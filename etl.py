@@ -1,0 +1,779 @@
+#!/usr/bin/env python3
+"""
+5 per Mille - ETL: normalizzazione, merge RUNTS, export.
+
+Legge tutti i dati_XXXX.xlsx dalla cartella Dati/, normalizza lo schema
+(che cambia ogni anno), arricchisce con i dati RUNTS e produce:
+  - enti_5x1000_norm.csv   : dataset normalizzato completo
+  - enti_5x1000_norm.xlsx  : stessa cosa in Excel
+
+Schema output:
+  ANNO, COD_FISCALE, DENOMINAZIONE, REGIONE, PROVINCIA, COMUNE,
+  CAT_VOLONTARIATO, CAT_ASD, CAT_RICERCA_SCI, CAT_RICERCA_SAN,
+  CAT_COMUNI, CAT_BENI_CULT, CAT_AREE_PROT, CAT_ETS_ONLUS,
+  CATEGORIA_PRINCIPALE, N_SCELTE, IMPORTO_ESPRESSO, IMPORTO_GENERICO,
+  IMPORTO_TOTALE,
+  [RUNTS_SEZIONE, RUNTS_SEDE_COMUNE, RUNTS_SEDE_PROV, RUNTS_5X1000,
+   RUNTS_DATA_ISCRIZIONE]  <- presenti solo se RUNTS trovato
+
+Uso:
+    python etl.py [--root CARTELLA] [--runts FILE_XLSX] [--out CARTELLA_OUTPUT]
+    python etl.py                          # usa defaults
+
+Requisiti:
+    pip install pandas openpyxl
+"""
+
+import os
+import re
+import sys
+import glob
+import argparse
+import logging
+import datetime
+from pathlib import Path
+
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from openpyxl.utils import get_column_letter
+
+# ============================================================================
+# CONFIGURAZIONE DEFAULT
+# ============================================================================
+
+DEFAULT_ROOT = Path(__file__).parent
+DEFAULT_DATI = DEFAULT_ROOT / "Dati"
+DEFAULT_RUNTS = DEFAULT_ROOT / "Runts"
+DEFAULT_OUT = DEFAULT_ROOT / "Dati"
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+
+def setup_logging(root: Path) -> None:
+    log_dir = root / "log"
+    log_dir.mkdir(exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"etl_{stamp}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.FileHandler(log_file, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+    logging.info(f"Log: {log_file}")
+
+
+# ============================================================================
+# UTILITY: NORMALIZZAZIONE NOMI COLONNA
+# ============================================================================
+
+def ncol(col: str) -> str:
+    """
+    Normalizza il nome di una colonna:
+    rimuove soft-hyphens (\xad) e lo spazio che li segue (sono word-break hints
+    in tabelle PDF/Excel bilingui), poi collassa trattini e spazi; lowercase.
+
+    Esempi:
+      "Volon\xad tariato"          -> "volontariato"
+      "Volo\xad ntari\xad ato"     -> "volontariato"
+      "Ricerca scient\xad ifica"   -> "ricerca scientifica"
+      "Beni cultu\xad rali..."     -> "beni culturali..."
+    """
+    s = str(col)
+    s = re.sub(r"\xad\s*", "", s)    # soft-hyphen + spazio seguente → niente
+    s = re.sub(r"[\-\s]+", " ", s)   # trattini e spazi → spazio singolo
+    return s.strip().lower()
+
+
+def build_col_index(df: pd.DataFrame) -> dict[str, str]:
+    """Restituisce {ncol(colonna): colonna_originale} per un DataFrame."""
+    return {ncol(c): c for c in df.columns}
+
+
+# ============================================================================
+# UTILITY: PARSING NUMERI ITALIANI
+# ============================================================================
+
+def parse_importo(val) -> float | None:
+    """
+    Converte un importo in formato italiano ("1.234.567,89") in float.
+    Restituisce None se il valore è vuoto o non parsabile.
+    """
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    s = str(val).strip()
+    if s in ("", "-", "NaN", "nan"):
+        return None
+    # Rimuovi simboli di valuta e spazi
+    s = re.sub(r"[€\s]", "", s)
+    # Formato italiano: punti come separatore migliaia, virgola come decimale
+    # Rimuovi i punti di migliaia, sostituisci virgola con punto
+    s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_intero(val) -> int | None:
+    """Converte numero scelte (può avere punti come migliaia)."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    s = str(val).strip().replace(".", "").replace(",", "")
+    try:
+        return int(float(s))
+    except ValueError:
+        return None
+
+
+# ============================================================================
+# UTILITY: NORMALIZZAZIONE CODICE FISCALE
+# ============================================================================
+
+def normalize_cf(val) -> str:
+    """
+    Normalizza il codice fiscale:
+    - Strip spazi e uppercase
+    - Se numerico, padding a 11 cifre con zero a sinistra
+    - Mantiene i CF alfanumerici (persone fisiche) com'è
+    """
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    s = str(val).strip().upper()
+    # Rimuovi ".0" finale (da Excel che legge come float)
+    s = re.sub(r"\.0+$", "", s)
+    # Se è puramente numerico, padda a 11 cifre
+    if re.fullmatch(r"\d+", s):
+        s = s.zfill(11)
+    return s
+
+
+# ============================================================================
+# UTILITY: RILEVAZIONE FLAG CATEGORIA
+# ============================================================================
+
+def is_flag(val) -> bool:
+    """
+    True se il valore indica una presenza (X, x, SI, sì, ecc.).
+    False per NaN, None, stringa vuota, '-'.
+    """
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return False
+    s = str(val).strip().lower()
+    return s in ("x", "si", "sì", "yes", "y", "1", "true", "•", "*")
+
+
+def col_to_bool_series(df: pd.DataFrame, col_orig: str | None) -> pd.Series:
+    """Restituisce una Series booleana da una colonna flag (o tutti False se None)."""
+    if col_orig is None or col_orig not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df[col_orig].apply(is_flag)
+
+
+# ============================================================================
+# LOGICA DI NORMALIZZAZIONE PER ANNO
+# ============================================================================
+
+# Mappa dal nome normalizzato al campo target.
+# Il match usa ncol() sia sulla chiave che sul nome colonna effettivo.
+
+# Campi identità (stesso in tutti gli anni, nomi diversi)
+CF_ALIASES = {"codice fiscale", "cf"}
+DENOM_ALIASES = {"denominazione", "beneficiario"}
+REGIONE_ALIASES = {"regione"}
+PROV_ALIASES = {"provincia", "prov", "pr"}
+COMUNE_ALIASES = {"comune"}
+
+# Campi categoria (flag)
+CAT_VOL_ALIASES = {
+    "categoria volontariato / asd",   # 2006-2007 (combinato)
+    "categoria volontariato/ asd",    # variante 2007
+    "categoria volontariato",         # 2008-2016
+    "volontariato",                   # 2017-2021
+}
+CAT_ETS_ALIASES = {"ets e onlus"}     # 2022-2024 (sostituisce volontariato)
+CAT_ASD_ALIASES = {"asd"}
+CAT_SCI_ALIASES = {"ricerca scientifica", "ricerca scient ifica"}
+CAT_SAN_ALIASES = {"ricerca sanitaria", "ricerca sanit aria"}
+CAT_COM_ALIASES = {"comuni", "com uni"}
+CAT_BENI_ALIASES = {
+    "mibac", "mibac (1)",
+    "beni culturali e paesa ggistici",
+    "beni cultu rali e paes aggis tici",
+    "beni culturali e paesaggistici",
+}
+CAT_AREE_ALIASES = {
+    "enti gestori aree protette",
+    "enti gestori aree prote tte",
+}
+
+# Campi numerici
+N_SCELTE_ALIASES = {"numero scelte"}
+IMP_ESP_ALIASES = {
+    "importo (euro) per scelte espresse",
+    "importo (euro) importo delle scelte espresse",
+    "importo delle scelte espresse",
+}
+IMP_GEN_ALIASES = {
+    "per scelte generiche",
+    "importo proporzionale per le scelte generiche",
+}
+IMP_TOT_ALIASES = {
+    "importo totale",
+    "totale",
+    "importo totale erogabile",
+}
+
+
+def find_col(col_index: dict, aliases: set) -> str | None:
+    """
+    Cerca il nome originale della colonna nel col_index usando le aliases.
+    Restituisce il nome originale o None.
+    Usa match esatto sul nome normalizzato.
+    """
+    for alias in aliases:
+        if alias in col_index:
+            return col_index[alias]
+    return None
+
+
+def find_col_partial(col_index: dict, aliases: set) -> str | None:
+    """
+    Come find_col ma cerca anche corrispondenza parziale
+    (il nome normalizzato *contiene* l'alias).
+    Utile per varianti con spazi extra da soft-hyphens.
+    """
+    # Prima prova match esatto
+    result = find_col(col_index, aliases)
+    if result:
+        return result
+    # Poi prova match parziale
+    for alias in aliases:
+        for norm_name, orig_name in col_index.items():
+            if alias in norm_name or norm_name in alias:
+                return orig_name
+    return None
+
+
+def normalize_year(df: pd.DataFrame, anno: int) -> pd.DataFrame:
+    """
+    Normalizza un DataFrame annuale nello schema unificato.
+    Restituisce un DataFrame con le colonne standard.
+    """
+    ci = build_col_index(df)
+
+    # --- Colonne identità ---
+    cf_col = find_col(ci, CF_ALIASES)
+    denom_col = find_col(ci, DENOM_ALIASES)
+    reg_col = find_col(ci, REGIONE_ALIASES)
+    prov_col = find_col(ci, PROV_ALIASES)
+    comune_col = find_col(ci, COMUNE_ALIASES)
+
+    # --- Colonne categoria ---
+    # Nota: 2022-2024 usano ETS e ONLUS al posto di Volontariato
+    cat_ets_col = find_col(ci, CAT_ETS_ALIASES)
+    cat_vol_col = find_col(ci, CAT_VOL_ALIASES) if cat_ets_col is None else None
+    cat_asd_col = find_col(ci, CAT_ASD_ALIASES)
+    cat_sci_col = find_col_partial(ci, CAT_SCI_ALIASES)
+    cat_san_col = find_col_partial(ci, CAT_SAN_ALIASES)
+    cat_com_col = find_col_partial(ci, CAT_COM_ALIASES)
+    cat_beni_col = find_col_partial(ci, CAT_BENI_ALIASES)
+    cat_aree_col = find_col_partial(ci, CAT_AREE_ALIASES)
+
+    # --- Colonne numeriche ---
+    n_scelte_col = find_col(ci, N_SCELTE_ALIASES)
+    imp_esp_col = find_col_partial(ci, IMP_ESP_ALIASES)
+    imp_gen_col = find_col_partial(ci, IMP_GEN_ALIASES)
+    imp_tot_col = find_col_partial(ci, IMP_TOT_ALIASES)
+
+    # Warn se colonne critiche mancano
+    if cf_col is None:
+        logging.warning(f"  [{anno}] Colonna CODICE FISCALE non trovata! Colonne: {list(df.columns)}")
+    if imp_tot_col is None:
+        logging.warning(f"  [{anno}] Colonna IMPORTO TOTALE non trovata")
+
+    # --- Costruzione DataFrame normalizzato ---
+    out = pd.DataFrame(index=df.index)
+
+    out["ANNO"] = anno
+
+    out["COD_FISCALE"] = (
+        df[cf_col].apply(normalize_cf) if cf_col else ""
+    )
+    out["DENOMINAZIONE"] = (
+        df[denom_col].astype(str).str.strip() if denom_col else ""
+    )
+    out["REGIONE"] = (
+        df[reg_col].astype(str).str.strip().str.upper() if reg_col else ""
+    )
+    out["PROVINCIA"] = (
+        df[prov_col].astype(str).str.strip().str.upper()
+        .str.replace(r"\s+", "", regex=True)  # rimuove spazi interni (es. "M I" → "MI")
+        if prov_col else ""
+    )
+    out["COMUNE"] = (
+        df[comune_col].astype(str).str.strip().str.upper() if comune_col else ""
+    )
+
+    # Categorie booleane
+    # In 2006-2007 il campo vol/asd è combinato: lo mettiamo in entrambi
+    if cat_ets_col:
+        # 2022+: ETS e ONLUS → sia CAT_ETS_ONLUS che CAT_VOLONTARIATO
+        ets_series = col_to_bool_series(df, cat_ets_col)
+        out["CAT_VOLONTARIATO"] = ets_series
+        out["CAT_ETS_ONLUS"] = ets_series
+    elif cat_vol_col:
+        vol_series = col_to_bool_series(df, cat_vol_col)
+        # Se la colonna è quella combinata VOL/ASD (2006-2007)
+        col_norm = ncol(cat_vol_col)
+        if "asd" in col_norm:
+            out["CAT_VOLONTARIATO"] = vol_series
+            out["CAT_ASD"] = pd.Series(False, index=df.index)  # non distinguibile
+        else:
+            out["CAT_VOLONTARIATO"] = vol_series
+        out["CAT_ETS_ONLUS"] = pd.Series(False, index=df.index)
+    else:
+        out["CAT_VOLONTARIATO"] = pd.Series(False, index=df.index)
+        out["CAT_ETS_ONLUS"] = pd.Series(False, index=df.index)
+
+    if "CAT_ASD" not in out.columns:
+        out["CAT_ASD"] = col_to_bool_series(df, cat_asd_col)
+
+    out["CAT_RICERCA_SCI"] = col_to_bool_series(df, cat_sci_col)
+    out["CAT_RICERCA_SAN"] = col_to_bool_series(df, cat_san_col)
+    out["CAT_COMUNI"] = col_to_bool_series(df, cat_com_col)
+    out["CAT_BENI_CULT"] = col_to_bool_series(df, cat_beni_col)
+    out["CAT_AREE_PROT"] = col_to_bool_series(df, cat_aree_col)
+
+    # Categoria principale (priorità: ricerca > comuni > beni > aree > asd > ets > vol)
+    def get_cat_principale(row) -> str:
+        if row["CAT_RICERCA_SCI"]:
+            return "Ricerca scientifica"
+        if row["CAT_RICERCA_SAN"]:
+            return "Ricerca sanitaria"
+        if row["CAT_COMUNI"]:
+            return "Comuni"
+        if row["CAT_BENI_CULT"]:
+            return "Beni culturali"
+        if row["CAT_AREE_PROT"]:
+            return "Enti gestori aree protette"
+        if row["CAT_ASD"]:
+            return "ASD"
+        if row["CAT_ETS_ONLUS"]:
+            return "ETS/ONLUS"
+        if row["CAT_VOLONTARIATO"]:
+            return "Volontariato"
+        return "Non specificata"
+
+    cat_cols = ["CAT_RICERCA_SCI", "CAT_RICERCA_SAN", "CAT_COMUNI",
+                "CAT_BENI_CULT", "CAT_AREE_PROT", "CAT_ASD",
+                "CAT_ETS_ONLUS", "CAT_VOLONTARIATO"]
+    out["CATEGORIA_PRINCIPALE"] = out[cat_cols].apply(get_cat_principale, axis=1)
+
+    # Numerici
+    out["N_SCELTE"] = (
+        df[n_scelte_col].apply(parse_intero) if n_scelte_col else None
+    )
+    out["IMPORTO_ESPRESSO"] = (
+        df[imp_esp_col].apply(parse_importo) if imp_esp_col else None
+    )
+    out["IMPORTO_GENERICO"] = (
+        df[imp_gen_col].apply(parse_importo) if imp_gen_col else None
+    )
+    out["IMPORTO_TOTALE"] = (
+        df[imp_tot_col].apply(parse_importo) if imp_tot_col else None
+    )
+
+    return out
+
+
+# ============================================================================
+# LOAD DATI 5x1000
+# ============================================================================
+
+def process_streaming(
+    dati_dir: Path,
+    out_csv: Path,
+    df_runts: "pd.DataFrame | None",
+    anni_filter: "list[int] | None" = None,
+) -> dict:
+    """
+    Processa i file anno per anno in modalità streaming:
+    normalizza ogni anno, fa il join RUNTS, e scrive nel CSV riga per riga.
+    Questo evita di tenere tutto il dataset in RAM simultaneamente.
+    Restituisce statistiche aggregate.
+    """
+    files = sorted(dati_dir.glob("dati_[0-9][0-9][0-9][0-9].xlsx"))
+    if not files:
+        logging.error(f"Nessun file dati_XXXX.xlsx trovato in {dati_dir}")
+        sys.exit(1)
+
+    stats = {
+        "total_rows": 0,
+        "anni": [],
+        "cat_counts": {},
+        "importo_per_anno": {},
+        "runts_matches": 0,
+    }
+
+    first_write = True
+
+    for f in files:
+        anno = int(f.stem.split("_")[1])
+        if anni_filter and anno not in anni_filter:
+            continue
+
+        logging.info(f"[{anno}] Carico {f.name}...")
+        try:
+            df_raw = pd.read_excel(f, dtype=str)
+            df_raw = df_raw.dropna(how="all")
+            df_norm = normalize_year(df_raw, anno)
+
+            before = len(df_norm)
+            df_norm = df_norm[df_norm["COD_FISCALE"].str.len() > 0]
+            dropped = before - len(df_norm)
+            if dropped:
+                logging.info(f"  [{anno}] Rimosse {dropped} righe senza CF")
+
+            # Merge RUNTS (left join)
+            if df_runts is not None:
+                df_norm = df_norm.merge(df_runts, on="COD_FISCALE", how="left")
+                matches = df_norm["RUNTS_SEZIONE"].notna().sum() if "RUNTS_SEZIONE" in df_norm.columns else 0
+                stats["runts_matches"] += int(matches)
+
+            # Scrivi nel CSV (append)
+            mode = "w" if first_write else "a"
+            header = first_write
+            df_norm.to_csv(out_csv, mode=mode, header=header, index=False, encoding="utf-8-sig")
+            first_write = False
+
+            # Aggiorna stats
+            n = len(df_norm)
+            stats["total_rows"] += n
+            stats["anni"].append(anno)
+
+            for cat, cnt in df_norm["CATEGORIA_PRINCIPALE"].value_counts().items():
+                stats["cat_counts"][cat] = stats["cat_counts"].get(cat, 0) + int(cnt)
+
+            imp_sum = df_norm["IMPORTO_TOTALE"].sum()
+            stats["importo_per_anno"][anno] = float(imp_sum) if pd.notna(imp_sum) else 0.0
+
+            logging.info(f"  [{anno}] {n:,} righe → CSV")
+
+        except Exception as e:
+            logging.error(f"  [{anno}] ERRORE: {e}")
+            import traceback
+            logging.debug(traceback.format_exc())
+
+    return stats
+
+
+def load_all_years(dati_dir: Path) -> "pd.DataFrame":
+    """
+    Carica TUTTI gli anni in un unico DataFrame (uso interno/test).
+    Per grandi dataset usa process_streaming() invece.
+    """
+    import pandas as pd
+    files = sorted(dati_dir.glob("dati_[0-9][0-9][0-9][0-9].xlsx"))
+    frames = []
+    for f in files:
+        anno = int(f.stem.split("_")[1])
+        logging.info(f"[{anno}] Carico {f.name}...")
+        df_raw = pd.read_excel(f, dtype=str).dropna(how="all")
+        df_norm = normalize_year(df_raw, anno)
+        df_norm = df_norm[df_norm["COD_FISCALE"].str.len() > 0]
+        logging.info(f"  {len(df_norm):,} righe")
+        frames.append(df_norm)
+    return pd.concat(frames, ignore_index=True)
+
+
+# ============================================================================
+# LOAD RUNTS
+# ============================================================================
+
+def load_runts(runts_dir: Path) -> pd.DataFrame | None:
+    """
+    Cerca un file RUNTS nella cartella e lo normalizza.
+    Il file ha nomi colonna con _x000D_\\n (artifacts da Excel bilinguismo IT/DE).
+    """
+    files = sorted(runts_dir.glob("*.xlsx")) if runts_dir.is_dir() else []
+    if not files:
+        logging.warning(f"Nessun file RUNTS trovato in {runts_dir}")
+        return None
+
+    # Prende il più recente
+    runts_file = files[-1]
+    logging.info(f"[RUNTS] Carico {runts_file.name}...")
+
+    df = pd.read_excel(runts_file, dtype=str)
+    logging.info(f"[RUNTS] {len(df):,} righe, {len(df.columns)} colonne")
+
+    # Pulisce i nomi colonna (rimuove _x000D_\n e testo dopo \n)
+    def clean_runts_col(col: str) -> str:
+        col = col.replace("_x000D_", "").replace("\r", "")
+        col = col.split("\n")[0].strip()
+        return col
+
+    df.columns = [clean_runts_col(c) for c in df.columns]
+    logging.info(f"[RUNTS] Colonne: {list(df.columns)}")
+
+    # Normalizza il CF
+    cf_col = next((c for c in df.columns if "codice fiscale" in c.lower()), None)
+    if not cf_col:
+        logging.warning("[RUNTS] Colonna CF non trovata")
+        return None
+
+    df["COD_FISCALE"] = df[cf_col].apply(normalize_cf)
+
+    # Rinomina colonne chiave
+    rename_map: dict[str, str] = {}
+    for col in df.columns:
+        cn = col.lower()
+        if "sezione" in cn:
+            rename_map[col] = "RUNTS_SEZIONE"
+        elif "comune sede" in cn:
+            rename_map[col] = "RUNTS_SEDE_COMUNE"
+        elif "provincia sede" in cn:
+            rename_map[col] = "RUNTS_SEDE_PROV"
+        elif cn in ("5x", "5x1000") or ("5x" in cn and "1000" in cn):
+            rename_map[col] = "RUNTS_5X1000"
+        elif "data iscrizione" in cn:
+            rename_map[col] = "RUNTS_DATA_ISCRIZIONE"
+        elif "denominazione" in cn:
+            rename_map[col] = "RUNTS_DENOMINAZIONE"
+
+    df = df.rename(columns=rename_map)
+
+    # Seleziona solo le colonne utili
+    keep = ["COD_FISCALE"] + [c for c in df.columns if c.startswith("RUNTS_")]
+    df = df[[c for c in keep if c in df.columns]].copy()
+
+    # Normalizza RUNTS_5X1000 in booleano leggibile
+    if "RUNTS_5X1000" in df.columns:
+        df["RUNTS_5X1000"] = df["RUNTS_5X1000"].apply(
+            lambda v: True if str(v).strip().lower() in ("si", "sì", "yes", "1", "true") else False
+        )
+
+    # Deduplica: tieni il più recente per CF (ordina per data iscrizione)
+    if "RUNTS_DATA_ISCRIZIONE" in df.columns:
+        df = df.sort_values("RUNTS_DATA_ISCRIZIONE", ascending=False)
+
+    df = df.drop_duplicates(subset=["COD_FISCALE"], keep="first")
+    logging.info(f"[RUNTS] {len(df):,} enti unici dopo deduplicazione")
+    return df
+
+
+# ============================================================================
+# MERGE
+# ============================================================================
+
+def merge_runts(df_5x: pd.DataFrame, df_runts: pd.DataFrame) -> pd.DataFrame:
+    """Left join tra dati 5x1000 e RUNTS su COD_FISCALE."""
+    df = df_5x.merge(df_runts, on="COD_FISCALE", how="left")
+    matched = df["RUNTS_SEZIONE"].notna().sum() if "RUNTS_SEZIONE" in df.columns else 0
+    total = len(df_5x)
+    logging.info(f"[MERGE] {matched:,}/{total:,} righe con match RUNTS ({100*matched/total:.1f}%)")
+    return df
+
+
+# ============================================================================
+# EXPORT CSV
+# ============================================================================
+
+def export_csv(df: pd.DataFrame, out_path: Path) -> None:
+    df.to_csv(out_path, index=False, encoding="utf-8-sig")
+    size_mb = out_path.stat().st_size / 1_048_576
+    logging.info(f"CSV salvato: {out_path} ({size_mb:.1f} MB, {len(df):,} righe)")
+
+
+# ============================================================================
+# EXPORT EXCEL (formattato)
+# ============================================================================
+
+def export_excel(df: pd.DataFrame, out_path: Path) -> None:
+    """Crea un Excel formattato con header fisso e autofilter."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "5x1000_norm"
+
+    header_font = Font(name="Arial", bold=True, size=10, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="2F5496")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    data_font = Font(name="Arial", size=9)
+    alt_fill = PatternFill("solid", fgColor="EEF2FF")
+    thin = Side(style="thin", color="D9D9D9")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    cols = list(df.columns)
+
+    # Header
+    for ci, col in enumerate(cols, 1):
+        cell = ws.cell(row=1, column=ci, value=col)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = border
+
+    # Dati (in batch da 10k per non esplodere la memoria)
+    BATCH = 10_000
+    for batch_start in range(0, len(df), BATCH):
+        batch = df.iloc[batch_start:batch_start + BATCH]
+        for ri, (_, row) in enumerate(batch.iterrows(), batch_start + 2):
+            fill = alt_fill if ri % 2 == 0 else None
+            for ci, val in enumerate(row, 1):
+                cell = ws.cell(row=ri, column=ci, value=val)
+                cell.font = data_font
+                cell.border = border
+                if fill:
+                    cell.fill = fill
+
+    # Larghezza colonne
+    for ci, col in enumerate(cols, 1):
+        max_len = len(col)
+        sample_rows = df[col].dropna().astype(str).head(200)
+        if len(sample_rows) > 0:
+            max_len = max(max_len, sample_rows.str.len().max())
+        ws.column_dimensions[get_column_letter(ci)].width = min(max_len + 2, 40)
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}1"
+
+    wb.save(out_path)
+    size_mb = out_path.stat().st_size / 1_048_576
+    logging.info(f"Excel salvato: {out_path} ({size_mb:.1f} MB)")
+
+
+# ============================================================================
+# STATS DI RIEPILOGO
+# ============================================================================
+
+def print_stats(df: pd.DataFrame) -> None:
+    """Stampa alcune statistiche rapide sul dataset normalizzato."""
+    logging.info("\n" + "=" * 60)
+    logging.info("RIEPILOGO DATASET NORMALIZZATO")
+    logging.info("=" * 60)
+    logging.info(f"  Righe totali:    {len(df):,}")
+    logging.info(f"  Anni coperti:    {sorted(df['ANNO'].unique())}")
+    logging.info(f"  Enti unici (CF): {df['COD_FISCALE'].nunique():,}")
+    logging.info(f"  Enti unici (nome): {df['DENOMINAZIONE'].nunique():,}")
+
+    logging.info("\n  Distribuzione per CATEGORIA_PRINCIPALE:")
+    cat_counts = df["CATEGORIA_PRINCIPALE"].value_counts()
+    for cat, cnt in cat_counts.items():
+        logging.info(f"    {cat:<35} {cnt:>8,}")
+
+    if "IMPORTO_TOTALE" in df.columns:
+        totale_per_anno = df.groupby("ANNO")["IMPORTO_TOTALE"].sum()
+        logging.info("\n  Importo totale per anno (€):")
+        for anno, tot in totale_per_anno.items():
+            logging.info(f"    {anno}: {tot:>18,.2f}")
+
+    if "RUNTS_SEZIONE" in df.columns:
+        n_match = df["RUNTS_SEZIONE"].notna().sum()
+        logging.info(f"\n  Enti con match RUNTS: {n_match:,} su {len(df):,} righe")
+
+    logging.info("=" * 60)
+
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="ETL 5x1000: normalizza e unifica i dati per anno"
+    )
+    parser.add_argument(
+        "--root", type=Path, default=DEFAULT_ROOT,
+        help=f"Cartella root del progetto (default: {DEFAULT_ROOT})"
+    )
+    parser.add_argument(
+        "--dati", type=Path, default=None,
+        help="Cartella con i file dati_XXXX.xlsx (default: ROOT/Dati)"
+    )
+    parser.add_argument(
+        "--runts", type=Path, default=None,
+        help="Cartella con il file RUNTS (default: ROOT/Runts)"
+    )
+    parser.add_argument(
+        "--out", type=Path, default=None,
+        help="Cartella di output (default: ROOT/Dati)"
+    )
+    parser.add_argument(
+        "--no-runts", action="store_true",
+        help="Salta il merge con RUNTS"
+    )
+    parser.add_argument(
+        "--no-excel", action="store_true",
+        help="Non genera il file Excel (solo CSV)"
+    )
+    parser.add_argument(
+        "--anni", type=str, default=None,
+        help="Anni da processare, separati da virgola (es. 2020,2021,2022)"
+    )
+    args = parser.parse_args()
+
+    root = args.root
+    dati_dir = args.dati or (root / "Dati")
+    runts_dir = args.runts or (root / "Runts")
+    out_dir = args.out or (root / "Dati")
+    out_dir.mkdir(exist_ok=True)
+
+    setup_logging(root)
+    logging.info(f"Root:  {root}")
+    logging.info(f"Dati:  {dati_dir}")
+    logging.info(f"RUNTS: {runts_dir}")
+    logging.info(f"Out:   {out_dir}")
+
+    # --- Carica RUNTS prima (è piccolo) ---
+    df_runts = None
+    if not args.no_runts:
+        df_runts = load_runts(runts_dir)
+    else:
+        logging.info("Merge RUNTS saltato (--no-runts)")
+
+    # --- Filtro anni ---
+    anni_filter = None
+    if args.anni:
+        anni_filter = [int(a.strip()) for a in args.anni.split(",")]
+        logging.info(f"Filtro anni: {anni_filter}")
+
+    # --- Processing streaming: anno per anno → CSV ---
+    csv_path = out_dir / "enti_5x1000_norm.csv"
+    logging.info(f"Output CSV: {csv_path}")
+
+    stats = process_streaming(dati_dir, csv_path, df_runts, anni_filter)
+
+    # --- Stats riassuntive ---
+    logging.info("\n" + "=" * 60)
+    logging.info("RIEPILOGO ETL")
+    logging.info("=" * 60)
+    logging.info(f"  Righe totali:    {stats['total_rows']:,}")
+    logging.info(f"  Anni coperti:    {stats['anni']}")
+    logging.info(f"  Match RUNTS:     {stats['runts_matches']:,}")
+    logging.info("\n  Categorie:")
+    for cat, cnt in sorted(stats["cat_counts"].items(), key=lambda x: -x[1]):
+        logging.info(f"    {cat:<35} {cnt:>8,}")
+    logging.info("\n  Importo per anno (€):")
+    for anno in sorted(stats["importo_per_anno"]):
+        logging.info(f"    {anno}: {stats['importo_per_anno'][anno]:>18,.2f}")
+
+    size_mb = csv_path.stat().st_size / 1_048_576 if csv_path.exists() else 0
+    logging.info(f"\nCSV: {csv_path} ({size_mb:.1f} MB)")
+
+    if not args.no_excel:
+        logging.info("Generazione Excel dal CSV normalizzato...")
+        df_full = pd.read_csv(csv_path, dtype=str)
+        xlsx_path = out_dir / "enti_5x1000_norm.xlsx"
+        export_excel(df_full, xlsx_path)
+
+    logging.info("\nETL completato.")
+
+
+if __name__ == "__main__":
+    main()

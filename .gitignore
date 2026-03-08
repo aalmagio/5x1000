@@ -1,0 +1,88 @@
+# =============================================================================
+# 5 per Mille — .gitignore
+# =============================================================================
+
+# --- Credenziali Google (MAI committare) ---
+credentials*.json
+service_account*.json
+*.key.json
+token*.json
+.env
+
+# --- File dati scaricati dall'Agenzia delle Entrate (generati dal download) ---
+# Cartelle anno con i file grezzi PDF/CSV
+2006/
+2007/
+2008/
+2009/
+2010/
+2011/
+2012/
+2013/
+2014/
+2015/
+2016/
+2017/
+2018/
+2019/
+2020/
+2021/
+2022/
+2023/
+2024/
+2025/
+
+# --- File dati del RUNTS (da scaricare manualmente, non in repo) ---
+Runts/
+
+# --- Output ETL (file generati, troppo grandi per GitHub) ---
+Dati/*.xlsx
+Dati/*.csv
+Dati/output/
+enti_5x1000.csv
+enti_5x1000_norm.csv
+enti_5x1000_norm.xlsx
+
+# --- File dashboard (binari, grandi) ---
+*.pbix
+*.qvw
+*.qvf
+
+# --- Log ---
+log/
+*.log
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+.env/
+
+# --- IDE e OS ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- File vecchi / backup ---
+_OLD/
+*.old
+*.bak
+*.tmp
+
+# --- File files/ (contenuto locale) ---
+files/
