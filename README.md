@@ -13,9 +13,6 @@ Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i
 | `cinque_per_mille.py` | Scarica i file PDF/CSV dalle pagine ufficiali AdE e li converte in Excel per anno |
 | `etl.py` | Normalizza tutti i dati annuali in uno schema unificato e fa il join con il RUNTS |
 | `gsheets.py` | Carica il dataset normalizzato su Google Sheets per Looker Studio |
-| `ETL_Looker.py` | Versione alternativa dell'ETL con mapping esplicito per anno |
-| `pdf_to_excel.py` | Utility standalone per estrarre tabelle da PDF AdE |
-| `5xlooker.py` | Aggrega tutti i dati annuali in un unico CSV (versione semplice) |
 
 ---
 
@@ -114,10 +111,7 @@ Il dataset è diviso per anno (un foglio per anno) per rispettare i limiti di Go
 5x1000/
 ├── cinque_per_mille.py   # Download + conversione PDF/CSV → Excel
 ├── etl.py                # ETL: normalizzazione + merge RUNTS
-├── ETL_Looker.py         # ETL alternativo con mapping esplicito per anno
 ├── gsheets.py            # Export su Google Sheets
-├── pdf_to_excel.py       # Utility estrazione tabelle da PDF
-├── 5xlooker.py           # Aggregatore CSV semplice
 ├── requirements.txt
 │
 ├── Dati/                 # Excel per anno + output normalizzato (non in repo)
