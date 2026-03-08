@@ -28,6 +28,7 @@ import os
 import re
 import sys
 import glob
+import math
 import argparse
 import logging
 import datetime
@@ -596,10 +597,14 @@ def export_csv(df: pd.DataFrame, out_path: Path) -> None:
 # ============================================================================
 
 def export_excel(df: pd.DataFrame, out_path: Path) -> None:
-    """Crea un Excel formattato con header fisso e autofilter."""
+    """
+    Crea un Excel formattato con header fisso e autofilter.
+    Se il dataset supera il limite Excel di 1.048.575 righe dati,
+    lo divide automaticamente in più fogli.
+    """
+    EXCEL_MAX_DATA_ROWS = 1_048_575  # 1.048.576 - 1 (header)
+
     wb = Workbook()
-    ws = wb.active
-    ws.title = "5x1000_norm"
 
     header_font = Font(name="Arial", bold=True, size=10, color="FFFFFF")
     header_fill = PatternFill("solid", fgColor="2F5496")
@@ -610,42 +615,63 @@ def export_excel(df: pd.DataFrame, out_path: Path) -> None:
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     cols = list(df.columns)
+    total_rows = len(df)
+    n_sheets = math.ceil(total_rows / EXCEL_MAX_DATA_ROWS) if total_rows > 0 else 1
 
-    # Header
-    for ci, col in enumerate(cols, 1):
-        cell = ws.cell(row=1, column=ci, value=col)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_align
-        cell.border = border
+    if n_sheets > 1:
+        logging.info(
+            f"  Dataset ({total_rows:,} righe) supera il limite Excel "
+            f"({EXCEL_MAX_DATA_ROWS:,}) → {n_sheets} fogli"
+        )
 
-    # Dati (in batch da 10k per non esplodere la memoria)
-    BATCH = 10_000
-    for batch_start in range(0, len(df), BATCH):
-        batch = df.iloc[batch_start:batch_start + BATCH]
-        for ri, (_, row) in enumerate(batch.iterrows(), batch_start + 2):
-            fill = alt_fill if ri % 2 == 0 else None
-            for ci, val in enumerate(row, 1):
-                cell = ws.cell(row=ri, column=ci, value=val)
-                cell.font = data_font
-                cell.border = border
-                if fill:
-                    cell.fill = fill
+    for sheet_idx in range(n_sheets):
+        start = sheet_idx * EXCEL_MAX_DATA_ROWS
+        end = min(start + EXCEL_MAX_DATA_ROWS, total_rows)
+        df_chunk = df.iloc[start:end]
 
-    # Larghezza colonne
-    for ci, col in enumerate(cols, 1):
-        max_len = len(col)
-        sample_rows = df[col].dropna().astype(str).head(200)
-        if len(sample_rows) > 0:
-            max_len = max(max_len, sample_rows.str.len().max())
-        ws.column_dimensions[get_column_letter(ci)].width = min(max_len + 2, 40)
+        if sheet_idx == 0:
+            ws = wb.active
+        else:
+            ws = wb.create_sheet()
+        ws.title = "5x1000_norm" if n_sheets == 1 else f"Parte_{sheet_idx + 1}"
 
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}1"
+        # Header
+        for ci, col in enumerate(cols, 1):
+            cell = ws.cell(row=1, column=ci, value=col)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            cell.border = border
+
+        # Dati (in batch da 10k per non esplodere la memoria)
+        BATCH = 10_000
+        for batch_start in range(0, len(df_chunk), BATCH):
+            batch = df_chunk.iloc[batch_start:batch_start + BATCH]
+            for ri, (_, row) in enumerate(batch.iterrows(), batch_start + 2):
+                fill = alt_fill if ri % 2 == 0 else None
+                for ci, val in enumerate(row, 1):
+                    cell = ws.cell(row=ri, column=ci, value=val)
+                    cell.font = data_font
+                    cell.border = border
+                    if fill:
+                        cell.fill = fill
+
+        # Larghezza colonne
+        for ci, col in enumerate(cols, 1):
+            max_len = len(col)
+            sample_rows = df_chunk[col].dropna().astype(str).head(200)
+            if len(sample_rows) > 0:
+                max_len = max(max_len, sample_rows.str.len().max())
+            ws.column_dimensions[get_column_letter(ci)].width = min(max_len + 2, 40)
+
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}1"
+
+        logging.info(f"  Foglio '{ws.title}': {len(df_chunk):,} righe")
 
     wb.save(out_path)
     size_mb = out_path.stat().st_size / 1_048_576
-    logging.info(f"Excel salvato: {out_path} ({size_mb:.1f} MB)")
+    logging.info(f"Excel salvato: {out_path} ({size_mb:.1f} MB, {n_sheets} foglio/i)")
 
 
 # ============================================================================
