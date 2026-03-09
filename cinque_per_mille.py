@@ -384,6 +384,7 @@ def create_excel(header, all_rows, output_path, year):
     header_fill = PatternFill("solid", fgColor="2F5496")
     header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
     data_font = Font(name="Arial", size=10)
+    data_align = Alignment(vertical="center")
     thin_border = Border(
         left=Side(style="thin", color="D9D9D9"),
         right=Side(style="thin", color="D9D9D9"),
@@ -404,7 +405,7 @@ def create_excel(header, all_rows, output_path, year):
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
                 cell.font = data_font
                 cell.border = thin_border
-                cell.alignment = Alignment(vertical="center")
+                cell.alignment = data_align
 
     for col_idx in range(1, len(header) + 1):
         max_len = len(str(header[col_idx - 1]))
