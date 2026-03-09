@@ -178,9 +178,57 @@ def load_links(excel_path):
 # DOWNLOAD PER CATEGORIA
 # ============================================================================
 
+def _is_direct_file_url(url):
+    """
+    Controlla se l'URL punta direttamente a un file PDF o CSV
+    (non a una pagina HTML con link da estrarre).
+    """
+    parsed = urlparse(url)
+    path_lower = unquote(parsed.path).lower()
+    # Controlla estensione esplicita
+    if path_lower.endswith(".pdf") or path_lower.endswith(".csv"):
+        return True
+    # Controlla pattern AdE tipo "/d/guest/...csv" o ".../NomeFile.pdf/UUID"
+    segments = [s for s in path_lower.split("/") if s]
+    for seg in segments:
+        if seg.endswith(".pdf") or seg.endswith(".csv"):
+            return True
+        # Pattern con UUID dopo il nome file: NomeFile.pdf/abc-123-...
+        if ".pdf" in seg or ".csv" in seg:
+            return True
+    return False
+
+
+def _detect_file_ext(url, session):
+    """
+    Determina il tipo di file (pdf/csv) dall'URL o dal Content-Type.
+    Restituisce 'pdf', 'csv' oppure None.
+    """
+    path_lower = unquote(urlparse(url).lower() if hasattr(urlparse(url), 'lower') else urlparse(url).path.lower())
+    if ".pdf" in path_lower:
+        return "pdf"
+    if ".csv" in path_lower:
+        return "csv"
+    # In caso dubbio, fai un HEAD per controllare il Content-Type
+    try:
+        resp = session.head(url, headers=HEADERS, timeout=30, allow_redirects=True)
+        ct = resp.headers.get("Content-Type", "").lower()
+        if "pdf" in ct:
+            return "pdf"
+        if "csv" in ct or "text/plain" in ct or "octet-stream" in ct:
+            return "csv"
+    except Exception:
+        pass
+    return None
+
+
 def download_category(anno, slug, page_url, root_dir, session):
     """
     Scarica tutti i PDF e CSV dalla pagina di una categoria.
+
+    Se page_url punta direttamente a un file PDF o CSV, lo scarica
+    direttamente senza tentare di analizzare la pagina HTML.
+
     Restituisce dict:
         {"downloaded": int, "errors": list[str]}
     dove errors contiene messaggi su link/file non funzionanti.
@@ -189,17 +237,56 @@ def download_category(anno, slug, page_url, root_dir, session):
     os.makedirs(folder, exist_ok=True)
     errors = []
 
-    logging.info(f"[{anno}/{slug}] Scarico link da: {page_url}")
+    # --- Caso 1: Link diretto a un file PDF o CSV ---
+    if _is_direct_file_url(page_url):
+        ext = _detect_file_ext(page_url, session)
+        if ext is None:
+            ext = "csv"  # fallback
+        logging.info(f"[{anno}/{slug}] Link diretto a {ext.upper()}: {page_url}")
+        filename = smart_filename(page_url, 1, ext)
+        dest = os.path.join(folder, filename)
+        if download_file(page_url, dest, session):
+            logging.info(f"[{anno}/{slug}] Scaricato: {filename}")
+            return {"downloaded": 1, "errors": []}
+        else:
+            msg = f"[{anno}/{slug}] Download fallito: {filename} -- {page_url}"
+            logging.warning(msg)
+            return {"downloaded": 0, "errors": [msg]}
+
+    # --- Caso 2: Pagina HTML con link da estrarre ---
+    logging.info(f"[{anno}/{slug}] Scarico link da pagina: {page_url}")
 
     # Verifica che la pagina sia raggiungibile
     try:
         resp = session.get(page_url, headers=HEADERS, timeout=60, allow_redirects=True)
         resp.raise_for_status()
     except Exception as e:
-        msg = f"[{anno}/{slug}] Pagina non raggiungibile: {page_url} — {e}"
+        msg = f"[{anno}/{slug}] Pagina non raggiungibile: {page_url} -- {e}"
         logging.error(msg)
         errors.append(msg)
         return {"downloaded": 0, "errors": errors}
+
+    # Controlla se la risposta e' in realta' un file binario (PDF/CSV)
+    # nonostante l'URL non avesse un'estensione riconoscibile
+    ct = resp.headers.get("Content-Type", "").lower()
+    if "pdf" in ct or ("octet-stream" in ct and ".pdf" in page_url.lower()):
+        logging.info(f"[{anno}/{slug}] La risposta e' un PDF diretto (Content-Type: {ct})")
+        filename = smart_filename(page_url, 1, "pdf")
+        dest = os.path.join(folder, filename)
+        with open(dest, "wb") as f:
+            f.write(resp.content)
+        logging.info(f"[{anno}/{slug}] Salvato: {filename}")
+        return {"downloaded": 1, "errors": []}
+    if "csv" in ct or "text/plain" in ct:
+        # Potrebbe essere un CSV diretto — verifica che non sia HTML
+        if not resp.text.strip().startswith("<!") and not resp.text.strip().startswith("<html"):
+            logging.info(f"[{anno}/{slug}] La risposta e' un CSV diretto (Content-Type: {ct})")
+            filename = smart_filename(page_url, 1, "csv")
+            dest = os.path.join(folder, filename)
+            with open(dest, "wb") as f:
+                f.write(resp.content)
+            logging.info(f"[{anno}/{slug}] Salvato: {filename}")
+            return {"downloaded": 1, "errors": []}
 
     links = find_download_links(page_url, session)
 
@@ -220,7 +307,7 @@ def download_category(anno, slug, page_url, root_dir, session):
             if download_file(file_url, dest, session):
                 downloaded += 1
             else:
-                msg = f"[{anno}/{slug}] Download fallito: {filename} — {file_url}"
+                msg = f"[{anno}/{slug}] Download fallito: {filename} -- {file_url}"
                 logging.warning(msg)
                 errors.append(msg)
 

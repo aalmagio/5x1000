@@ -35,13 +35,15 @@ token*.json
 # --- File dati del RUNTS (da scaricare manualmente, non in repo) ---
 Runts/
 
-# --- Output ETL (file generati, troppo grandi per GitHub) ---
-Dati/*.xlsx
-Dati/*.csv
-Dati/output/
+# --- Output ETL e categorie (file generati, troppo grandi per GitHub) ---
+Dati/
 enti_5x1000.csv
 enti_5x1000_norm.csv
 enti_5x1000_norm.xlsx
+
+# --- File input locali (non in repo) ---
+categorie.xlsx
+*.zip
 
 # --- File dashboard (binari, grandi) ---
 *.pbix
@@ -68,9 +70,10 @@ venv/
 env/
 .env/
 
-# --- IDE e OS ---
+# --- IDE, OS e Claude Code ---
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 *~
