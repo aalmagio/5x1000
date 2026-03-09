@@ -1,0 +1,62 @@
+# ============================================================================
+# 5 per Mille — Configurazione
+# ============================================================================
+# Modifica questi valori senza toccare il codice Python.
+# Se questo file non esiste o una chiave manca, lo script usa i valori
+# di default definiti nel codice.
+# ============================================================================
+
+# --- Percorsi (relativi alla cartella root del progetto) ---
+percorsi:
+  dati: "Dati"              # Cartella con i file dati_XXXX.xlsx
+  runts: "Runts"             # Cartella con il file RUNTS scaricato manualmente
+  log: "log"                 # Cartella per i file di log
+
+# --- Download ---
+download:
+  timeout_pagina: 60         # Secondi di attesa per le pagine web
+  timeout_file: 120          # Secondi di attesa per il download dei file
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+# --- URL per anno (Agenzia delle Entrate) ---
+# Ogni anno punta alla pagina ufficiale con i link ai file PDF/CSV.
+# Aggiungere nuovi anni qui quando l'AdE li pubblica.
+url_anni:
+  2025: "https://www.agenziaentrate.gov.it/portale/elenco-permanente-delle-onlus-accreditate-per-il-2025"
+  2024: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-dei-beneficiari"
+  2023: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-dei-beneficiari-2023"
+  2022: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-degli-enti-ammessi-in-una-o-piu-categorie-di-beneficiari"
+  2021: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-degli-enti-ammessi-in-una-o-pi%C3%B9-categorie-di-beneficiari"
+  2020: "https://www.agenziaentrate.gov.it/portale/web/guest/elenco-5x1000-2020-enti-ammessi-categorie-di-beneficiari"
+  2019: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-dei-beneficiari-2019"
+  2018: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-beneficiari-2018"
+  2017: "https://www.agenziaentrate.gov.it/portale/archivio/archivioschedeadempimento/schede-adempimento-2017/agevolazioni-2017/iscrizione-elenchi-5-per-mille-2017/elenchi-5xmille2017/elenco-completo-beneficiari-5xmille2017"
+  2016: "https://www.agenziaentrate.gov.it/portale/archivio/archivioschedeadempimento/schede-adempimento-2016/richiedere-2016/iscrizione-elenchi-5-per-mille-2016/elenchi-5xmille2016/elenco-enti-ammessi-categorie-beneficiari"
+  2015: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivioschedeadempimento/schede-adempimento-2015/richiedere-2015/iscrizione-elenchi-5-per-mille-2015/elenchi-5xmille2015/elenco-complessivo-beneficiari-5xmille2015"
+  2014: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivioschedeadempimento/schede-adempimento-2014/richiedere-2014/iscrizione-elenchi-5-per-mille-2014/elenchi-5xmille2014/elenco-complessivo-beneficiari-5xmille2014"
+  2013: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivioschedeadempimento/schede-adempimento-2013/richiedere-2013/contributo-5xmille2013/elenchi-5xmille2013/elenco-complessivo-beneficiari-5xmille2013"
+  2012: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivioschedeadempimento/schede-adempimento-2012/richiedere-2012/contributo-5-per-mille-2012/elenchi-2012/elenco-complessivo-beneficiari"
+  2011: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivioschedeadempimento/schede-adempimento-2011/richiedere-2011/contributo-del-5-per-mille-2011/elenchi-2011/elenco-complessivo-beneficiari-2011"
+  2010: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivioschedeadempimento/schede-adempimento-2010/richiedere-2010/iscrizione-elenchi-5-per-mille/elenchi/elenco-complessivo-beneficiari-5permille2010"
+  2009: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivio-5permille/5-per-mille-anni-precedenti/contributo-5-per-mille-2009/elenchi-5xmille2009/elenco-complessivo-beneficiari-5xmille2009"
+  2008: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivio-5permille/5-per-mille-anni-precedenti/contributo-5-per-mille-2008/elenchi-5xmille2008/elenco-complessivo-beneficiari-5xmille2008"
+  2007: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivio-5permille/5-per-mille-anni-precedenti/contributo-5-per-mille-2007/elenchi-5xmille2007/elenchi-complessivi-5xmille2007"
+  2006: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivio-5permille/5-per-mille-anni-precedenti/contributo-5-per-mille-2006/elenchi-5xmille2006/elenco-complessivo-beneficiari-5xmille2006"
+
+# --- ETL (etl.py) ---
+etl:
+  chunk_size: 50000          # Righe per chunk nella lettura CSV per l'export Excel
+
+# --- Formattazione Excel ---
+# Usata sia da cinque_per_mille.py (conversione PDF/CSV) che da etl.py (export normalizzato)
+excel:
+  header_font: "Arial"
+  header_size: 10
+  header_bg: "#2F5496"       # Colore sfondo intestazione (blu scuro)
+  header_fg: "#FFFFFF"       # Colore testo intestazione (bianco)
+  data_font: "Arial"
+  data_size_download: 10     # Dimensione font dati in cinque_per_mille.py
+  data_size_etl: 9           # Dimensione font dati in etl.py
+  alt_row_bg: "#EEF2FF"      # Colore sfondo righe alternate
+  border_color: "#D9D9D9"    # Colore bordi celle
+  max_col_width: 40          # Larghezza massima colonne (caratteri)

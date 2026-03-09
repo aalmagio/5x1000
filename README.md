@@ -10,7 +10,8 @@ Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i
 
 | Script | Funzione |
 |---|---|
-| `cinque_per_mille.py` | Scarica i file PDF/CSV dalle pagine ufficiali AdE e li converte in Excel per anno |
+| `cinque_per_mille.py` | Scarica i file PDF/CSV dall'elenco complessivo AdE e li converte in Excel per anno |
+| `scarica_categorie.py` | Scarica e converte i dati **per categoria** (ammessi/esclusi separati) |
 | `etl.py` | Normalizza tutti i dati annuali in uno schema unificato e fa il join con il RUNTS |
 | `gsheets.py` | Carica il dataset normalizzato su Google Sheets per Looker Studio |
 
@@ -70,10 +71,57 @@ pip install pdfplumber openpyxl requests beautifulsoup4
 ### 1. Scaricare i dati dall'Agenzia delle Entrate
 
 ```bash
-python cinque_per_mille.py [cartella_root]
+# Modalita' interattiva (chiede tutto passo passo)
+python cinque_per_mille.py
+
+# Batch: solo conversione CSV degli anni 2023 e 2024, senza download
+python cinque_per_mille.py --no-download --source csv --anni 2023,2024
+
+# Batch: download + conversione PDF di tutti gli anni
+python cinque_per_mille.py --source pdf
+
+# Solo download, senza conversione Excel
+python cinque_per_mille.py --no-convert
 ```
 
-Lo script è interattivo: chiede quali anni scaricare e se procedere alla conversione Excel. I file vengono salvati in sottocartelle `2006/`, `2007/`, …, `2024/` e convertiti in `dati_ANNO.xlsx` da copiare nella cartella `Dati/`.
+| Flag | Default | Descrizione |
+|---|---|---|
+| `--root` | `.` | Cartella root del progetto |
+| `--anni` | tutti | Anni da elaborare (es. `2020,2021,2024`) |
+| `--source` | `ask` | Fonte dati: `pdf`, `csv`, o `ask` (chiede per ogni cartella) |
+| `--no-download` | | Salta la fase di download dall'AdE |
+| `--no-convert` | | Salta la fase di conversione in Excel |
+
+Senza flag aggiuntivi lo script e' interattivo (come prima). Con `--source` e `--anni` diventa completamente non-interattivo, adatto all'esecuzione schedulata.
+
+I file vengono salvati in sottocartelle `2006/`, `2007/`, …, `2024/` e convertiti in `dati_ANNO.xlsx` da copiare nella cartella `Dati/`.
+
+### 1b. Scaricare i dati per categoria (ammessi/esclusi)
+
+Per lavorare a livello di singola categoria (con file ammessi e esclusi separati), si usa un file Excel con l'elenco dei link alle pagine delle categorie:
+
+```bash
+# Download + estrazione (tutte le righe del file)
+python scarica_categorie.py --input categorie.xlsx
+
+# Solo anno 2024
+python scarica_categorie.py --input categorie.xlsx --anni 2024
+
+# Solo download (senza creare gli Excel)
+python scarica_categorie.py --input categorie.xlsx --no-extract
+
+# Solo estrazione (file gia' scaricati)
+python scarica_categorie.py --input categorie.xlsx --no-download
+
+# Estrai da PDF invece che da CSV
+python scarica_categorie.py --input categorie.xlsx --source pdf
+```
+
+Il file Excel di input deve avere le colonne: **Categoria**, **Link**, **Anno**. Per ogni riga lo script:
+1. Crea la cartella `{anno}/{categoria}/`
+2. Scarica tutti i PDF e CSV dalla pagina
+3. Classifica i file in "ammessi" e "esclusi"
+4. Crea `{ANNO}_{CATEGORIA}_ammessi.xlsx` e `{ANNO}_{CATEGORIA}_esclusi.xlsx`
 
 ### 2. Normalizzare i dati (ETL)
 
@@ -105,13 +153,27 @@ Il dataset è diviso per anno (un foglio per anno) per rispettare i limiti di Go
 
 ---
 
+## Configurazione (`config.yaml`)
+
+Il file `config.yaml` nella root del progetto permette di modificare i parametri principali **senza toccare il codice Python**: URL per anno, timeout di download, formattazione Excel, percorsi cartelle.
+
+Se il file non esiste o una chiave manca, gli script usano i valori di default interni. Il file e' commentato in italiano ed e' pensato per essere leggibile anche da chi non programma.
+
+Priorita' dei valori: **flag CLI > config.yaml > default nel codice**.
+
+> Richiede `PyYAML` (`pip install pyyaml`). Senza PyYAML gli script funzionano normalmente con i default.
+
+---
+
 ## Struttura cartelle
 
 ```
 5x1000/
-├── cinque_per_mille.py   # Download + conversione PDF/CSV → Excel
+├── cinque_per_mille.py   # Download + conversione PDF/CSV → Excel (elenco complessivo)
+├── scarica_categorie.py  # Download + conversione per categoria (ammessi/esclusi)
 ├── etl.py                # ETL: normalizzazione + merge RUNTS
 ├── gsheets.py            # Export su Google Sheets
+├── config.yaml           # Configurazione esterna (modificabile senza codice)
 ├── requirements.txt
 │
 ├── Dati/                 # Excel per anno + output normalizzato (non in repo)
