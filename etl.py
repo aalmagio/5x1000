@@ -44,6 +44,81 @@ DEFAULT_DATI = DEFAULT_ROOT / "Dati"
 DEFAULT_RUNTS = DEFAULT_ROOT / "Runts"
 DEFAULT_OUT = DEFAULT_ROOT / "Dati"
 
+# Configurazione Excel (sovrascritta da config.yaml)
+EXCEL_CONFIG = {
+    "header_font": "Arial",
+    "header_size": 10,
+    "header_bg": "#2F5496",
+    "header_fg": "#FFFFFF",
+    "data_font": "Arial",
+    "data_size": 9,
+    "alt_row_bg": "#EEF2FF",
+    "border_color": "#D9D9D9",
+    "max_col_width": 40,
+}
+
+# Configurazione ETL
+ETL_CONFIG = {
+    "chunk_size": 50_000,
+}
+
+
+def _load_config(root: Path) -> dict:
+    """
+    Carica config.yaml dalla root del progetto.
+    Restituisce un dict vuoto se il file non esiste o PyYAML non e' installato.
+    """
+    config_path = root / "config.yaml"
+    if not config_path.is_file():
+        return {}
+    try:
+        import yaml
+    except ImportError:
+        logging.warning(
+            "PyYAML non installato: config.yaml ignorato. "
+            "Installa con: pip install pyyaml"
+        )
+        return {}
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return cfg
+    except Exception as e:
+        logging.warning(f"Errore nel leggere config.yaml: {e}")
+        return {}
+
+
+def _apply_config(cfg: dict) -> None:
+    """Applica i valori di config.yaml a EXCEL_CONFIG e ETL_CONFIG."""
+    # Excel
+    excel_cfg = cfg.get("excel", {})
+    if excel_cfg:
+        mapping = {
+            "header_font": "header_font",
+            "header_size": "header_size",
+            "header_bg": "header_bg",
+            "header_fg": "header_fg",
+            "data_font": "data_font",
+            "data_size_etl": "data_size",
+            "alt_row_bg": "alt_row_bg",
+            "border_color": "border_color",
+            "max_col_width": "max_col_width",
+        }
+        for yaml_key, config_key in mapping.items():
+            if yaml_key in excel_cfg:
+                val = excel_cfg[yaml_key]
+                # Normalizza colori: assicura '#' iniziale
+                if config_key in ("header_bg", "header_fg", "alt_row_bg", "border_color"):
+                    val = str(val)
+                    if not val.startswith("#"):
+                        val = f"#{val}"
+                EXCEL_CONFIG[config_key] = val
+
+    # ETL
+    etl_cfg = cfg.get("etl", {})
+    if etl_cfg.get("chunk_size"):
+        ETL_CONFIG["chunk_size"] = int(etl_cfg["chunk_size"])
+
 # ============================================================================
 # LOGGING
 # ============================================================================
@@ -594,25 +669,28 @@ def export_csv(df: pd.DataFrame, out_path: Path) -> None:
 
 def _xlsxwriter_formats(wb):
     """Crea e restituisce i formati riutilizzabili per xlsxwriter."""
+    ec = EXCEL_CONFIG
     header_fmt = wb.add_format({
-        "font_name": "Arial", "bold": True, "font_size": 10,
-        "font_color": "#FFFFFF", "bg_color": "#2F5496",
+        "font_name": ec["header_font"], "bold": True, "font_size": ec["header_size"],
+        "font_color": ec["header_fg"], "bg_color": ec["header_bg"],
         "align": "center", "valign": "vcenter", "text_wrap": True,
-        "border": 1, "border_color": "#D9D9D9",
+        "border": 1, "border_color": ec["border_color"],
     })
     data_fmt = wb.add_format({
-        "font_name": "Arial", "font_size": 9,
-        "border": 1, "border_color": "#D9D9D9",
+        "font_name": ec["data_font"], "font_size": ec["data_size"],
+        "border": 1, "border_color": ec["border_color"],
     })
     data_alt_fmt = wb.add_format({
-        "font_name": "Arial", "font_size": 9, "bg_color": "#EEF2FF",
-        "border": 1, "border_color": "#D9D9D9",
+        "font_name": ec["data_font"], "font_size": ec["data_size"],
+        "bg_color": ec["alt_row_bg"],
+        "border": 1, "border_color": ec["border_color"],
     })
     return header_fmt, data_fmt, data_alt_fmt
 
 
 def _compute_col_widths(cols: list[str], sample: pd.DataFrame) -> list[int]:
     """Calcola la larghezza delle colonne da un campione di dati."""
+    max_width = EXCEL_CONFIG.get("max_col_width", 40)
     widths = []
     for col in cols:
         max_len = len(col)
@@ -620,7 +698,7 @@ def _compute_col_widths(cols: list[str], sample: pd.DataFrame) -> list[int]:
             vals = sample[col].dropna().astype(str)
             if len(vals) > 0:
                 max_len = max(max_len, int(vals.str.len().max()))
-        widths.append(min(max_len + 2, 40))
+        widths.append(min(max_len + 2, max_width))
     return widths
 
 
@@ -700,7 +778,7 @@ def export_excel_from_csv(csv_path: Path, out_path: Path) -> None:
     import xlsxwriter
 
     EXCEL_MAX_DATA_ROWS = 1_048_575
-    CHUNK_SIZE = 50_000
+    CHUNK_SIZE = ETL_CONFIG.get("chunk_size", 50_000)
 
     # --- Prima passata: colonne e larghezze ---
     sample = pd.read_csv(csv_path, dtype=str, nrows=200)
@@ -842,12 +920,22 @@ def main():
     args = parser.parse_args()
 
     root = args.root
-    dati_dir = args.dati or (root / "Dati")
-    runts_dir = args.runts or (root / "Runts")
-    out_dir = args.out or (root / "Dati")
-    out_dir.mkdir(exist_ok=True)
 
     setup_logging(root)
+
+    # Carica configurazione esterna (se presente)
+    cfg = _load_config(root)
+    _apply_config(cfg)
+    if cfg:
+        logging.info("Configurazione caricata da config.yaml")
+
+    # Percorsi: CLI > config.yaml > default
+    cfg_percorsi = cfg.get("percorsi", {})
+    dati_dir = args.dati or (root / cfg_percorsi.get("dati", "Dati"))
+    runts_dir = args.runts or (root / cfg_percorsi.get("runts", "Runts"))
+    out_dir = args.out or (root / cfg_percorsi.get("dati", "Dati"))
+    out_dir.mkdir(exist_ok=True)
+
     logging.info(f"Root:  {root}")
     logging.info(f"Dati:  {dati_dir}")
     logging.info(f"RUNTS: {runts_dir}")

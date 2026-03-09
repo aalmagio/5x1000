@@ -6,7 +6,10 @@ Scarica i file PDF/CSV dalle pagine ufficiali dell'Agenzia delle Entrate,
 li organizza in cartelle per anno e li converte in file Excel.
 
 Uso:
-    python cinque_per_mille.py [percorso_root]
+    python cinque_per_mille.py                                    # interattivo
+    python cinque_per_mille.py --no-download --source csv         # batch: solo conversione CSV
+    python cinque_per_mille.py --source csv --anni 2023,2024      # batch: anni specifici
+    python cinque_per_mille.py --help                             # mostra tutti i flag
 
 Requisiti:
     pip install -r requirements.txt
@@ -19,6 +22,7 @@ import glob
 import csv
 import logging
 import datetime
+import argparse
 import pdfplumber
 from io import StringIO
 from urllib.parse import urljoin, urlparse, unquote
@@ -36,6 +40,55 @@ except ImportError:
 # ============================================================================
 # CONFIGURAZIONE
 # ============================================================================
+
+def _load_config(root_dir):
+    """
+    Carica config.yaml dalla root del progetto.
+    Restituisce un dict vuoto se il file non esiste o PyYAML non e' installato.
+    """
+    config_path = os.path.join(root_dir, "config.yaml")
+    if not os.path.isfile(config_path):
+        return {}
+    try:
+        import yaml
+    except ImportError:
+        logging.warning(
+            "PyYAML non installato: config.yaml ignorato. "
+            "Installa con: pip install pyyaml"
+        )
+        return {}
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        return cfg
+    except Exception as e:
+        logging.warning(f"Errore nel leggere config.yaml: {e}")
+        return {}
+
+
+def _apply_config(cfg):
+    """
+    Applica i valori di config.yaml alle variabili globali di configurazione.
+    I valori presenti nel file sovrascrivono i default; i valori assenti
+    lasciano i default invariati.
+    """
+    global YEAR_URLS, HEADERS, TIMEOUT_PAGE, TIMEOUT_FILE
+
+    # URL per anno
+    url_anni = cfg.get("url_anni")
+    if url_anni and isinstance(url_anni, dict):
+        for anno, url in url_anni.items():
+            YEAR_URLS[int(anno)] = str(url)
+
+    # Download: headers e timeout
+    dl_cfg = cfg.get("download", {})
+    if dl_cfg.get("user_agent"):
+        HEADERS["User-Agent"] = dl_cfg["user_agent"]
+    if dl_cfg.get("timeout_pagina"):
+        TIMEOUT_PAGE = int(dl_cfg["timeout_pagina"])
+    if dl_cfg.get("timeout_file"):
+        TIMEOUT_FILE = int(dl_cfg["timeout_file"])
+
 
 YEAR_URLS = {
     2025: "https://www.agenziaentrate.gov.it/portale/elenco-permanente-delle-onlus-accreditate-per-il-2025",
@@ -66,13 +119,18 @@ HEADERS = {
     "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
 }
 
+TIMEOUT_PAGE = 60       # Secondi di attesa per le pagine web
+TIMEOUT_FILE = 120      # Secondi di attesa per il download file
+
 # ============================================================================
 # LOGGING
 # ============================================================================
 
 def setup_logging(root_dir):
     """Configura il logging su file e console."""
-    log_file = os.path.join(root_dir, f"cinque_per_mille_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    log_dir = os.path.join(root_dir, "log")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"cinque_per_mille_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -96,7 +154,7 @@ def find_download_links(page_url, session):
     """
     logging.info(f"  Scarico pagina: {page_url}")
     try:
-        resp = session.get(page_url, headers=HEADERS, timeout=60)
+        resp = session.get(page_url, headers=HEADERS, timeout=TIMEOUT_PAGE)
         resp.raise_for_status()
     except requests.RequestException as e:
         logging.error(f"  Errore nel scaricare la pagina: {e}")
@@ -143,7 +201,7 @@ def download_file(url, dest_path, session):
 
     logging.info(f"    Scarico: {filename}...")
     try:
-        resp = session.get(url, headers=HEADERS, timeout=120, stream=True)
+        resp = session.get(url, headers=HEADERS, timeout=TIMEOUT_FILE, stream=True)
         resp.raise_for_status()
 
         with open(dest_path, "wb") as f:
@@ -348,6 +406,7 @@ def extract_data_from_csv(csv_path):
 
     rows = []
     header = None
+    title_checked = False
 
     with open(csv_path, "r", encoding=enc, errors="replace") as f:
         reader = csv.reader(f, delimiter=delimiter)
@@ -358,10 +417,21 @@ def extract_data_from_csv(csv_path):
             if all(c == "" for c in cleaned):
                 continue
 
-            # Prima riga non vuota = intestazione
+            # Prima riga non vuota = intestazione (candidata)
             if header is None:
                 header = cleaned
                 continue
+
+            # Controlla se l'header era in realta' una riga di titolo:
+            # se ha meno colonne non-vuote dei dati, la vera intestazione
+            # e' questa riga corrente.
+            if not title_checked:
+                title_checked = True
+                hdr_filled = sum(1 for c in header if c)
+                row_filled = sum(1 for c in cleaned if c)
+                if hdr_filled < row_filled:
+                    header = cleaned
+                    continue
 
             # Salta intestazioni ripetute (stessa prima cella dell'header)
             if cleaned[:3] == header[:3]:
@@ -375,21 +445,61 @@ def extract_data_from_csv(csv_path):
 # EXCEL CREATION
 # ============================================================================
 
-def create_excel(header, all_rows, output_path, year):
+# Configurazione Excel di default (sovrascritta da config.yaml)
+EXCEL_CONFIG = {
+    "header_font": "Arial",
+    "header_size": 10,
+    "header_bg": "2F5496",
+    "header_fg": "FFFFFF",
+    "data_font": "Arial",
+    "data_size": 10,
+    "alt_row_bg": "EEF2FF",
+    "border_color": "D9D9D9",
+    "max_col_width": 45,
+}
+
+
+def _apply_excel_config(cfg):
+    """Aggiorna EXCEL_CONFIG dai valori di config.yaml."""
+    excel_cfg = cfg.get("excel", {})
+    if not excel_cfg:
+        return
+    mapping = {
+        "header_font": "header_font",
+        "header_size": "header_size",
+        "header_bg": "header_bg",
+        "header_fg": "header_fg",
+        "data_font": "data_font",
+        "data_size_download": "data_size",
+        "alt_row_bg": "alt_row_bg",
+        "border_color": "border_color",
+        "max_col_width": "max_col_width",
+    }
+    for yaml_key, config_key in mapping.items():
+        if yaml_key in excel_cfg:
+            val = excel_cfg[yaml_key]
+            # Rimuovi '#' iniziale dai colori se presente
+            if isinstance(val, str) and val.startswith("#"):
+                val = val[1:]
+            EXCEL_CONFIG[config_key] = val
+
+
+def create_excel(header, all_rows, output_path, sheet_name="Dati"):
+    ec = EXCEL_CONFIG
     wb = Workbook()
     ws = wb.active
-    ws.title = str(year)
+    ws.title = str(sheet_name)[:31]  # Excel limita a 31 caratteri
 
-    header_font = Font(name="Arial", bold=True, size=10, color="FFFFFF")
-    header_fill = PatternFill("solid", fgColor="2F5496")
+    header_font = Font(name=ec["header_font"], bold=True, size=ec["header_size"], color=ec["header_fg"])
+    header_fill = PatternFill("solid", fgColor=ec["header_bg"])
     header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    data_font = Font(name="Arial", size=10)
+    data_font = Font(name=ec["data_font"], size=ec["data_size"])
     data_align = Alignment(vertical="center")
     thin_border = Border(
-        left=Side(style="thin", color="D9D9D9"),
-        right=Side(style="thin", color="D9D9D9"),
-        top=Side(style="thin", color="D9D9D9"),
-        bottom=Side(style="thin", color="D9D9D9"),
+        left=Side(style="thin", color=ec["border_color"]),
+        right=Side(style="thin", color=ec["border_color"]),
+        top=Side(style="thin", color=ec["border_color"]),
+        bottom=Side(style="thin", color=ec["border_color"]),
     )
 
     for col_idx, col_name in enumerate(header, 1):
@@ -413,7 +523,7 @@ def create_excel(header, all_rows, output_path, year):
             for cell in row:
                 if cell.value:
                     max_len = max(max_len, len(str(cell.value)))
-        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 45)
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, ec["max_col_width"])
 
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(header))}{ws.max_row}"
@@ -575,24 +685,86 @@ def ask_source(year, has_pdf, has_csv):
 # MAIN
 # ============================================================================
 
+def parse_args():
+    """Parsing degli argomenti da riga di comando."""
+    parser = argparse.ArgumentParser(
+        description="5 per Mille - Download e conversione dati dall'Agenzia delle Entrate",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+Esempi:
+  %(prog)s                                    # modalita' interattiva
+  %(prog)s --no-download --source csv         # solo conversione CSV, tutti gli anni
+  %(prog)s --source csv --anni 2023,2024      # download + conversione CSV, anni scelti
+  %(prog)s --no-download --no-convert         # non fa nulla (utile per test)
+""",
+    )
+    parser.add_argument(
+        "--root", type=str, default=".",
+        help="Cartella root del progetto (default: directory corrente)",
+    )
+    parser.add_argument(
+        "--anni", type=str, default=None,
+        help="Anni da elaborare, separati da virgola (es. 2020,2021,2024). "
+             "Se omesso, chiede interattivamente.",
+    )
+    parser.add_argument(
+        "--source", choices=["pdf", "csv", "ask"], default="ask",
+        help="Fonte dati per la conversione Excel: 'pdf', 'csv' o 'ask' "
+             "(chiede per ogni cartella con entrambi i formati). Default: ask",
+    )
+    parser.add_argument(
+        "--no-download", action="store_true",
+        help="Salta la fase di download dall'Agenzia delle Entrate",
+    )
+    parser.add_argument(
+        "--no-convert", action="store_true",
+        help="Salta la fase di conversione in Excel",
+    )
+    return parser.parse_args()
+
+
 def main():
-    root_dir = sys.argv[1] if len(sys.argv) > 1 else "."
-    root_dir = os.path.abspath(root_dir)
+    args = parse_args()
+
+    root_dir = os.path.abspath(args.root)
     os.makedirs(root_dir, exist_ok=True)
+
+    # Carica configurazione esterna (se presente)
+    cfg = _load_config(root_dir)
+    _apply_config(cfg)
+    _apply_excel_config(cfg)
 
     log_file = setup_logging(root_dir)
     logging.info(f"Directory root: {root_dir}")
     logging.info(f"Python: {sys.version}")
+    if cfg:
+        logging.info("Configurazione caricata da config.yaml")
 
     available_years = sorted(YEAR_URLS.keys())
+
+    # --- Parsing anni da CLI ---
+    anni_cli = None
+    if args.anni:
+        try:
+            anni_cli = sorted(int(a.strip()) for a in args.anni.split(",") if a.strip())
+            invalid = [a for a in anni_cli if a not in available_years]
+            if invalid:
+                logging.error(f"Anni non validi: {invalid}. Disponibili: {min(available_years)}-{max(available_years)}")
+                sys.exit(1)
+        except ValueError:
+            logging.error(f"Formato anni non valido: '{args.anni}'. Usa numeri separati da virgola.")
+            sys.exit(1)
 
     # ---- FASE 1: DOWNLOAD ----
     print("\n" + "=" * 60)
     print("  5 PER MILLE - Download e conversione dati")
     print("=" * 60)
 
-    if not HAS_WEB:
-        print("\n⚠  Le librerie 'requests' e 'beautifulsoup4' non sono installate.")
+    if args.no_download:
+        logging.info("Download saltato (--no-download)")
+        do_download = False
+    elif not HAS_WEB:
+        print("\nLe librerie 'requests' e 'beautifulsoup4' non sono installate.")
         print("   Il download non e' disponibile. Installa con:")
         print("   pip install requests beautifulsoup4")
         print("   Procedo solo con la conversione dei file gia' presenti.\n")
@@ -601,7 +773,7 @@ def main():
         do_download = ask_yes_no("\nVuoi aggiornare i file scaricandoli dal sito dell'Agenzia delle Entrate?")
 
     if do_download:
-        years_to_download = ask_years(available_years, label="Scarica")
+        years_to_download = anni_cli if anni_cli else ask_years(available_years, label="Scarica")
         logging.info(f"Anni da scaricare: {years_to_download}")
 
         session = requests.Session()
@@ -615,10 +787,21 @@ def main():
         logging.info(f"\nDownload completato: {total_files} file totali")
 
     # ---- FASE 2: CONVERSIONE EXCEL ----
-    if not ask_yes_no("\nVuoi procedere alla creazione dei file Excel?"):
-        logging.info("Conversione Excel saltata dall'utente.")
+    if args.no_convert:
+        logging.info("Conversione Excel saltata (--no-convert)")
         print(f"\nLog completo: {log_file}")
         return
+
+    if not args.no_download and not do_download:
+        # Modalita' interattiva: chiedi se procedere alla conversione
+        pass  # prosegui comunque alla conversione
+    if not args.no_convert:
+        # In modalita' interattiva (no flag --no-download e --no-convert), chiedi conferma
+        if not anni_cli and args.source == "ask":
+            if not ask_yes_no("\nVuoi procedere alla creazione dei file Excel?"):
+                logging.info("Conversione Excel saltata dall'utente.")
+                print(f"\nLog completo: {log_file}")
+                return
 
     # Trova le cartelle che hanno effettivamente file da elaborare
     years_with_data = []
@@ -636,7 +819,16 @@ def main():
         print(f"\nLog completo: {log_file}")
         return
 
-    years_to_extract = ask_years(years_with_data, label="Elabora")
+    # Determina anni da elaborare
+    if anni_cli:
+        years_to_extract = [y for y in anni_cli if y in years_with_data]
+        if not years_to_extract:
+            logging.warning(f"Nessuna cartella con dati per gli anni richiesti: {anni_cli}")
+            print(f"\nLog completo: {log_file}")
+            return
+    else:
+        years_to_extract = ask_years(years_with_data, label="Elabora")
+
     logging.info(f"Anni da elaborare: {years_to_extract}")
 
     print()
@@ -661,7 +853,16 @@ def main():
         has_pdf = len(pdf_files) > 0
         has_csv = len(csv_files) > 0
 
-        if has_pdf and has_csv:
+        if args.source in ("pdf", "csv"):
+            # Fonte specificata da CLI
+            source = args.source
+            if source == "pdf" and not has_pdf:
+                logging.warning(f"[{year}] Nessun PDF disponibile, uso CSV")
+                source = "csv"
+            elif source == "csv" and not has_csv:
+                logging.warning(f"[{year}] Nessun CSV disponibile, uso PDF")
+                source = "pdf"
+        elif has_pdf and has_csv:
             source = ask_source(year, has_pdf, has_csv)
         elif has_csv:
             source = "csv"
