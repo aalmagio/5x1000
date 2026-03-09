@@ -21,13 +21,12 @@ Uso:
     python etl.py                          # usa defaults
 
 Requisiti:
-    pip install pandas openpyxl
+    pip install pandas xlsxwriter openpyxl
 """
 
 import os
 import re
 import sys
-import glob
 import math
 import argparse
 import logging
@@ -35,9 +34,6 @@ import datetime
 from pathlib import Path
 
 import pandas as pd
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-from openpyxl.utils import get_column_letter
 
 # ============================================================================
 # CONFIGURAZIONE DEFAULT
@@ -593,85 +589,186 @@ def export_csv(df: pd.DataFrame, out_path: Path) -> None:
 
 
 # ============================================================================
-# EXPORT EXCEL (formattato)
+# EXPORT EXCEL (formattato, xlsxwriter)
 # ============================================================================
+
+def _xlsxwriter_formats(wb):
+    """Crea e restituisce i formati riutilizzabili per xlsxwriter."""
+    header_fmt = wb.add_format({
+        "font_name": "Arial", "bold": True, "font_size": 10,
+        "font_color": "#FFFFFF", "bg_color": "#2F5496",
+        "align": "center", "valign": "vcenter", "text_wrap": True,
+        "border": 1, "border_color": "#D9D9D9",
+    })
+    data_fmt = wb.add_format({
+        "font_name": "Arial", "font_size": 9,
+        "border": 1, "border_color": "#D9D9D9",
+    })
+    data_alt_fmt = wb.add_format({
+        "font_name": "Arial", "font_size": 9, "bg_color": "#EEF2FF",
+        "border": 1, "border_color": "#D9D9D9",
+    })
+    return header_fmt, data_fmt, data_alt_fmt
+
+
+def _compute_col_widths(cols: list[str], sample: pd.DataFrame) -> list[int]:
+    """Calcola la larghezza delle colonne da un campione di dati."""
+    widths = []
+    for col in cols:
+        max_len = len(col)
+        if col in sample.columns:
+            vals = sample[col].dropna().astype(str)
+            if len(vals) > 0:
+                max_len = max(max_len, int(vals.str.len().max()))
+        widths.append(min(max_len + 2, 40))
+    return widths
+
+
+def _setup_xlsxwriter_sheet(wb, ws, cols, col_widths, header_fmt):
+    """Scrive header, imposta larghezze colonne su un foglio xlsxwriter."""
+    for ci, width in enumerate(col_widths):
+        ws.set_column(ci, ci, width)
+    for ci, col_name in enumerate(cols):
+        ws.write(0, ci, col_name, header_fmt)
+
+
+def _finalize_xlsxwriter_sheet(ws, n_data_rows: int, n_cols: int):
+    """Applica freeze panes e autofilter a un foglio completato."""
+    ws.freeze_panes(1, 0)
+    ws.autofilter(0, 0, n_data_rows, n_cols - 1)
+
 
 def export_excel(df: pd.DataFrame, out_path: Path) -> None:
     """
-    Crea un Excel formattato con header fisso e autofilter.
+    Crea un Excel formattato con xlsxwriter da un DataFrame in memoria.
     Se il dataset supera il limite Excel di 1.048.575 righe dati,
-    lo divide automaticamente in più fogli.
+    lo divide automaticamente in piu' fogli.
     """
-    EXCEL_MAX_DATA_ROWS = 1_048_575  # 1.048.576 - 1 (header)
+    import xlsxwriter
 
-    wb = Workbook()
-
-    header_font = Font(name="Arial", bold=True, size=10, color="FFFFFF")
-    header_fill = PatternFill("solid", fgColor="2F5496")
-    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    data_font = Font(name="Arial", size=9)
-    alt_fill = PatternFill("solid", fgColor="EEF2FF")
-    thin = Side(style="thin", color="D9D9D9")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    EXCEL_MAX_DATA_ROWS = 1_048_575
 
     cols = list(df.columns)
+    n_cols = len(cols)
     total_rows = len(df)
     n_sheets = math.ceil(total_rows / EXCEL_MAX_DATA_ROWS) if total_rows > 0 else 1
 
     if n_sheets > 1:
         logging.info(
             f"  Dataset ({total_rows:,} righe) supera il limite Excel "
-            f"({EXCEL_MAX_DATA_ROWS:,}) → {n_sheets} fogli"
+            f"({EXCEL_MAX_DATA_ROWS:,}) -> {n_sheets} fogli"
         )
+
+    col_widths = _compute_col_widths(cols, df.head(200))
+
+    wb = xlsxwriter.Workbook(str(out_path), {"constant_memory": True})
+    header_fmt, data_fmt, data_alt_fmt = _xlsxwriter_formats(wb)
 
     for sheet_idx in range(n_sheets):
         start = sheet_idx * EXCEL_MAX_DATA_ROWS
         end = min(start + EXCEL_MAX_DATA_ROWS, total_rows)
         df_chunk = df.iloc[start:end]
 
-        if sheet_idx == 0:
-            ws = wb.active
-        else:
-            ws = wb.create_sheet()
-        ws.title = "5x1000_norm" if n_sheets == 1 else f"Parte_{sheet_idx + 1}"
+        sheet_name = "5x1000_norm" if n_sheets == 1 else f"Parte_{sheet_idx + 1}"
+        ws = wb.add_worksheet(sheet_name)
+        _setup_xlsxwriter_sheet(wb, ws, cols, col_widths, header_fmt)
 
-        # Header
-        for ci, col in enumerate(cols, 1):
-            cell = ws.cell(row=1, column=ci, value=col)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_align
-            cell.border = border
+        values = df_chunk.values
+        for ri in range(len(values)):
+            fmt = data_alt_fmt if (ri % 2 == 0) else data_fmt
+            for ci in range(n_cols):
+                val = values[ri][ci]
+                if pd.isna(val):
+                    ws.write_blank(ri + 1, ci, None, fmt)
+                else:
+                    ws.write(ri + 1, ci, val, fmt)
 
-        # Dati (in batch da 10k per non esplodere la memoria)
-        BATCH = 10_000
-        for batch_start in range(0, len(df_chunk), BATCH):
-            batch = df_chunk.iloc[batch_start:batch_start + BATCH]
-            for ri, (_, row) in enumerate(batch.iterrows(), batch_start + 2):
-                fill = alt_fill if ri % 2 == 0 else None
-                for ci, val in enumerate(row, 1):
-                    cell = ws.cell(row=ri, column=ci, value=val)
-                    cell.font = data_font
-                    cell.border = border
-                    if fill:
-                        cell.fill = fill
+        _finalize_xlsxwriter_sheet(ws, len(df_chunk), n_cols)
+        logging.info(f"  Foglio '{sheet_name}': {len(df_chunk):,} righe")
 
-        # Larghezza colonne
-        for ci, col in enumerate(cols, 1):
-            max_len = len(col)
-            sample_rows = df_chunk[col].dropna().astype(str).head(200)
-            if len(sample_rows) > 0:
-                max_len = max(max_len, sample_rows.str.len().max())
-            ws.column_dimensions[get_column_letter(ci)].width = min(max_len + 2, 40)
-
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}1"
-
-        logging.info(f"  Foglio '{ws.title}': {len(df_chunk):,} righe")
-
-    wb.save(out_path)
+    wb.close()
     size_mb = out_path.stat().st_size / 1_048_576
     logging.info(f"Excel salvato: {out_path} ({size_mb:.1f} MB, {n_sheets} foglio/i)")
+
+
+def export_excel_from_csv(csv_path: Path, out_path: Path) -> None:
+    """
+    Crea un Excel formattato leggendo il CSV in streaming (senza caricare
+    tutto in RAM). Usa xlsxwriter in constant_memory mode.
+    Supporta multi-sheet per dataset che superano il limite Excel.
+    """
+    import xlsxwriter
+
+    EXCEL_MAX_DATA_ROWS = 1_048_575
+    CHUNK_SIZE = 50_000
+
+    # --- Prima passata: colonne e larghezze ---
+    sample = pd.read_csv(csv_path, dtype=str, nrows=200)
+    cols = list(sample.columns)
+    n_cols = len(cols)
+    col_widths = _compute_col_widths(cols, sample)
+
+    # Conta le righe totali per pianificare i fogli
+    with open(csv_path, encoding="utf-8-sig") as f:
+        total_rows = sum(1 for _ in f) - 1  # -1 per l'header
+
+    n_sheets = math.ceil(total_rows / EXCEL_MAX_DATA_ROWS) if total_rows > 0 else 1
+    if n_sheets > 1:
+        logging.info(
+            f"  Dataset ({total_rows:,} righe) supera il limite Excel "
+            f"({EXCEL_MAX_DATA_ROWS:,}) -> {n_sheets} fogli"
+        )
+
+    # --- Crea workbook ---
+    wb = xlsxwriter.Workbook(str(out_path), {"constant_memory": True})
+    header_fmt, data_fmt, data_alt_fmt = _xlsxwriter_formats(wb)
+
+    sheet_idx = 0
+    sheet_row = 0  # riga dati corrente nel foglio (0-based)
+    ws = None
+
+    def start_new_sheet():
+        nonlocal ws, sheet_idx, sheet_row
+        name = "5x1000_norm" if n_sheets == 1 else f"Parte_{sheet_idx + 1}"
+        ws = wb.add_worksheet(name)
+        _setup_xlsxwriter_sheet(wb, ws, cols, col_widths, header_fmt)
+        sheet_row = 0
+
+    start_new_sheet()
+
+    # --- Seconda passata: scrivi dati in streaming ---
+    reader = pd.read_csv(csv_path, dtype=str, chunksize=CHUNK_SIZE)
+
+    for chunk in reader:
+        values = chunk.values
+        for ri in range(len(values)):
+            # Nuovo foglio se necessario
+            if sheet_row >= EXCEL_MAX_DATA_ROWS:
+                _finalize_xlsxwriter_sheet(ws, sheet_row, n_cols)
+                logging.info(f"  Foglio completato: {sheet_row:,} righe")
+                sheet_idx += 1
+                start_new_sheet()
+
+            fmt = data_alt_fmt if (sheet_row % 2 == 0) else data_fmt
+            excel_row = sheet_row + 1  # +1 per l'header
+
+            for ci in range(n_cols):
+                val = values[ri][ci]
+                if pd.isna(val):
+                    ws.write_blank(excel_row, ci, None, fmt)
+                else:
+                    ws.write(excel_row, ci, val, fmt)
+
+            sheet_row += 1
+
+    # Finalizza ultimo foglio
+    if ws is not None:
+        _finalize_xlsxwriter_sheet(ws, sheet_row, n_cols)
+        logging.info(f"  Foglio completato: {sheet_row:,} righe")
+
+    wb.close()
+    size_mb = out_path.stat().st_size / 1_048_576
+    logging.info(f"Excel salvato: {out_path} ({size_mb:.1f} MB, {sheet_idx + 1} foglio/i)")
 
 
 # ============================================================================
@@ -794,9 +891,8 @@ def main():
 
     if not args.no_excel:
         logging.info("Generazione Excel dal CSV normalizzato...")
-        df_full = pd.read_csv(csv_path, dtype=str)
         xlsx_path = out_dir / "enti_5x1000_norm.xlsx"
-        export_excel(df_full, xlsx_path)
+        export_excel_from_csv(csv_path, xlsx_path)
 
     logging.info("\nETL completato.")
 

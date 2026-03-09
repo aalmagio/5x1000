@@ -1,7 +1,7 @@
 # 5 per Mille - Dipendenze Python
 # pip install -r requirements.txt
 
-# --- Estrazione e conversione dati (cinque_per_mille.py, pdf_to_excel.py) ---
+# --- Estrazione e conversione dati (cinque_per_mille.py) ---
 pdfplumber>=0.10.0
 openpyxl>=3.1.0
 requests>=2.31.0
@@ -9,6 +9,7 @@ beautifulsoup4>=4.12.0
 
 # --- ETL e normalizzazione (etl.py) ---
 pandas>=2.0.0
+xlsxwriter>=3.1.0
 
 # --- Export Google Sheets (gsheets.py) ---
 # Installare solo se si usa l'export su Sheets/Looker Studio
