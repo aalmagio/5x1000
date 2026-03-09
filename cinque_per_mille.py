@@ -20,6 +20,7 @@ import os
 import re
 import glob
 import csv
+import shutil
 import logging
 import datetime
 import argparse
@@ -879,6 +880,13 @@ def main():
 
             if success:
                 processed += 1
+                # Copia dati_{year}.xlsx in Dati/ per etl.py
+                dati_dir = os.path.join(root_dir, "Dati")
+                os.makedirs(dati_dir, exist_ok=True)
+                src = os.path.join(folder, f"dati_{year}.xlsx")
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(dati_dir, f"dati_{year}.xlsx"))
+                    logging.info(f"[{year}] Copiato in Dati/dati_{year}.xlsx")
             else:
                 errors += 1
         except Exception as e:

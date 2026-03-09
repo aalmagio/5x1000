@@ -10,6 +10,7 @@ Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i
 
 | Script | Funzione |
 |---|---|
+| **`pipeline.py`** | **Orchestratore**: esegue tutti gli step in sequenza con un solo comando |
 | `cinque_per_mille.py` | Scarica i file PDF/CSV dall'elenco complessivo AdE e li converte in Excel per anno |
 | `scarica_categorie.py` | Scarica e converte i dati **per categoria** (ammessi/esclusi separati) |
 | `etl.py` | Normalizza tutti i dati annuali in uno schema unificato e fa il join con il RUNTS |
@@ -68,6 +69,42 @@ pip install pdfplumber openpyxl requests beautifulsoup4
 
 ## Utilizzo
 
+### 0. Pipeline completa (consigliato)
+
+Per eseguire tutti gli step con un solo comando:
+
+```bash
+# Pipeline completa interattiva
+python pipeline.py
+
+# Solo anno 2024, senza riscaricare
+python pipeline.py --anni 2024 --skip-download
+
+# Senza Google Sheets
+python pipeline.py --anni 2024 --skip-download --skip-gsheets
+
+# Solo ETL + GSheets (dati gia' scaricati e convertiti)
+python pipeline.py --only etl,gsheets
+
+# Con Sheet ID specifico
+python pipeline.py --sheet-id 1ABC... --anni 2024
+```
+
+| Flag | Default | Descrizione |
+|---|---|---|
+| `--anni` | tutti | Anni da elaborare (es. `2023,2024`) |
+| `--source` | `csv` | Fonte dati: `csv` o `pdf` |
+| `--input` | da config | File Excel con link categorie |
+| `--skip-download` | | Salta il download in tutti gli script |
+| `--skip-gsheets` | | Salta l'upload su Google Sheets |
+| `--sheet-id` | da config | ID del Google Sheet |
+| `--only` | tutti | Step specifici: `download,categorie,etl,gsheets` |
+| `--no-runts` | | Salta il merge RUNTS in etl.py |
+| `--no-excel-etl` | | Non genera il file Excel in etl.py (solo CSV) |
+
+La pipeline esegue in ordine: **download** → **categorie** → **etl** → **gsheets**.
+I file estratti vengono copiati automaticamente nella cartella `Dati/`.
+
 ### 1. Scaricare i dati dall'Agenzia delle Entrate
 
 ```bash
@@ -94,7 +131,7 @@ python cinque_per_mille.py --no-convert
 
 Senza flag aggiuntivi lo script e' interattivo (come prima). Con `--source` e `--anni` diventa completamente non-interattivo, adatto all'esecuzione schedulata.
 
-I file vengono salvati in sottocartelle `2006/`, `2007/`, …, `2024/` e convertiti in `dati_ANNO.xlsx` da copiare nella cartella `Dati/`.
+I file vengono salvati in sottocartelle `2006/`, `2007/`, ..., `2024/` e convertiti in `dati_ANNO.xlsx`, copiati automaticamente nella cartella `Dati/`.
 
 ### 1b. Scaricare i dati per categoria (ammessi/esclusi)
 
@@ -122,6 +159,7 @@ Il file Excel di input deve avere le colonne: **Categoria**, **Link**, **Anno**.
 2. Scarica tutti i PDF e CSV dalla pagina
 3. Classifica i file in "ammessi" e "esclusi"
 4. Crea `{ANNO}_{CATEGORIA}_ammessi.xlsx` e `{ANNO}_{CATEGORIA}_esclusi.xlsx`
+5. Copia gli Excel in `Dati/{CATEGORIA}/`
 
 ### 2. Normalizzare i dati (ETL)
 
@@ -169,25 +207,34 @@ Priorita' dei valori: **flag CLI > config.yaml > default nel codice**.
 
 ```
 5x1000/
+├── pipeline.py           # Orchestratore: esegue tutti gli step in sequenza
 ├── cinque_per_mille.py   # Download + conversione PDF/CSV → Excel (elenco complessivo)
 ├── scarica_categorie.py  # Download + conversione per categoria (ammessi/esclusi)
 ├── etl.py                # ETL: normalizzazione + merge RUNTS
 ├── gsheets.py            # Export su Google Sheets
 ├── config.yaml           # Configurazione esterna (modificabile senza codice)
+├── categorie.xlsx        # Elenco link alle pagine delle categorie
 ├── requirements.txt
 │
-├── Dati/                 # Excel per anno + output normalizzato (non in repo)
-│   ├── dati_2006.xlsx
-│   ├── ...
-│   ├── dati_2024.xlsx
-│   └── enti_5x1000_norm.csv   # ← output principale di etl.py
+├── Dati/                 # Output finale (non in repo)
+│   ├── dati_2006.xlsx ... dati_2024.xlsx    # Elenco complessivo per anno
+│   ├── ETS_ONLUS/                           # File per categoria
+│   │   ├── 2024_ETS_ONLUS_ammessi.xlsx
+│   │   └── 2024_ETS_ONLUS_esclusi.xlsx
+│   ├── ASD/
+│   │   └── 2024_ASD_ammessi.xlsx
+│   ├── ...                                  # Altre categorie
+│   ├── enti_5x1000_norm.csv                 # ← output principale di etl.py
+│   └── enti_5x1000_norm.xlsx
 │
 ├── Runts/                # File RUNTS (da scaricare manualmente, non in repo)
 │   └── *.xlsx
 │
-├── 2006/ … 2024/         # File grezzi scaricati dall'AdE (non in repo)
-│   ├── *.pdf
-│   └── *.csv
+├── 2006/ ... 2024/       # File grezzi scaricati dall'AdE (non in repo)
+│   ├── *.pdf, *.csv
+│   └── {categoria}/      # Sotto-cartelle per categoria
+│       ├── *.pdf, *.csv
+│       └── {ANNO}_{CATEGORIA}_ammessi.xlsx
 │
 ├── _EXAMPLE/             # File di esempio per testing
 │   └── dati_2006_ESEMPIO.xlsx

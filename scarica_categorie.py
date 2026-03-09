@@ -25,6 +25,7 @@ import sys
 import os
 import re
 import glob
+import shutil
 import logging
 import argparse
 
@@ -391,6 +392,16 @@ def extract_category(anno, slug, root_dir, source="csv"):
 
         if rows_extracted == 0 and (use_csv or use_pdf or csv_groups[tipo] or pdf_groups[tipo]):
             logging.warning(f"  [{tipo}] Estrazione fallita: 0 righe")
+
+    # Copia gli Excel estratti in Dati/{slug}/
+    dati_cat_dir = os.path.join(root_dir, "Dati", slug)
+    xlsx_files = glob.glob(os.path.join(folder, f"{anno}_{slug}_*.xlsx"))
+    if xlsx_files:
+        os.makedirs(dati_cat_dir, exist_ok=True)
+        for xlsx in xlsx_files:
+            dest = os.path.join(dati_cat_dir, os.path.basename(xlsx))
+            shutil.copy2(xlsx, dest)
+            logging.info(f"  Copiato in Dati/{slug}/{os.path.basename(xlsx)}")
 
 
 # ============================================================================

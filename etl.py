@@ -535,7 +535,7 @@ def process_streaming(
             imp_sum = df_norm["IMPORTO_TOTALE"].sum()
             stats["importo_per_anno"][anno] = float(imp_sum) if pd.notna(imp_sum) else 0.0
 
-            logging.info(f"  [{anno}] {n:,} righe → CSV")
+            logging.info(f"  [{anno}] {n:,} righe -> CSV")
 
         except Exception as e:
             logging.error(f"  [{anno}] ERRORE: {e}")

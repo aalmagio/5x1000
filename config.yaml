@@ -43,6 +43,11 @@ url_anni:
   2007: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivio-5permille/5-per-mille-anni-precedenti/contributo-5-per-mille-2007/elenchi-5xmille2007/elenchi-complessivi-5xmille2007"
   2006: "https://www.agenziaentrate.gov.it/portale/web/guest/archivio/archivio-5permille/5-per-mille-anni-precedenti/contributo-5-per-mille-2006/elenchi-5xmille2006/elenco-complessivo-beneficiari-5xmille2006"
 
+# --- Pipeline (pipeline.py) ---
+pipeline:
+  input_categorie: "categorie.xlsx"   # File Excel con link alle pagine delle categorie
+  # sheet_id: "1ABC..."              # ID del Google Sheet (decommentare e valorizzare)
+
 # --- ETL (etl.py) ---
 etl:
   chunk_size: 50000          # Righe per chunk nella lettura CSV per l'export Excel
