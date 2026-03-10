@@ -140,12 +140,22 @@ def slugify(categoria):
     key = categoria.strip().lower()
     if key in CATEGORY_SLUGS:
         return CATEGORY_SLUGS[key]
+    # Prova match per prefisso nelle chiavi lowercase (gestisce suffissi extra)
+    for known_key in sorted(CATEGORY_SLUGS, key=len, reverse=True):
+        if key.startswith(known_key):
+            return CATEGORY_SLUGS[known_key]
     # Fallback: rimuovi caratteri speciali, sostituisci spazi
     slug = re.sub(r"[^\w\s-]", "", categoria.strip())
     slug = re.sub(r"[\s-]+", "_", slug)
     slug = slug[:50]
-    # Normalizza al nome canonico se presente
-    return SLUG_NORMALIZE.get(slug, slug)
+    # Normalizza al nome canonico se presente (exact match)
+    if slug in SLUG_NORMALIZE:
+        return SLUG_NORMALIZE[slug]
+    # Prova match per prefisso nello slug generato
+    for known_slug in sorted(SLUG_NORMALIZE, key=len, reverse=True):
+        if slug.startswith(known_slug):
+            return SLUG_NORMALIZE[known_slug]
+    return slug
 
 
 # ============================================================================

@@ -288,6 +288,54 @@ def main():
         if not sheet_id:
             sheet_id = None
 
+    # Se report e' negli step, determina anni per il report
+    report_anni = None
+    if "report" in steps:
+        if args.anno_confronto:
+            # Flag esplicito --anno-confronto
+            anni_list = sorted([a.strip() for a in anni.split(",") if a.strip()]) if anni else []
+            a = anni_list[-1] if anni_list else None
+            if a:
+                report_anni = f"{a},{args.anno_confronto}"
+        elif anni:
+            anni_list = sorted([a.strip() for a in anni.split(",") if a.strip()])
+            ultimo = anni_list[-1]  # anno piu' recente
+
+            if args.no_confronto:
+                report_anni = ultimo
+            elif len(anni_list) == 1:
+                # Un solo anno: confronto con anno-1 (default di report.py)
+                report_anni = ultimo
+            elif sys.stdin.isatty():
+                # Piu' anni e modalita' interattiva: chiedi quale anno per il report
+                penultimo = anni_list[-2]
+                default_choice = f"{ultimo},{penultimo}"
+                print(f"\nAnni per il report (dati disponibili: {','.join(anni_list)}):")
+                print(f"  {ultimo},{penultimo}  → report {ultimo} con confronto {penultimo} (default)")
+                print(f"  {ultimo}       → report {ultimo} con confronto {int(ultimo)-1} (anno-1)")
+                print(f"  no         → salta il report")
+                resp = input(f"Scelta [{default_choice}]: ").strip()
+                if resp.lower() == "no":
+                    report_anni = None
+                elif resp:
+                    report_anni = resp
+                else:
+                    report_anni = default_choice
+            else:
+                # Non interattivo con piu' anni: usa il piu' recente
+                report_anni = ultimo
+        elif sys.stdin.isatty():
+            # Nessun --anni specificato, chiedi tutto da zero
+            print("\nAnni per il report:")
+            print("  2024,2023  → report 2024, confronto con 2023")
+            print("  2024       → report 2024, confronto con 2023 (anno-1)")
+            print("  no         → salta il report")
+            resp = input("Scelta: ").strip()
+            if resp.lower() == "no":
+                report_anni = None
+            elif resp:
+                report_anni = resp
+
     # Verifica file input categorie
     input_path = os.path.join(root_dir, input_file) if not os.path.isabs(input_file) else input_file
     if "categorie" in steps and not os.path.isfile(input_path):
@@ -309,12 +357,16 @@ def main():
         logging.info(f"  Categorie:  {'solo estrazione' if skip_download_categorie else 'download + estrazione'} (per categoria)")
         logging.info(f"  Input cat:  {input_path}")
     if "report" in steps:
-        if args.no_confronto:
-            logging.info(f"  Report:     senza confronto YoY")
-        elif args.anno_confronto:
-            logging.info(f"  Report:     confronto con {args.anno_confronto}")
+        if report_anni:
+            parts = [p.strip() for p in report_anni.split(",")]
+            if len(parts) >= 2:
+                logging.info(f"  Report:     anno {parts[0]}, confronto con {parts[1]}")
+            elif args.no_confronto:
+                logging.info(f"  Report:     anno {parts[0]}, senza confronto YoY")
+            else:
+                logging.info(f"  Report:     anno {parts[0]}, confronto con anno-1")
         else:
-            logging.info(f"  Report:     confronto con anno-1 (default)")
+            logging.info(f"  Report:     saltato (nessun anno)")
     if "gsheets" in steps:
         logging.info(f"  Sheet ID:   {sheet_id or '(nuovo)'}")
 
@@ -358,30 +410,6 @@ def main():
 
     # STEP 4: Report Excel
     if "report" in steps:
-        # Determina anno/i per il report
-        report_anni = None  # stringa "2024" o "2024,2023"
-
-        if args.anno_confronto:
-            # Flag esplicito --anno-confronto: usa il primo anno da --anni
-            a = anni.split(",")[0].strip() if anni else None
-            if a:
-                report_anni = f"{a},{args.anno_confronto}"
-        elif args.no_confronto and anni:
-            report_anni = anni.split(",")[0].strip()
-        elif anni:
-            # Se --anni ha un solo anno, confronto con anno-1 (default di report.py)
-            report_anni = anni.split(",")[0].strip()
-        elif sys.stdin.isatty():
-            print("\nAnni per il report:")
-            print("  2024,2023  → report 2024, confronto con 2023")
-            print("  2024       → report 2024, confronto con 2023 (anno-1)")
-            print("  no         → salta il report")
-            resp = input("Scelta: ").strip()
-            if resp.lower() == "no":
-                report_anni = None
-            elif resp:
-                report_anni = resp
-
         if report_anni:
             cmd = [PYTHON, "report.py", "--anno", report_anni]
             if args.no_confronto:
