@@ -127,7 +127,7 @@ def clean_for_sheets(df: pd.DataFrame) -> pd.DataFrame:
 def write_sheet(worksheet, df: pd.DataFrame, batch_size: int = 5000) -> None:
     """
     Scrive un DataFrame su un foglio Google Sheets in batch.
-    Cancella i dati precedenti e riscrive dall'inizio.
+    Cancella i dati precedenti, ridimensiona il foglio e riscrive dall'inizio.
     """
     logging.info(f"  Pulizia foglio precedente...")
     worksheet.clear()
@@ -136,9 +136,15 @@ def write_sheet(worksheet, df: pd.DataFrame, batch_size: int = 5000) -> None:
     headers = [list(df_clean.columns)]
     data = df_clean.values.tolist()
 
+    # Ridimensiona il foglio per contenere tutti i dati (header + righe)
+    needed_rows = len(data) + 1  # +1 per header
+    needed_cols = len(df_clean.columns)
+    worksheet.resize(rows=needed_rows, cols=needed_cols)
+    logging.info(f"  Foglio ridimensionato: {needed_rows:,} righe x {needed_cols} colonne")
+
     # Scrivi header
-    worksheet.update("A1", headers)
-    logging.info(f"  Header scritto ({len(df_clean.columns)} colonne)")
+    worksheet.update(values=headers, range_name="A1")
+    logging.info(f"  Header scritto ({needed_cols} colonne)")
 
     # Scrivi dati in batch
     total_rows = len(data)
@@ -146,11 +152,11 @@ def write_sheet(worksheet, df: pd.DataFrame, batch_size: int = 5000) -> None:
 
     for i in range(n_batches):
         batch = data[i * batch_size : (i + 1) * batch_size]
-        start_row = i * batch_size + 2  # +2 perché la riga 1 è header
+        start_row = i * batch_size + 2  # +2 perche' la riga 1 e' header
         end_row = start_row + len(batch) - 1
         cell_range = f"A{start_row}"
 
-        worksheet.update(cell_range, batch)
+        worksheet.update(values=batch, range_name=cell_range)
         pct = min(100, int((i + 1) * 100 / n_batches))
         logging.info(f"  Righe {start_row}-{end_row} ({pct}%)...")
 
