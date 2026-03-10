@@ -52,7 +52,7 @@ CATEGORIES = [
         "display": "Enti del\nVOLONTARIATO",
         "display_short": "Volontariato",
         "sheet": "Volontariato",
-        "slugs": ["ETS_ONLUS", "Enti_del_volontariato"],
+        "slug": "ETS_ONLUS",
         "has_redistribuzione": True,
     },
     {
@@ -60,7 +60,7 @@ CATEGORIES = [
         "display": "Enti dello\nSPORT",
         "display_short": "Sport",
         "sheet": "Sport",
-        "slugs": ["ASD", "Associazioni_Sportive_Dilettantistiche_ASD"],
+        "slug": "ASD",
         "has_redistribuzione": True,
     },
     {
@@ -68,7 +68,7 @@ CATEGORIES = [
         "display": "Enti della\nRICERCA\nSCIENTIFICA",
         "display_short": "Ric. Scientifica",
         "sheet": "Scienza",
-        "slugs": ["Ricerca_scientifica"],
+        "slug": "Ricerca_scientifica",
         "has_redistribuzione": True,
     },
     {
@@ -76,7 +76,7 @@ CATEGORIES = [
         "display": "Enti della\nRICERCA\nSANITARIA",
         "display_short": "Ric. Sanitaria",
         "sheet": "Sanita",
-        "slugs": ["Ricerca_sanitaria"],
+        "slug": "Ricerca_sanitaria",
         "has_redistribuzione": True,
     },
     {
@@ -84,7 +84,7 @@ CATEGORIES = [
         "display": "\nCOMUNI",
         "display_short": "Comuni",
         "sheet": "Comuni",
-        "slugs": ["Comuni"],
+        "slug": "Comuni",
         "has_redistribuzione": False,
     },
     {
@@ -92,7 +92,7 @@ CATEGORIES = [
         "display": "Enti della\nCULTURA",
         "display_short": "Cultura",
         "sheet": "Cultura",
-        "slugs": ["Beni_culturali", "Beni_culturali_e_paesaggistici"],
+        "slug": "Beni_culturali",
         "has_redistribuzione": False,
     },
     {
@@ -100,7 +100,7 @@ CATEGORIES = [
         "display": "Enti delle\nAREE\nPROTETTE",
         "display_short": "Aree Protette",
         "sheet": "Aree_Protette",
-        "slugs": ["Aree_protette"],
+        "slug": "Aree_protette",
         "has_redistribuzione": False,
     },
 ]
@@ -115,19 +115,18 @@ CATS_WITH_REDIST = [c["key"] for c in CATEGORIES if c["has_redistribuzione"]]
 
 def find_category_files(dati_dir, anno, cat):
     """
-    Cerca i file ammessi/esclusi per una categoria, provando tutti gli slug.
+    Cerca i file ammessi/esclusi per una categoria usando lo slug canonico.
     Restituisce {"ammessi": path|None, "esclusi": path|None}.
     """
     result = {"ammessi": None, "esclusi": None}
-    for slug in cat["slugs"]:
-        cat_dir = os.path.join(dati_dir, slug)
-        if not os.path.isdir(cat_dir):
-            continue
-        for tipo in ("ammessi", "esclusi"):
-            if result[tipo] is None:
-                path = os.path.join(cat_dir, f"{anno}_{slug}_{tipo}.xlsx")
-                if os.path.isfile(path):
-                    result[tipo] = path
+    slug = cat["slug"]
+    cat_dir = os.path.join(dati_dir, slug)
+    if not os.path.isdir(cat_dir):
+        return result
+    for tipo in ("ammessi", "esclusi"):
+        path = os.path.join(cat_dir, f"{anno}_{slug}_{tipo}.xlsx")
+        if os.path.isfile(path):
+            result[tipo] = path
     return result
 
 

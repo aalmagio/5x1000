@@ -103,6 +103,23 @@ def smart_filename(url, index, ext):
 # MAPPATURA CATEGORIE → SLUG
 # ============================================================================
 
+# Nomi canonici: ogni slug vecchio viene normalizzato al nome canonico
+SLUG_NORMALIZE = {
+    "Aree_protette": "Aree_protette",
+    "ASD": "ASD",
+    "Associazioni_Sportive_Dilettantistiche_ASD": "ASD",
+    "Beni_culturali": "Beni_culturali",
+    "Beni_culturali_e_paesaggistici": "Beni_culturali",
+    "Comuni": "Comuni",
+    "Enti_del_volontariato": "ETS_ONLUS",
+    "ETS_ONLUS": "ETS_ONLUS",
+    "Ricerca_sanitaria": "Ricerca_sanitaria",
+    "Ricerca_scientifica": "Ricerca_scientifica",
+    # Vecchi nomi extra
+    "Volontariato": "ETS_ONLUS",
+    "Enti_gestori_delle_aree_protette": "Aree_protette",
+}
+
 CATEGORY_SLUGS = {
     "enti del terzo settore e onlus": "ETS_ONLUS",
     "ricerca scientifica": "Ricerca_scientifica",
@@ -114,19 +131,21 @@ CATEGORY_SLUGS = {
     "enti dei beni culturali e paesaggistici": "Beni_culturali",
     "enti gestori delle aree protette": "Aree_protette",
     # Categorie piu' vecchie
-    "volontariato": "Volontariato",
+    "volontariato": "ETS_ONLUS",
 }
 
 
 def slugify(categoria):
-    """Converte il nome categoria in uno slug per il filesystem."""
+    """Converte il nome categoria in uno slug canonico per il filesystem."""
     key = categoria.strip().lower()
     if key in CATEGORY_SLUGS:
         return CATEGORY_SLUGS[key]
     # Fallback: rimuovi caratteri speciali, sostituisci spazi
     slug = re.sub(r"[^\w\s-]", "", categoria.strip())
     slug = re.sub(r"[\s-]+", "_", slug)
-    return slug[:50]
+    slug = slug[:50]
+    # Normalizza al nome canonico se presente
+    return SLUG_NORMALIZE.get(slug, slug)
 
 
 # ============================================================================
