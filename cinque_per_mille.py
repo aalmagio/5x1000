@@ -270,6 +270,9 @@ def clean_cell(value):
     if value is None:
         return ""
     value = str(value).strip()
+    # Rimuovi apici che circondano il valore (artefatto CSV per forzare testo)
+    if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
+        value = value[1:-1].strip()
     value = re.sub(r'\n+', ' ', value)
     value = re.sub(r'\s{2,}', ' ', value)
     value = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', value)

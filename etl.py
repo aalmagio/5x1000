@@ -210,6 +210,7 @@ def parse_intero(val) -> int | None:
 def normalize_cf(val) -> str:
     """
     Normalizza il codice fiscale:
+    - Rimuovi apici/virgolette (artefatto CSV per forzare testo)
     - Strip spazi e uppercase
     - Se numerico, padding a 11 cifre con zero a sinistra
     - Mantiene i CF alfanumerici (persone fisiche) com'è
@@ -217,6 +218,8 @@ def normalize_cf(val) -> str:
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return ""
     s = str(val).strip().upper()
+    # Rimuovi apici e virgolette (es. "'01234567890'" da CSV)
+    s = s.strip("'\"")
     # Rimuovi ".0" finale (da Excel che legge come float)
     s = re.sub(r"\.0+$", "", s)
     # Se è puramente numerico, padda a 11 cifre

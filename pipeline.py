@@ -270,6 +270,18 @@ def main():
         if resp and resp.lower() != "tutti":
             anni = resp
 
+    # Chiedi separatamente per i due tipi di download
+    skip_download_completo = args.skip_download
+    skip_download_categorie = args.skip_download
+
+    if sys.stdin.isatty() and not args.skip_download:
+        if "download" in steps:
+            if not ask_yes_no("\nScaricare le LISTE COMPLETE dall'AdE? (cinque_per_mille.py)"):
+                skip_download_completo = True
+        if "categorie" in steps:
+            if not ask_yes_no("Scaricare i dati PER CATEGORIA? (scarica_categorie.py)"):
+                skip_download_categorie = True
+
     # Se gsheets e' negli step ma non c'e' sheet_id, chiedi
     if "gsheets" in steps and not sheet_id and sys.stdin.isatty():
         sheet_id = input("\nID del Google Sheet (lascia vuoto per crearne uno nuovo): ").strip()
@@ -291,7 +303,10 @@ def main():
     logging.info(f"  Step:       {steps}")
     logging.info(f"  Anni:       {anni or 'tutti'}")
     logging.info(f"  Fonte:      {source}")
+    if "download" in steps:
+        logging.info(f"  Download:   {'solo estrazione' if skip_download_completo else 'download + estrazione'} (liste complete)")
     if "categorie" in steps:
+        logging.info(f"  Categorie:  {'solo estrazione' if skip_download_categorie else 'download + estrazione'} (per categoria)")
         logging.info(f"  Input cat:  {input_path}")
     if "report" in steps:
         if args.no_confronto:
@@ -312,9 +327,10 @@ def main():
         cmd = [PYTHON, "cinque_per_mille.py", "--source", source]
         if anni:
             cmd += ["--anni", anni]
-        if args.skip_download:
+        if skip_download_completo:
             cmd.append("--no-download")
-        ok, dur = run_step("Download + Estrazione (elenco complessivo)", cmd, root_dir)
+        step_label = "Estrazione (elenco complessivo)" if skip_download_completo else "Download + Estrazione (elenco complessivo)"
+        ok, dur = run_step(step_label, cmd, root_dir)
         results["download"] = (ok, dur)
 
     # STEP 2: Download categorie + estrazione
@@ -322,9 +338,10 @@ def main():
         cmd = [PYTHON, "scarica_categorie.py", "--input", input_path, "--source", source]
         if anni:
             cmd += ["--anni", anni]
-        if args.skip_download:
+        if skip_download_categorie:
             cmd.append("--no-download")
-        ok, dur = run_step("Download + Estrazione (per categoria)", cmd, root_dir)
+        step_label = "Estrazione (per categoria)" if skip_download_categorie else "Download + Estrazione (per categoria)"
+        ok, dur = run_step(step_label, cmd, root_dir)
         results["categorie"] = (ok, dur)
 
     # STEP 3: ETL
