@@ -974,19 +974,19 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Esempi:
-  %(prog)s --anno 2024                         # report con confronto 2023
-  %(prog)s --anno 2024 --no-confronto          # report senza YoY
-  %(prog)s --anno 2024 --anno-confronto 2022   # confronto con 2022
+  %(prog)s --anno 2024,2023                    # report 2024, confronto con 2023
+  %(prog)s --anno 2024                         # report 2024, confronto con 2023 (anno-1)
+  %(prog)s --anno 2024 --no-confronto          # report 2024 senza confronto YoY
   %(prog)s --anno 2024 --output report.xlsx    # output personalizzato
 """,
     )
     parser.add_argument(
-        "--anno", type=int, required=True,
-        help="Anno di riferimento per il report (es. 2024)",
+        "--anno", type=str, required=True,
+        help="Anno/i per il report: '2024' (confronto con anno-1) o '2024,2023' (confronto esplicito)",
     )
     parser.add_argument(
         "--anno-confronto", type=int, default=None,
-        help="Anno per il confronto YoY (default: anno-1)",
+        help="Anno per il confronto YoY (alternativa a '2024,2023')",
     )
     parser.add_argument(
         "--no-confronto", action="store_true",
@@ -1000,7 +1000,22 @@ Esempi:
         "--root", type=str, default=".",
         help="Cartella root del progetto",
     )
-    return parser.parse_args()
+
+    args = parser.parse_args()
+
+    # Parsing --anno: "2024" o "2024,2023"
+    parts = [p.strip() for p in args.anno.split(",") if p.strip()]
+    try:
+        args.anno = int(parts[0])
+    except ValueError:
+        parser.error(f"Anno non valido: '{parts[0]}'")
+    if len(parts) >= 2:
+        try:
+            args.anno_confronto = int(parts[1])
+        except ValueError:
+            parser.error(f"Anno confronto non valido: '{parts[1]}'")
+
+    return args
 
 
 # ============================================================================
