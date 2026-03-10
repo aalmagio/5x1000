@@ -270,6 +270,18 @@ def main():
         if resp and resp.lower() != "tutti":
             anni = resp
 
+    # Se report e' negli step, chiedi anno confronto
+    if "report" in steps and sys.stdin.isatty():
+        if not args.no_confronto and not args.anno_confronto:
+            resp = input("\nAnno confronto per il report YoY (es. 2023, o 'no' per saltare): ").strip()
+            if resp.lower() == "no":
+                args.no_confronto = True
+            elif resp:
+                try:
+                    args.anno_confronto = int(resp)
+                except ValueError:
+                    pass
+
     # Se gsheets e' negli step ma non c'e' sheet_id, chiedi
     if "gsheets" in steps and not sheet_id and sys.stdin.isatty():
         sheet_id = input("\nID del Google Sheet (lascia vuoto per crearne uno nuovo): ").strip()
@@ -293,6 +305,13 @@ def main():
     logging.info(f"  Fonte:      {source}")
     if "categorie" in steps:
         logging.info(f"  Input cat:  {input_path}")
+    if "report" in steps:
+        if args.anno_confronto:
+            logging.info(f"  Confronto:  {args.anno_confronto}")
+        elif args.no_confronto:
+            logging.info(f"  Confronto:  disabilitato")
+        else:
+            logging.info(f"  Confronto:  anno-1 (default)")
     if "gsheets" in steps:
         logging.info(f"  Sheet ID:   {sheet_id or '(nuovo)'}")
 
@@ -334,8 +353,15 @@ def main():
 
     # STEP 4: Report Excel
     if "report" in steps:
-        # Usa il primo anno dalla lista per il report
-        report_anno = anni.split(",")[0].strip() if anni else None
+        # Determina anno per il report
+        report_anno = None
+        if anni:
+            report_anno = anni.split(",")[0].strip()
+        elif sys.stdin.isatty():
+            resp = input("\nAnno per il report (es. 2024): ").strip()
+            if resp:
+                report_anno = resp
+
         if report_anno:
             cmd = [PYTHON, "report.py", "--anno", report_anno]
             if args.anno_confronto:
