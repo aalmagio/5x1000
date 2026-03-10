@@ -2,11 +2,12 @@
 """
 5 per Mille - Pipeline completa.
 
-Orchestratore che esegue in sequenza i 4 step della pipeline:
+Orchestratore che esegue in sequenza i 5 step della pipeline:
   1. cinque_per_mille.py  — download elenco complessivo + estrazione Excel
   2. scarica_categorie.py — download per categoria + estrazione Excel
   3. etl.py               — normalizzazione, merge RUNTS, export CSV/Excel
-  4. gsheets.py           — upload su Google Sheets
+  4. report.py            — report Excel multi-foglio (stile ASSIF/Bedogni)
+  5. gsheets.py           — upload su Google Sheets
 
 Le domande vengono poste all'inizio e i parametri passati ai singoli script.
 
@@ -31,7 +32,7 @@ import datetime
 # CONFIGURAZIONE
 # ============================================================================
 
-STEPS_ALL = ["download", "categorie", "etl", "gsheets"]
+STEPS_ALL = ["download", "categorie", "etl", "report", "gsheets"]
 
 DEFAULT_INPUT = "categorie.xlsx"
 
@@ -166,9 +167,9 @@ Esempi:
   %(prog)s --anni 2024                          # solo anno 2024
   %(prog)s --skip-download                      # salta download, solo estrazione + ETL + GSheets
   %(prog)s --skip-download --skip-gsheets       # solo estrazione + ETL
-  %(prog)s --only categorie,etl                 # solo step specifici
+  %(prog)s --only categorie,etl,report          # solo step specifici
 
-Step disponibili: download, categorie, etl, gsheets
+Step disponibili: download, categorie, etl, report, gsheets
 """,
     )
     parser.add_argument(
@@ -207,6 +208,18 @@ Step disponibili: download, categorie, etl, gsheets
         "--no-excel-etl", action="store_true",
         help="Non genera il file Excel in etl.py (solo CSV)",
     )
+    parser.add_argument(
+        "--anno-confronto", type=int, default=None,
+        help="Anno per il confronto YoY nel report (default: anno-1)",
+    )
+    parser.add_argument(
+        "--no-confronto", action="store_true",
+        help="Non calcolare il confronto YoY nel report",
+    )
+    parser.add_argument(
+        "--skip-report", action="store_true",
+        help="Salta la generazione del report Excel",
+    )
     return parser.parse_args()
 
 
@@ -240,6 +253,8 @@ def main():
             steps = [s for s in steps if s != "download"]
         if args.skip_gsheets:
             steps = [s for s in steps if s != "gsheets"]
+        if args.skip_report:
+            steps = [s for s in steps if s != "report"]
 
     logging.info(f"Step da eseguire: {steps}")
 
@@ -317,7 +332,22 @@ def main():
         ok, dur = run_step("ETL (normalizzazione + export)", cmd, root_dir)
         results["etl"] = (ok, dur)
 
-    # STEP 4: Google Sheets
+    # STEP 4: Report Excel
+    if "report" in steps:
+        # Usa il primo anno dalla lista per il report
+        report_anno = anni.split(",")[0].strip() if anni else None
+        if report_anno:
+            cmd = [PYTHON, "report.py", "--anno", report_anno]
+            if args.anno_confronto:
+                cmd += ["--anno-confronto", str(args.anno_confronto)]
+            elif args.no_confronto:
+                cmd.append("--no-confronto")
+            ok, dur = run_step("Report Excel (stile ASSIF)", cmd, root_dir)
+            results["report"] = (ok, dur)
+        else:
+            logging.warning("Report saltato: nessun anno specificato")
+
+    # STEP 5: Google Sheets
     if "gsheets" in steps:
         cmd = [PYTHON, "gsheets.py"]
         if sheet_id:
