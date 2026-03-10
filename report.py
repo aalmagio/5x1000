@@ -108,6 +108,14 @@ CATEGORIES = [
 # Categorie con redistribuzione <100 EUR
 CATS_WITH_REDIST = [c["key"] for c in CATEGORIES if c["has_redistribuzione"]]
 
+# Vecchi slug → slug canonico (per retrocompatibilita' con cartelle non rinominate)
+SLUG_ALIASES = {
+    "ETS_ONLUS": ["Enti_del_volontariato", "Volontariato"],
+    "ASD": ["Associazioni_Sportive_Dilettantistiche_ASD"],
+    "Beni_culturali": ["Beni_culturali_e_paesaggistici"],
+    "Aree_protette": ["Enti_gestori_delle_aree_protette"],
+}
+
 
 # ============================================================================
 # CARICAMENTO DATI
@@ -115,18 +123,27 @@ CATS_WITH_REDIST = [c["key"] for c in CATEGORIES if c["has_redistribuzione"]]
 
 def find_category_files(dati_dir, anno, cat):
     """
-    Cerca i file ammessi/esclusi per una categoria usando lo slug canonico.
+    Cerca i file ammessi/esclusi per una categoria.
+    Prova prima lo slug canonico, poi i vecchi nomi come fallback.
     Restituisce {"ammessi": path|None, "esclusi": path|None}.
     """
     result = {"ammessi": None, "esclusi": None}
-    slug = cat["slug"]
-    cat_dir = os.path.join(dati_dir, slug)
-    if not os.path.isdir(cat_dir):
-        return result
-    for tipo in ("ammessi", "esclusi"):
-        path = os.path.join(cat_dir, f"{anno}_{slug}_{tipo}.xlsx")
-        if os.path.isfile(path):
-            result[tipo] = path
+    canonical = cat["slug"]
+    slugs_to_try = [canonical] + SLUG_ALIASES.get(canonical, [])
+
+    for slug in slugs_to_try:
+        cat_dir = os.path.join(dati_dir, slug)
+        if not os.path.isdir(cat_dir):
+            continue
+        for tipo in ("ammessi", "esclusi"):
+            if result[tipo] is None:
+                path = os.path.join(cat_dir, f"{anno}_{slug}_{tipo}.xlsx")
+                if os.path.isfile(path):
+                    result[tipo] = path
+        # Se trovati entrambi, esci
+        if result["ammessi"] and result["esclusi"]:
+            break
+
     return result
 
 
