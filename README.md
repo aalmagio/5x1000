@@ -14,6 +14,7 @@ Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i
 | `cinque_per_mille.py` | Scarica i file PDF/CSV dall'elenco complessivo AdE e li converte in Excel per anno |
 | `scarica_categorie.py` | Scarica e converte i dati **per categoria** (ammessi/esclusi separati) |
 | `etl.py` | Normalizza tutti i dati annuali in uno schema unificato e fa il join con il RUNTS |
+| `report.py` | Genera un report Excel multi-foglio stile ASSIF/Bedogni con classifiche, confronto YoY e aggregazioni regionali |
 | `gsheets.py` | Carica il dataset normalizzato su Google Sheets per Looker Studio |
 
 ---
@@ -98,11 +99,14 @@ python pipeline.py --sheet-id 1ABC... --anni 2024
 | `--skip-download` | | Salta il download in tutti gli script |
 | `--skip-gsheets` | | Salta l'upload su Google Sheets |
 | `--sheet-id` | da config | ID del Google Sheet |
-| `--only` | tutti | Step specifici: `download,categorie,etl,gsheets` |
+| `--only` | tutti | Step specifici: `download,categorie,etl,report,gsheets` |
 | `--no-runts` | | Salta il merge RUNTS in etl.py |
 | `--no-excel-etl` | | Non genera il file Excel in etl.py (solo CSV) |
+| `--anno-confronto` | anno-1 | Anno per il confronto YoY nel report |
+| `--no-confronto` | | Non calcolare il confronto anno precedente nel report |
+| `--skip-report` | | Salta la generazione del report |
 
-La pipeline esegue in ordine: **download** → **categorie** → **etl** → **gsheets**.
+La pipeline esegue in ordine: **download** → **categorie** → **etl** → **report** → **gsheets**.
 I file estratti vengono copiati automaticamente nella cartella `Dati/`.
 
 ### 1. Scaricare i dati dall'Agenzia delle Entrate
@@ -179,7 +183,40 @@ python etl.py
 
 Output: `Dati/enti_5x1000_norm.csv` (~210 MB)
 
-### 3. Caricare su Google Sheets (per Looker Studio)
+### 3. Generare il report Excel (stile ASSIF/Bedogni)
+
+```bash
+# Report anno 2024 con confronto automatico 2023
+python report.py --anno 2024
+
+# Senza confronto anno precedente
+python report.py --anno 2024 --no-confronto
+
+# Confronto con un anno specifico
+python report.py --anno 2024 --anno-confronto 2022
+
+# Output personalizzato
+python report.py --anno 2024 --output mio_report.xlsx
+```
+
+Combina i dati delle 7 categorie (ammessi + esclusi) in un workbook con 10 fogli:
+
+| Foglio | Contenuto |
+|---|---|
+| **COMPLESSIVO** | Tutte le entita' (~96K righe) con breakdown per categoria, totali, classifiche e confronto YoY |
+| **Volontariato** | Filtrato per ETS/ONLUS con classifica interna |
+| **Sport** | Filtrato per ASD |
+| **Scienza** | Ricerca scientifica |
+| **Sanita** | Ricerca sanitaria |
+| **Comuni** | Comuni |
+| **Cultura** | Beni culturali |
+| **Aree_Protette** | Enti gestori aree protette |
+| **Grafici** | Aggregazione regionale (enti, scelte, importo per regione x categoria) |
+| **Licenza** | Attribuzione dati AdE |
+
+Output: `Dati/report_{anno}.xlsx`
+
+### 4. Caricare su Google Sheets (per Looker Studio)
 
 Prima di tutto, [crea le credenziali GCP](#setup-google-sheets):
 
@@ -211,6 +248,7 @@ Priorita' dei valori: **flag CLI > config.yaml > default nel codice**.
 ├── cinque_per_mille.py   # Download + conversione PDF/CSV → Excel (elenco complessivo)
 ├── scarica_categorie.py  # Download + conversione per categoria (ammessi/esclusi)
 ├── etl.py                # ETL: normalizzazione + merge RUNTS
+├── report.py             # Report Excel multi-foglio (stile ASSIF/Bedogni)
 ├── gsheets.py            # Export su Google Sheets
 ├── config.yaml           # Configurazione esterna (modificabile senza codice)
 ├── categorie.xlsx        # Elenco link alle pagine delle categorie
@@ -225,7 +263,8 @@ Priorita' dei valori: **flag CLI > config.yaml > default nel codice**.
 │   │   └── 2024_ASD_ammessi.xlsx
 │   ├── ...                                  # Altre categorie
 │   ├── enti_5x1000_norm.csv                 # ← output principale di etl.py
-│   └── enti_5x1000_norm.xlsx
+│   ├── enti_5x1000_norm.xlsx
+│   └── report_2024.xlsx                     # ← output di report.py
 │
 ├── Runts/                # File RUNTS (da scaricare manualmente, non in repo)
 │   └── *.xlsx
