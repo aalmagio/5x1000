@@ -455,6 +455,32 @@ def main():
     logging.info(f"Log completo: {log_file}")
     logging.info("=" * 60)
 
+    # ---- Aggiornamento DB sito ----
+    try:
+        from db_updater import aggiorna_db_sito
+        import pathlib
+        _cfg = _load_pipeline_config(root_dir)
+        _dati_dir = pathlib.Path(_cfg.get("dati_dir", os.path.join(root_dir, "Dati")))
+        _csv_path = _dati_dir / "enti_5x1000_norm.csv"
+        _anni_list = [int(a) for a in anni.split(",") if a.strip()] if anni else []
+        _db_status = "ok" if all_ok else "parziale"
+        _note = f"Errori in: {failed}" if not all_ok else ""
+        ok_db = aggiorna_db_sito(
+            anni_processati=_anni_list,
+            steps_eseguiti=steps,
+            csv_path=_csv_path,
+            dati_dir=_dati_dir,
+            status=_db_status,
+            note=_note,
+            t_inizio=total_start,
+        )
+        if ok_db:
+            logging.info("DB sito aggiornato con successo.")
+        else:
+            logging.info("Aggiornamento DB sito saltato (non configurato o errore).")
+    except Exception as _e:
+        logging.warning(f"Aggiornamento DB sito non riuscito: {_e}")
+
     sys.exit(0 if all_ok else 1)
 
 
