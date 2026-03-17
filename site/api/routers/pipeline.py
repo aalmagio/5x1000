@@ -54,7 +54,7 @@ class PipelineRunRequest(BaseModel):
     anni: Optional[str] = None          # es. "2023,2024"
     steps: Optional[List[str]] = None   # es. ["etl","gsheets"]
     skip_download: bool = False
-    skip_gsheets: bool = False
+    skip_gsheets: bool = True   # Google Sheets è opt-in: passa False per abilitare
     skip_report: bool = False
     no_runts: bool = False
     source: str = "csv"                 # "csv" | "pdf"

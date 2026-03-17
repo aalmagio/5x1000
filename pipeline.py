@@ -119,37 +119,56 @@ def ask_choice(prompt, choices, default=None):
 # ESECUZIONE STEP
 # ============================================================================
 
-def run_step(name, cmd, root_dir):
+_DEFAULT_STEP_TIMEOUT = 3600  # fallback se non configurato
+
+
+def run_step(name, cmd, root_dir, timeout=None):
     """
     Esegue un comando subprocess per uno step della pipeline.
     Restituisce (success: bool, duration_secs: float).
+    Il timeout (secondi) è configurabile; il processo viene ucciso alla scadenza.
     """
+    if timeout is None:
+        timeout = _DEFAULT_STEP_TIMEOUT
+
     logging.info(f"\n{'='*60}")
     logging.info(f"STEP: {name}")
     logging.info(f"Comando: {' '.join(cmd)}")
+    logging.info(f"Timeout: {timeout}s")
     logging.info(f"{'='*60}")
 
     start = time.time()
+    proc = None
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=root_dir,
-            timeout=3600,  # 1 ora max per step
-        )
+        proc = subprocess.Popen(cmd, cwd=root_dir)
+        proc.wait(timeout=timeout)
         elapsed = time.time() - start
-        if result.returncode == 0:
+        if proc.returncode == 0:
             logging.info(f"[OK] {name} completato in {elapsed:.0f}s")
             return True, elapsed
         else:
-            logging.error(f"[ERRORE] {name} fallito (exit code {result.returncode})")
+            logging.error(f"[ERRORE] {name} fallito (exit code {proc.returncode})")
             return False, elapsed
     except subprocess.TimeoutExpired:
         elapsed = time.time() - start
-        logging.error(f"[TIMEOUT] {name} interrotto dopo {elapsed:.0f}s")
+        logging.error(f"[TIMEOUT] {name} interrotto dopo {elapsed:.0f}s (limite: {timeout}s)")
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait()
+                logging.info(f"Processo {proc.pid} terminato forzatamente.")
+            except Exception as kill_exc:
+                logging.warning(f"Impossibile terminare il processo: {kill_exc}")
         return False, elapsed
     except Exception as e:
         elapsed = time.time() - start
         logging.error(f"[ERRORE] {name}: {e}")
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait()
+            except Exception:
+                pass
         return False, elapsed
 
 
@@ -235,6 +254,11 @@ def main():
 
     # Carica config pipeline
     pcfg = _load_pipeline_config(root_dir)
+
+    # Timeout per step (secondi) — da config.yaml o default
+    _step_timeouts_cfg = pcfg.get("step_timeouts", {})
+    def _timeout(step_name):
+        return int(_step_timeouts_cfg.get(step_name, _DEFAULT_STEP_TIMEOUT))
 
     print("\n" + "=" * 60)
     print("  5 PER MILLE - PIPELINE COMPLETA")
@@ -382,7 +406,7 @@ def main():
         if skip_download_completo:
             cmd.append("--no-download")
         step_label = "Estrazione (elenco complessivo)" if skip_download_completo else "Download + Estrazione (elenco complessivo)"
-        ok, dur = run_step(step_label, cmd, root_dir)
+        ok, dur = run_step(step_label, cmd, root_dir, timeout=_timeout("download"))
         results["download"] = (ok, dur)
 
     # STEP 2: Download categorie + estrazione
@@ -393,7 +417,7 @@ def main():
         if skip_download_categorie:
             cmd.append("--no-download")
         step_label = "Estrazione (per categoria)" if skip_download_categorie else "Download + Estrazione (per categoria)"
-        ok, dur = run_step(step_label, cmd, root_dir)
+        ok, dur = run_step(step_label, cmd, root_dir, timeout=_timeout("categorie"))
         results["categorie"] = (ok, dur)
 
     # STEP 3: ETL
@@ -405,7 +429,7 @@ def main():
             cmd.append("--no-runts")
         if args.no_excel_etl:
             cmd.append("--no-excel")
-        ok, dur = run_step("ETL (normalizzazione + export)", cmd, root_dir)
+        ok, dur = run_step("ETL (normalizzazione + export)", cmd, root_dir, timeout=_timeout("etl"))
         results["etl"] = (ok, dur)
 
     # STEP 4: Report Excel
@@ -414,7 +438,7 @@ def main():
             cmd = [PYTHON, "report.py", "--anno", report_anni]
             if args.no_confronto:
                 cmd.append("--no-confronto")
-            ok, dur = run_step("Report Excel (stile ASSIF)", cmd, root_dir)
+            ok, dur = run_step("Report Excel (stile ASSIF)", cmd, root_dir, timeout=_timeout("report"))
             results["report"] = (ok, dur)
         else:
             logging.warning("Report saltato: nessun anno specificato")
@@ -426,7 +450,7 @@ def main():
             cmd += ["--sheet-id", sheet_id]
         if anni:
             cmd += ["--anni", anni]
-        ok, dur = run_step("Upload Google Sheets", cmd, root_dir)
+        ok, dur = run_step("Upload Google Sheets", cmd, root_dir, timeout=_timeout("gsheets"))
         results["gsheets"] = (ok, dur)
 
     # ---- Riepilogo finale ----
