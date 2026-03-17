@@ -58,6 +58,7 @@ class PipelineRunRequest(BaseModel):
     skip_report: bool = False
     no_runts: bool = False
     source: str = "csv"                 # "csv" | "pdf"
+    smart: bool = True                  # analizza file esistenti e salta step già aggiornati
 
 
 class JobSummary(BaseModel):
@@ -166,6 +167,8 @@ def run_pipeline(
         cmd.append("--no-runts")
     if body.source and body.source != "csv":
         cmd += ["--source", body.source]
+    if body.smart:
+        cmd.append("--smart")
 
     job_id = str(uuid.uuid4())
     started = datetime.now(timezone.utc).isoformat()
@@ -238,6 +241,32 @@ def delete_job(
         if job["status"] == "running":
             raise HTTPException(status_code=409, detail="Impossibile rimuovere un job in esecuzione.")
         del _jobs[job_id]
+
+
+@router.get(
+    "/analyze",
+    summary="Analisi file esistenti — cosa manca o è obsoleto",
+)
+def analyze_pipeline(
+    anni: Optional[str] = None,
+    x_pipeline_key: Optional[str] = Header(default=None, alias="X-Pipeline-Key"),
+):
+    """
+    Scansiona la cartella Dati/ e restituisce per ogni step/anno se i file sono
+    presenti e aggiornati, mancanti, o obsoleti (stale).
+
+    - **anni**: anni da verificare, separati da virgola (es. `2023,2024`).
+      Se omesso, controlla tutti gli anni già presenti su disco.
+    """
+    _check_api_key(x_pipeline_key)
+    try:
+        import sys as _sys
+        _sys.path.insert(0, settings.pipeline_root_dir)
+        from pipeline_checker import full_analysis
+        anni_list = [int(a.strip()) for a in anni.split(",") if a.strip()] if anni else None
+        return full_analysis(settings.pipeline_root_dir, anni_list)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Analisi fallita: {exc}")
 
 
 # ---------------------------------------------------------------------------

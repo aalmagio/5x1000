@@ -239,6 +239,14 @@ Step disponibili: download, categorie, etl, report, gsheets
         "--skip-report", action="store_true",
         help="Salta la generazione del report Excel",
     )
+    parser.add_argument(
+        "--smart", action="store_true",
+        help=(
+            "Analizza i file già presenti e salta automaticamente gli step/anni "
+            "già aggiornati. Download e categorie vengono eseguiti solo per gli "
+            "anni mancanti; ETL solo se l'output è obsoleto."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -369,6 +377,51 @@ def main():
             steps.remove("categorie")
             logging.warning("Step 'categorie' rimosso dalla pipeline")
 
+    # ---- Modalità smart: filtra anni/step già aggiornati ----
+    smart_anni_download  = None   # None = usa anni originali
+    smart_anni_categorie = None
+    _skip_etl_smart      = False
+
+    if args.smart:
+        try:
+            from pipeline_checker import full_analysis
+            anni_list = [int(a.strip()) for a in anni.split(",") if a.strip()] if anni else None
+            check = full_analysis(root_dir, anni_list)
+
+            logging.info("\n[SMART] Analisi file esistenti:")
+            logging.info(f"  Download:   {check['riepilogo']['download']}")
+            logging.info(f"  Categorie:  {check['riepilogo']['categorie']}")
+            logging.info(f"  ETL:        {check['riepilogo']['etl']}")
+
+            # Download: scarica solo gli anni mancanti
+            if "download" in steps:
+                mancanti = check["anni_mancanti_download"]
+                if not mancanti:
+                    logging.info("[SMART] Step 'download' saltato: tutti gli anni già presenti.")
+                    steps = [s for s in steps if s != "download"]
+                else:
+                    smart_anni_download = ",".join(str(a) for a in mancanti)
+                    logging.info(f"[SMART] Download solo per anni mancanti: {mancanti}")
+
+            # Categorie: elabora solo gli anni con file mancanti
+            if "categorie" in steps:
+                mancanti_cat = check["anni_mancanti_categorie"]
+                if not mancanti_cat:
+                    logging.info("[SMART] Step 'categorie' saltato: tutti gli anni già presenti.")
+                    steps = [s for s in steps if s != "categorie"]
+                else:
+                    smart_anni_categorie = ",".join(str(a) for a in mancanti_cat)
+                    logging.info(f"[SMART] Categorie solo per anni mancanti: {mancanti_cat}")
+
+            # ETL: salta se CSV è aggiornato e non ci sono nuovi input
+            if "etl" in steps and check["etl"]["status"] == "ok":
+                if not check["anni_mancanti_download"] and not check["anni_mancanti_categorie"]:
+                    logging.info("[SMART] Step 'etl' saltato: CSV normalizzato aggiornato.")
+                    steps = [s for s in steps if s != "etl"]
+
+        except Exception as _e:
+            logging.warning(f"[SMART] Analisi non riuscita ({_e}), eseguo tutto normalmente.")
+
     # ---- Riepilogo ----
     logging.info(f"\nConfigurazione pipeline:")
     logging.info(f"  Root:       {root_dir}")
@@ -401,8 +454,9 @@ def main():
     # STEP 1: Download elenco complessivo + estrazione
     if "download" in steps:
         cmd = [PYTHON, "cinque_per_mille.py", "--source", source]
-        if anni:
-            cmd += ["--anni", anni]
+        _anni_dl = smart_anni_download if smart_anni_download is not None else anni
+        if _anni_dl:
+            cmd += ["--anni", _anni_dl]
         if skip_download_completo:
             cmd.append("--no-download")
         step_label = "Estrazione (elenco complessivo)" if skip_download_completo else "Download + Estrazione (elenco complessivo)"
@@ -412,8 +466,9 @@ def main():
     # STEP 2: Download categorie + estrazione
     if "categorie" in steps:
         cmd = [PYTHON, "scarica_categorie.py", "--input", input_path, "--source", source]
-        if anni:
-            cmd += ["--anni", anni]
+        _anni_cat = smart_anni_categorie if smart_anni_categorie is not None else anni
+        if _anni_cat:
+            cmd += ["--anni", _anni_cat]
         if skip_download_categorie:
             cmd.append("--no-download")
         step_label = "Estrazione (per categoria)" if skip_download_categorie else "Download + Estrazione (per categoria)"
