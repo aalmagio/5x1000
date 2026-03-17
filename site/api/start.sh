@@ -13,7 +13,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$SCRIPT_DIR/venv"
+# Plesk crea il venv nella root del dominio, un livello sopra site/api/
+VENV_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")/venv"
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_FILE="$LOG_DIR/gunicorn.pid"
 LOG_FILE="$LOG_DIR/gunicorn.log"
