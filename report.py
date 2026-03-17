@@ -428,42 +428,6 @@ def compute_regional_stats(entities):
     return dict(sorted(regions.items()))
 
 
-def find_sotto_soglia(entities):
-    """
-    Identifica entita' ammesse con scelte espresse ma totale erogabile nullo
-    ('sotto soglia' < 100 EUR, importo redistribuito).
-    Restituisce lista di (entity, cat_key, cat_data) tuples, ordinate per
-    categoria e poi per n_scelte decrescente.
-    """
-    results = []
-    for ent in entities.values():
-        for cat_key, cat_data in ent["categories"].items():
-            if (cat_data["status"] == "Ammesso"
-                    and cat_data["n_scelte"] > 0
-                    and cat_data["totale_erogabile"] == 0):
-                results.append((ent, cat_key, cat_data))
-
-    # Ordina per categoria, poi per n_scelte decrescente
-    results.sort(key=lambda x: (x[1], -x[2]["n_scelte"]))
-    return results
-
-
-def find_cross_status(entities):
-    """
-    Trova entita' che risultano Ammesse in almeno una categoria
-    e contemporaneamente Escluse in almeno un'altra.
-    Restituisce lista di entity dicts, ordinata per denominazione.
-    """
-    results = []
-    for ent in entities.values():
-        statuses = {cat_data["status"] for cat_data in ent["categories"].values()}
-        if "Ammesso" in statuses and "Escluso" in statuses:
-            results.append(ent)
-
-    results.sort(key=lambda e: e["denominazione"].upper())
-    return results
-
-
 # ============================================================================
 # FORMATTAZIONE EXCEL
 # ============================================================================
@@ -1000,138 +964,6 @@ def write_licenza(wb, anno, fmts):
     logging.info(f"  Licenza: OK")
 
 
-def write_sotto_soglia(wb, entities, anno, fmts):
-    """Scrive il foglio degli enti ammessi sotto soglia (<100 EUR, redistribuito)."""
-    ws = wb.add_worksheet("Sotto_Soglia")
-
-    sotto = find_sotto_soglia(entities)
-    cat_display = {c["key"]: c["display_short"] for c in CATEGORIES}
-
-    # Titolo e sottotitolo
-    ws.write(0, 0, f"Enti sotto soglia - Anno Finanziario {anno}", fmts["title"])
-    ws.write(1, 0,
-        "Enti ammessi con scelte espresse ma totale erogabile = 0 "
-        "(importo < 100 EUR, redistribuito)", fmts["subtitle"])
-
-    # Conteggi per categoria
-    from collections import Counter
-    cat_counts = Counter(cat_key for _, cat_key, _ in sotto)
-    parts = [f"{cat_display.get(k, k)}: {v}" for k, v in
-             sorted(cat_counts.items(), key=lambda x: -x[1])]
-    ws.write(2, 0, f"Totale: {len(sotto)} | " + " | ".join(parts),
-             fmts["subtitle"])
-
-    # Definizione colonne
-    col_defs = [
-        {"name": "CODICE FISCALE", "width": 16, "type": "text"},
-        {"name": "DENOMINAZIONE", "width": 40, "type": "text"},
-        {"name": "COMUNE", "width": 18, "type": "text"},
-        {"name": "PR", "width": 5, "type": "text"},
-        {"name": "REGIONE", "width": 16, "type": "text"},
-        {"name": "CATEGORIA", "width": 18, "type": "text"},
-        {"name": "NUMERO\nSCELTE", "width": 12, "type": "int"},
-        {"name": "IMPORTO\nESPRESSE", "width": 14, "type": "euro"},
-        {"name": "IMPORTO\nGENERICHE", "width": 14, "type": "euro"},
-        {"name": "TOTALE\nEROGABILE", "width": 14, "type": "euro"},
-    ]
-
-    # Header
-    header_row = 4
-    for ci, col in enumerate(col_defs):
-        ws.write(header_row, ci, col["name"], fmts["header"])
-        ws.set_column(ci, ci, col["width"])
-
-    # Dati
-    data_start = header_row + 1
-    for ri, (ent, cat_key, cat_data) in enumerate(sotto):
-        row = data_start + ri
-        is_alt = ri % 2 == 1
-        vals = [
-            ent["cf"],
-            ent["denominazione"],
-            ent["comune"],
-            ent["pr"],
-            ent["regione"],
-            cat_display.get(cat_key, cat_key),
-            cat_data["n_scelte"],
-            cat_data["importo_espresse"],
-            cat_data["importo_generiche"],
-            cat_data["totale_erogabile"],
-        ]
-        for ci, val in enumerate(vals):
-            _write_cell(ws, row, ci, val, col_defs[ci], fmts, is_alt)
-
-    # Freeze panes e autofilter
-    ws.freeze_panes(data_start, 2)
-    if sotto:
-        ws.autofilter(header_row, 0, header_row + len(sotto), len(col_defs) - 1)
-
-    logging.info(f"  Sotto_Soglia: {len(sotto)} righe")
-
-
-def write_status_incrociato(wb, entities, anno, fmts):
-    """Scrive il foglio degli enti con status incrociato tra categorie."""
-    ws = wb.add_worksheet("Status_Incrociato")
-
-    cross = find_cross_status(entities)
-    cat_display = {c["key"]: c["display_short"] for c in CATEGORIES}
-
-    # Titolo e sottotitolo
-    ws.write(0, 0, f"Status incrociato - Anno Finanziario {anno}", fmts["title"])
-    ws.write(1, 0,
-        "Enti ammessi in almeno una categoria ed esclusi in un'altra",
-        fmts["subtitle"])
-    ws.write(2, 0, f"Totale: {len(cross)} enti", fmts["subtitle"])
-
-    # Colonne: anagrafica + 7 categorie
-    col_defs = [
-        {"name": "CODICE FISCALE", "width": 16, "type": "text"},
-        {"name": "DENOMINAZIONE", "width": 40, "type": "text"},
-        {"name": "COMUNE", "width": 18, "type": "text"},
-        {"name": "PR", "width": 5, "type": "text"},
-        {"name": "REGIONE", "width": 16, "type": "text"},
-    ]
-    for cat in CATEGORIES:
-        col_defs.append({
-            "name": cat["display_short"],
-            "width": 14,
-            "type": "status",
-            "cat_key": cat["key"],
-        })
-
-    # Header
-    header_row = 4
-    for ci, col in enumerate(col_defs):
-        ws.write(header_row, ci, col["name"], fmts["header"])
-        ws.set_column(ci, ci, col["width"])
-
-    # Dati
-    data_start = header_row + 1
-    for ri, ent in enumerate(cross):
-        row = data_start + ri
-        is_alt = ri % 2 == 1
-
-        # Anagrafica
-        anag = [ent["cf"], ent["denominazione"], ent["comune"],
-                ent["pr"], ent["regione"]]
-        for ci, val in enumerate(anag):
-            _write_cell(ws, row, ci, val, col_defs[ci], fmts, is_alt)
-
-        # Status per categoria
-        for ci_off, cat in enumerate(CATEGORIES):
-            ci = 5 + ci_off
-            cat_data = ent["categories"].get(cat["key"])
-            val = cat_data["status"] if cat_data else "-"
-            _write_cell(ws, row, ci, val, col_defs[ci], fmts, is_alt)
-
-    # Freeze panes e autofilter
-    ws.freeze_panes(data_start, 2)
-    if cross:
-        ws.autofilter(header_row, 0, header_row + len(cross), len(col_defs) - 1)
-
-    logging.info(f"  Status_Incrociato: {len(cross)} righe")
-
-
 # ============================================================================
 # CLI
 # ============================================================================
@@ -1251,12 +1083,6 @@ def main():
 
     # Grafici
     write_grafici(wb, regional, anno, fmts)
-
-    # Sotto soglia
-    write_sotto_soglia(wb, entities, anno, fmts)
-
-    # Status incrociato
-    write_status_incrociato(wb, entities, anno, fmts)
 
     # Licenza
     write_licenza(wb, anno, fmts)
