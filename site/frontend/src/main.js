@@ -10,6 +10,7 @@ const Download    = () => import('./pages/Download.vue')
 const ApiDocs     = () => import('./pages/ApiDocs.vue')
 const About       = () => import('./pages/About.vue')
 const EnteDetail  = () => import('./pages/EnteDetail.vue')
+const Pipeline    = () => import('./pages/Pipeline.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -20,6 +21,7 @@ const router = createRouter({
     { path: '/api',          component: ApiDocs,    name: 'api' },
     { path: '/about',        component: About,      name: 'about' },
     { path: '/ente/:cf',     component: EnteDetail, name: 'ente' },
+    { path: '/pipeline',     component: Pipeline,   name: 'pipeline' },
   ],
   scrollBehavior: () => ({ top: 0 }),
 })

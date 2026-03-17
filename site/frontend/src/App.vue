@@ -46,10 +46,11 @@
 import { RouterLink, RouterView } from 'vue-router'
 
 const navLinks = [
-  { to: '/',         label: 'Home' },
-  { to: '/dati',     label: 'Esplora' },
-  { to: '/download', label: 'Download' },
-  { to: '/api',      label: 'API' },
-  { to: '/about',    label: 'Info' },
+  { to: '/',          label: 'Home' },
+  { to: '/dati',      label: 'Esplora' },
+  { to: '/download',  label: 'Download' },
+  { to: '/api',       label: 'API' },
+  { to: '/about',     label: 'Info' },
+  { to: '/pipeline',  label: '⚙ Pipeline' },
 ]
 </script>
