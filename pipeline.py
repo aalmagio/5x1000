@@ -247,6 +247,16 @@ Step disponibili: download, categorie, etl, report, gsheets
             "anni mancanti; ETL solo se l'output è obsoleto."
         ),
     )
+    parser.add_argument(
+        "--anni-download", type=str, default=None,
+        help="Override esplicito degli anni da scaricare (liste complete). "
+             "Se omesso, usa --anni (o smart mode se attivo).",
+    )
+    parser.add_argument(
+        "--anni-categorie", type=str, default=None,
+        help="Override esplicito degli anni da scaricare (per categoria). "
+             "Se omesso, usa --anni (o smart mode se attivo).",
+    )
     return parser.parse_args()
 
 
@@ -377,9 +387,9 @@ def main():
             steps.remove("categorie")
             logging.warning("Step 'categorie' rimosso dalla pipeline")
 
-    # ---- Modalità smart: filtra anni/step già aggiornati ----
-    smart_anni_download  = None   # None = usa anni originali
-    smart_anni_categorie = None
+    # ---- Override espliciti anni per step specifici ----
+    smart_anni_download  = args.anni_download   # None = usa anni originali / smart
+    smart_anni_categorie = args.anni_categorie
     _skip_etl_smart      = False
 
     if args.smart:
@@ -393,8 +403,8 @@ def main():
             logging.info(f"  Categorie:  {check['riepilogo']['categorie']}")
             logging.info(f"  ETL:        {check['riepilogo']['etl']}")
 
-            # Download: scarica solo gli anni mancanti
-            if "download" in steps:
+            # Download: scarica solo gli anni mancanti (solo se non c'è override esplicito)
+            if "download" in steps and smart_anni_download is None:
                 mancanti = check["anni_mancanti_download"]
                 if not mancanti:
                     logging.info("[SMART] Step 'download' saltato: tutti gli anni già presenti.")
@@ -403,8 +413,8 @@ def main():
                     smart_anni_download = ",".join(str(a) for a in mancanti)
                     logging.info(f"[SMART] Download solo per anni mancanti: {mancanti}")
 
-            # Categorie: elabora solo gli anni con file mancanti
-            if "categorie" in steps:
+            # Categorie: elabora solo gli anni con file mancanti (solo se non c'è override esplicito)
+            if "categorie" in steps and smart_anni_categorie is None:
                 mancanti_cat = check["anni_mancanti_categorie"]
                 if not mancanti_cat:
                     logging.info("[SMART] Step 'categorie' saltato: tutti gli anni già presenti.")

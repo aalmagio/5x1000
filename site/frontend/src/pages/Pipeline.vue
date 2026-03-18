@@ -135,28 +135,27 @@
         <h2>Configurazione</h2>
       </div>
 
-      <!-- Selezione anni -->
+      <!-- ① Anni target (ETL / report) -->
       <div class="mb-6">
-        <div class="flex items-center justify-between mb-3">
-          <label class="text-sm font-semibold text-gray-700">Anni da elaborare</label>
+        <div class="flex items-center justify-between mb-1">
+          <label class="text-sm font-semibold text-gray-700">Anni target</label>
           <div class="flex gap-3 text-xs">
-            <button @click="selectMissing" class="text-brand-600 hover:text-brand-700 font-medium">Solo mancanti</button>
-            <button @click="selectAll" class="text-brand-600 hover:text-brand-700 font-medium">Tutti</button>
+            <button @click="selectMissing" class="text-brand-600 hover:text-brand-700 font-medium">Mancanti</button>
+            <button @click="selectAll"     class="text-brand-600 hover:text-brand-700 font-medium">Tutti</button>
             <button @click="selectedAnni = []" class="text-gray-400 hover:text-gray-600">Nessuno</button>
           </div>
         </div>
+        <p class="text-xs text-gray-400 mb-3">
+          Anni inclusi nel ciclo ETL e report.
+          Download e categorie usano una selezione separata (configurabile in ogni step qui sotto).
+        </p>
         <div class="flex flex-wrap gap-2">
           <label
             v-for="(stato, anno) in analysis.download"
             :key="anno"
             class="cursor-pointer select-none"
           >
-            <input
-              type="checkbox"
-              :value="parseInt(anno)"
-              v-model="selectedAnni"
-              class="sr-only peer"
-            />
+            <input type="checkbox" :value="parseInt(anno)" v-model="selectedAnni" class="sr-only peer" />
             <span
               class="inline-block px-3 py-1.5 rounded-lg text-xs font-mono font-semibold border transition-all
                      peer-checked:bg-brand-600 peer-checked:text-white peer-checked:border-brand-600
@@ -164,41 +163,142 @@
               :class="stato.status === 'ok'
                 ? 'bg-green-50 border-green-200 text-green-700'
                 : 'bg-red-50 border-red-200 text-red-600'"
-            >
-              {{ anno }}
-            </span>
+              :title="stato.status === 'ok' ? `Già presente (${stato.age_days} gg fa)` : 'File mancante'"
+            >{{ anno }}</span>
           </label>
+        </div>
+        <div class="flex gap-5 mt-2 text-xs text-gray-400">
+          <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-green-50 border border-green-300 inline-block"></span>file presente</span>
+          <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-red-50 border border-red-300 inline-block"></span>mancante</span>
+          <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm bg-brand-600 inline-block"></span>selezionato</span>
         </div>
         <p v-if="selectedAnni.length === 0" class="mt-2 text-xs text-amber-600 flex items-center gap-1">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
           </svg>
-          Seleziona almeno un anno per avviare la pipeline.
+          Seleziona almeno un anno target per avviare la pipeline.
         </p>
       </div>
 
-      <!-- Step da eseguire -->
+      <!-- ② Step da eseguire -->
       <div class="mb-6">
         <label class="text-sm font-semibold text-gray-700 block mb-3">Step da eseguire</label>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <label
+        <div class="space-y-2">
+          <div
             v-for="s in availableSteps"
             :key="s.id"
-            class="flex items-center gap-3 p-3 rounded-lg border cursor-pointer select-none transition-all"
-            :class="selectedSteps.includes(s.id)
-              ? 'bg-brand-50 border-brand-300'
-              : 'bg-gray-50 border-gray-200 hover:border-gray-300'"
+            class="rounded-lg border transition-all overflow-hidden"
+            :class="selectedSteps.includes(s.id) ? 'border-brand-300' : 'border-gray-200'"
           >
-            <input
-              type="checkbox"
-              :value="s.id"
-              v-model="selectedSteps"
-              :disabled="s.required"
-              class="rounded border-gray-300 accent-brand-600"
-            />
-            <span class="text-sm text-gray-800 font-medium flex-1">{{ s.label }}</span>
-            <span v-if="s.badge" class="badge bg-gray-100 text-gray-500 text-xs">{{ s.badge }}</span>
-          </label>
+            <!-- Header step -->
+            <label
+              class="flex items-center gap-3 p-3 cursor-pointer select-none"
+              :class="selectedSteps.includes(s.id) ? 'bg-brand-50' : 'bg-gray-50 hover:bg-gray-100'"
+            >
+              <input
+                type="checkbox"
+                :value="s.id"
+                v-model="selectedSteps"
+                class="rounded border-gray-300 accent-brand-600"
+              />
+              <span class="flex-1">
+                <span class="text-sm text-gray-800 font-semibold">{{ s.label }}</span>
+                <span class="block text-xs text-gray-400 mt-0.5">{{ s.desc }}</span>
+              </span>
+              <span v-if="s.badge" class="badge bg-gray-100 text-gray-500 text-xs shrink-0">{{ s.badge }}</span>
+            </label>
+
+            <!-- Sub-config: anni da scaricare (liste complete) -->
+            <div
+              v-if="s.id === 'download' && selectedSteps.includes('download')"
+              class="border-t border-brand-100 bg-white px-4 py-3"
+            >
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs font-semibold text-gray-600">Anni da scaricare dall'AdE</p>
+                <div class="flex gap-2 text-xs">
+                  <button @click="dlSelectMissing"    class="text-brand-600 hover:text-brand-700 font-medium">Mancanti</button>
+                  <button @click="dlSelectLikeTarget" class="text-brand-600 hover:text-brand-700 font-medium">Come target</button>
+                  <button @click="dlSelectAll"        class="text-brand-600 hover:text-brand-700 font-medium">Tutti</button>
+                  <button @click="selectedAnniDl = []" class="text-gray-400 hover:text-gray-600">Nessuno</button>
+                </div>
+              </div>
+              <p class="text-xs text-gray-400 mb-2">
+                Solo questi anni verranno scaricati. Lascia vuoto per affidarsi alla modalità smart
+                (scarica automaticamente solo gli anni mancanti).
+              </p>
+              <div class="flex flex-wrap gap-1.5">
+                <label v-for="a in anniList" :key="a" class="cursor-pointer select-none">
+                  <input type="checkbox" :value="a" v-model="selectedAnniDl" class="sr-only peer" />
+                  <span
+                    class="inline-block px-2.5 py-1 rounded-md text-xs font-mono font-semibold border transition-all
+                           peer-checked:bg-brand-600 peer-checked:text-white peer-checked:border-brand-600
+                           hover:border-brand-400"
+                    :class="(analysis.download[String(a)]?.status === 'ok')
+                      ? 'bg-green-50 border-green-200 text-green-700'
+                      : 'bg-red-50 border-red-200 text-red-600'"
+                  >{{ a }}</span>
+                </label>
+              </div>
+              <p v-if="selectedAnniDl.length === 0" class="mt-1.5 text-xs text-gray-400 italic">
+                Nessuno selezionato — userà la modalità smart.
+              </p>
+            </div>
+
+            <!-- Sub-config: anni da scaricare (categorie) -->
+            <div
+              v-if="s.id === 'categorie' && selectedSteps.includes('categorie')"
+              class="border-t border-brand-100 bg-white px-4 py-3"
+            >
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs font-semibold text-gray-600">Anni da scaricare per categoria</p>
+                <div class="flex gap-2 text-xs">
+                  <button @click="catSelectMissing"    class="text-brand-600 hover:text-brand-700 font-medium">Mancanti</button>
+                  <button @click="catSelectLikeTarget" class="text-brand-600 hover:text-brand-700 font-medium">Come target</button>
+                  <button @click="catSelectAll"        class="text-brand-600 hover:text-brand-700 font-medium">Tutti</button>
+                  <button @click="selectedAnniCat = []" class="text-gray-400 hover:text-gray-600">Nessuno</button>
+                </div>
+              </div>
+              <p class="text-xs text-gray-400 mb-2">
+                Solo questi anni verranno scaricati per categoria. Lascia vuoto per usare la modalità smart.
+              </p>
+              <div class="flex flex-wrap gap-1.5">
+                <label v-for="a in anniList" :key="a" class="cursor-pointer select-none">
+                  <input type="checkbox" :value="a" v-model="selectedAnniCat" class="sr-only peer" />
+                  <span
+                    class="inline-block px-2.5 py-1 rounded-md text-xs font-mono font-semibold border transition-all
+                           peer-checked:bg-brand-600 peer-checked:text-white peer-checked:border-brand-600
+                           hover:border-brand-400"
+                    :class="(analysis.download[String(a)]?.status === 'ok')
+                      ? 'bg-green-50 border-green-200 text-green-700'
+                      : 'bg-red-50 border-red-200 text-red-600'"
+                  >{{ a }}</span>
+                </label>
+              </div>
+              <p v-if="selectedAnniCat.length === 0" class="mt-1.5 text-xs text-gray-400 italic">
+                Nessuno selezionato — userà la modalità smart.
+              </p>
+            </div>
+
+            <!-- Sub-config: Google Sheets ID -->
+            <div
+              v-if="s.id === 'gsheets' && selectedSteps.includes('gsheets')"
+              class="border-t border-brand-100 bg-white px-4 py-3"
+            >
+              <label class="text-xs font-semibold text-gray-600 block mb-1.5">ID foglio Google (opzionale)</label>
+              <input
+                v-model="gsheetsId"
+                type="text"
+                placeholder="Es. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+                class="input-field w-full text-xs font-mono"
+                @change="saveGsheetsId"
+              />
+              <p class="mt-1.5 text-xs text-gray-400">
+                Lascia vuoto per creare un nuovo foglio ad ogni esecuzione.
+                Puoi trovare l'ID nell'URL del foglio:
+                <span class="font-mono text-gray-500">…/spreadsheets/d/<strong class="text-gray-700">[ID]</strong>/…</span>
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -215,8 +315,11 @@
         </button>
         <div v-if="showAdvanced" class="mt-3 space-y-2 pl-5 border-l-2 border-gray-100">
           <label class="flex items-center gap-2.5 cursor-pointer p-2 rounded-lg hover:bg-gray-50">
-            <input type="checkbox" v-model="opts.forceAll" class="rounded border-gray-300 accent-brand-600" />
-            <span class="text-sm text-gray-700">Forza ri-download anche degli anni già presenti</span>
+            <input type="checkbox" v-model="opts.disableSmart" class="rounded border-gray-300 accent-brand-600" />
+            <span class="text-sm text-gray-700">
+              Disabilita ottimizzazione smart
+              <span class="text-xs text-gray-400">(forza ri-elaborazione ETL anche se il CSV è aggiornato)</span>
+            </span>
           </label>
           <label class="flex items-center gap-2.5 cursor-pointer p-2 rounded-lg hover:bg-gray-50">
             <input type="checkbox" v-model="opts.noRunts" class="rounded border-gray-300 accent-brand-600" />
@@ -315,36 +418,42 @@ import {
 } from '../api/client.js'
 
 // ── Stato ─────────────────────────────────────────────────────────────────
-const apiKey          = ref(sessionStorage.getItem('pipeline_key') || '')
-const loadingAnalysis = ref(false)
-const authError       = ref('')
-const analysis        = ref(null)
-const selectedAnni    = ref([])
-const showAdvanced    = ref(false)
-const starting        = ref(false)
-const activeJob       = ref(null)
-const logContent      = ref('')
-const logBox          = ref(null)
-let pollTimer         = null
+const apiKey              = ref(sessionStorage.getItem('pipeline_key') || '')
+const loadingAnalysis     = ref(false)
+const authError           = ref('')
+const analysis            = ref(null)
+const selectedAnni        = ref([])   // anni target (ETL/report)
+const selectedAnniDl      = ref([])   // override anni da scaricare (liste complete)
+const selectedAnniCat     = ref([])   // override anni da scaricare (categorie)
+const gsheetsId           = ref(sessionStorage.getItem('pipeline_gsheets_id') || '')
+const showAdvanced        = ref(false)
+const starting            = ref(false)
+const activeJob           = ref(null)
+const logContent          = ref('')
+const logBox              = ref(null)
+let pollTimer             = null
 
 const opts = ref({
-  forceAll:  false,
-  noRunts:   false,
-  sourcePdf: false,
+  disableSmart: false,
+  noRunts:      false,
+  sourcePdf:    false,
 })
 
 const availableSteps = [
-  { id: 'download',  label: 'Download elenco completo', required: false },
-  { id: 'categorie', label: 'Download per categoria',   required: false, badge: 'richiede categorie.xlsx' },
-  { id: 'etl',       label: 'Elaborazione (ETL)',        required: false },
-  { id: 'report',    label: 'Report Excel',              required: false, badge: 'opzionale' },
-  { id: 'gsheets',   label: 'Upload Google Sheets',      required: false, badge: 'opt-in' },
+  { id: 'download',  label: 'Download liste complete AdE',  desc: 'Scarica i file ufficiali dall\'Agenzia delle Entrate' },
+  { id: 'categorie', label: 'Download per categoria',       desc: 'Scarica i file suddivisi per categoria ETS', badge: 'richiede categorie.xlsx' },
+  { id: 'etl',       label: 'Elaborazione (ETL)',           desc: 'Normalizza e unisce i dati scaricati nel CSV finale' },
+  { id: 'report',    label: 'Report Excel',                 desc: 'Genera il report comparativo anno su anno', badge: 'opzionale' },
+  { id: 'gsheets',   label: 'Upload Google Sheets',         desc: 'Esporta il CSV su un foglio Google', badge: 'opt-in' },
 ]
 
 const selectedSteps = ref(['download', 'etl'])
 
 // ── Computed ───────────────────────────────────────────────────────────────
-const totalAnni   = computed(() => analysis.value ? Object.keys(analysis.value.download).length : 0)
+const anniList    = computed(() =>
+  analysis.value ? Object.keys(analysis.value.download).map(a => parseInt(a)).sort() : []
+)
+const totalAnni   = computed(() => anniList.value.length)
 const totalAnniOk = computed(() => analysis.value
   ? Object.values(analysis.value.download).filter(s => s.status === 'ok').length
   : 0
@@ -352,9 +461,9 @@ const totalAnniOk = computed(() => analysis.value
 
 const etlBadgeClass = computed(() => {
   const s = analysis.value?.riepilogo?.etl
-  if (s === 'ok')      return 'bg-green-50 text-green-700'
-  if (s === 'stale')   return 'bg-amber-50 text-amber-700'
-  return 'bg-red-50 text-red-700'
+  if (s === 'ok')    return 'bg-green-50 text-green-700 border-green-200'
+  if (s === 'stale') return 'bg-amber-50 text-amber-700 border-amber-200'
+  return 'bg-red-50 text-red-700 border-red-200'
 })
 const etlDotClass = computed(() => {
   const s = analysis.value?.riepilogo?.etl
@@ -376,23 +485,33 @@ const jobStatusLabel = computed(() => {
   return '❌ Errore'
 })
 
-// ── Metodi ─────────────────────────────────────────────────────────────────
+// ── Helper badge anni ──────────────────────────────────────────────────────
 function annoBadgeClass(status) {
   return status === 'ok'
     ? 'bg-green-50 border-green-300 text-green-700'
     : 'bg-red-50 border-red-300 text-red-600'
 }
 
+// ── Selezione anni target ──────────────────────────────────────────────────
 function selectMissing() {
   selectedAnni.value = Object.entries(analysis.value.download)
-    .filter(([, s]) => s.status !== 'ok')
-    .map(([a]) => parseInt(a))
+    .filter(([, s]) => s.status !== 'ok').map(([a]) => parseInt(a))
 }
-
 function selectAll() {
-  selectedAnni.value = Object.keys(analysis.value.download).map(a => parseInt(a))
+  selectedAnni.value = anniList.value.slice()
 }
 
+// ── Selezione anni download (liste complete) ───────────────────────────────
+function dlSelectMissing()   { selectedAnniDl.value = (analysis.value?.anni_mancanti_download || []).slice() }
+function dlSelectLikeTarget(){ selectedAnniDl.value = [...selectedAnni.value] }
+function dlSelectAll()       { selectedAnniDl.value = anniList.value.slice() }
+
+// ── Selezione anni categorie ───────────────────────────────────────────────
+function catSelectMissing()   { selectedAnniCat.value = (analysis.value?.anni_mancanti_categorie || []).slice() }
+function catSelectLikeTarget(){ selectedAnniCat.value = [...selectedAnni.value] }
+function catSelectAll()       { selectedAnniCat.value = anniList.value.slice() }
+
+// ── Analisi file ───────────────────────────────────────────────────────────
 async function analyzeFiles() {
   if (!apiKey.value) return
   authError.value = ''
@@ -401,9 +520,11 @@ async function analyzeFiles() {
     sessionStorage.setItem('pipeline_key', apiKey.value)
     const res = await pipelineAnalyze(apiKey.value)
     analysis.value = res.data
-    // Pre-seleziona anni mancanti
-    selectedAnni.value = (res.data.anni_mancanti_download || [])
-    // Pre-seleziona step suggeriti (escludi gsheets di default)
+    // Pre-seleziona anni mancanti come target di default
+    selectedAnni.value    = (res.data.anni_mancanti_download || []).slice()
+    selectedAnniDl.value  = (res.data.anni_mancanti_download || []).slice()
+    selectedAnniCat.value = (res.data.anni_mancanti_categorie || []).slice()
+    // Pre-seleziona step suggeriti (escludi gsheets/report di default)
     const suggeriti = (res.data.steps_necessari || []).filter(s => s !== 'gsheets' && s !== 'report')
     if (suggeriti.length) selectedSteps.value = suggeriti
   } catch (e) {
@@ -418,18 +539,29 @@ async function analyzeFiles() {
   }
 }
 
+// ── Avvio pipeline ─────────────────────────────────────────────────────────
 async function startPipeline() {
   starting.value = true
   try {
+    const includesDl  = selectedSteps.value.includes('download')
+    const includesCat = selectedSteps.value.includes('categorie')
     const payload = {
-      anni:          selectedAnni.value.sort().join(','),
-      steps:         selectedSteps.value,
-      skip_gsheets:  !selectedSteps.value.includes('gsheets'),
-      skip_report:   !selectedSteps.value.includes('report'),
-      no_runts:      opts.value.noRunts,
-      source:        opts.value.sourcePdf ? 'pdf' : 'csv',
-      smart:         !opts.value.forceAll,
+      anni:         selectedAnni.value.sort((a, b) => a - b).join(','),
+      steps:        selectedSteps.value,
+      skip_gsheets: !selectedSteps.value.includes('gsheets'),
+      skip_report:  !selectedSteps.value.includes('report'),
+      no_runts:     opts.value.noRunts,
+      source:       opts.value.sourcePdf ? 'pdf' : 'csv',
+      smart:        !opts.value.disableSmart,
     }
+    // Override espliciti anni per step specifici
+    if (includesDl  && selectedAnniDl.value.length)
+      payload.anni_download  = selectedAnniDl.value.sort((a, b) => a - b).join(',')
+    if (includesCat && selectedAnniCat.value.length)
+      payload.anni_categorie = selectedAnniCat.value.sort((a, b) => a - b).join(',')
+    if (gsheetsId.value.trim())
+      payload.gsheets_id = gsheetsId.value.trim()
+
     const res = await pipelineRun(apiKey.value, payload)
     activeJob.value = res.data
     logContent.value = ''
@@ -441,6 +573,7 @@ async function startPipeline() {
   }
 }
 
+// ── Polling log ────────────────────────────────────────────────────────────
 function startPolling(jobId) {
   stopPolling()
   pollTimer = setInterval(async () => {
@@ -455,7 +588,6 @@ function startPolling(jobId) {
     }
   }, 2000)
 }
-
 function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 }
@@ -477,8 +609,12 @@ function formatDate(iso) {
   return new Date(iso).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'medium' })
 }
 
+function saveGsheetsId() {
+  sessionStorage.setItem('pipeline_gsheets_id', gsheetsId.value)
+}
+
 onUnmounted(stopPolling)
 
-// Auto-analizza se la chiave è già salvata
+// Auto-analizza se la chiave è già salvata in sessione
 if (apiKey.value) analyzeFiles()
 </script>

@@ -51,7 +51,9 @@ def _prune_jobs():
 # ---------------------------------------------------------------------------
 
 class PipelineRunRequest(BaseModel):
-    anni: Optional[str] = None          # es. "2023,2024"
+    anni: Optional[str] = None          # es. "2023,2024" — anni target per ETL/report
+    anni_download: Optional[str] = None # override anni da scaricare (liste complete)
+    anni_categorie: Optional[str] = None# override anni da scaricare (per categoria)
     steps: Optional[List[str]] = None   # es. ["etl","gsheets"]
     skip_download: bool = False
     skip_gsheets: bool = True   # Google Sheets è opt-in: passa False per abilitare
@@ -59,6 +61,7 @@ class PipelineRunRequest(BaseModel):
     no_runts: bool = False
     source: str = "csv"                 # "csv" | "pdf"
     smart: bool = True                  # analizza file esistenti e salta step già aggiornati
+    gsheets_id: Optional[str] = None    # ID foglio Google esistente (vuoto = crea nuovo)
 
 
 class JobSummary(BaseModel):
@@ -155,6 +158,10 @@ def run_pipeline(
 
     if body.anni:
         cmd += ["--anni", body.anni]
+    if body.anni_download:
+        cmd += ["--anni-download", body.anni_download]
+    if body.anni_categorie:
+        cmd += ["--anni-categorie", body.anni_categorie]
     if body.steps:
         cmd += ["--only", ",".join(body.steps)]
     if body.skip_download:
@@ -169,6 +176,8 @@ def run_pipeline(
         cmd += ["--source", body.source]
     if body.smart:
         cmd.append("--smart")
+    if body.gsheets_id:
+        cmd += ["--sheet-id", body.gsheets_id]
 
     job_id = str(uuid.uuid4())
     started = datetime.now(timezone.utc).isoformat()
