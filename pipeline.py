@@ -324,11 +324,14 @@ def main():
             if not ask_yes_no("Scaricare i dati PER CATEGORIA? (scarica_categorie.py)"):
                 skip_download_categorie = True
 
-    # Se gsheets e' negli step ma non c'e' sheet_id, chiedi
-    if "gsheets" in steps and not sheet_id and sys.stdin.isatty():
-        sheet_id = input("\nID del Google Sheet (lascia vuoto per crearne uno nuovo): ").strip()
-        if not sheet_id:
-            sheet_id = None
+    # Se gsheets e' negli step, chiedi se eseguirlo e l'eventuale sheet_id
+    if "gsheets" in steps and sys.stdin.isatty():
+        if not ask_yes_no("\nEseguire l'upload su Google Sheets? (gsheets.py)", default="n"):
+            steps = [s for s in steps if s != "gsheets"]
+        elif not sheet_id:
+            sheet_id = input("ID del Google Sheet (lascia vuoto per crearne uno nuovo): ").strip()
+            if not sheet_id:
+                sheet_id = None
 
     # Se report e' negli step, determina anni per il report
     report_anni = None
