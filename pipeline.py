@@ -29,6 +29,31 @@ import datetime
 
 
 # ============================================================================
+# Carica variabili d'ambiente da .env (se presente)
+# ============================================================================
+
+def _load_dotenv(root_dir):
+    env_path = os.path.join(root_dir, ".env")
+    if not os.path.isfile(env_path):
+        return
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            # Rimuove eventuale prefisso 'export '
+            if line.startswith("export "):
+                line = line[7:]
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+_load_dotenv(os.path.dirname(os.path.abspath(__file__)))
+
+
+# ============================================================================
 # CONFIGURAZIONE
 # ============================================================================
 
