@@ -229,9 +229,9 @@ function action_enti(): void {
          FROM enti
          $sql_where
          ORDER BY $sort $dir
-         LIMIT ? OFFSET ?"
+         LIMIT $per_pagina OFFSET $offset"
     );
-    $data_stmt->execute(array_merge($params, [$per_pagina, $offset]));
+    $data_stmt->execute($params);
     $rows = $data_stmt->fetchAll();
 
     foreach ($rows as &$r) {
