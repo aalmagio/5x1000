@@ -56,11 +56,14 @@ load_env(__DIR__);
 function db(): PDO {
     static $pdo = null;
     if ($pdo) return $pdo;
-    $host = $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: 'localhost';
-    $port = $_ENV['DB_PORT'] ?? getenv('DB_PORT') ?: '3306';
-    $name = $_ENV['DB_NAME'] ?? getenv('DB_NAME') ?: '';
-    $user = $_ENV['DB_USER'] ?? getenv('DB_USER') ?: '';
-    $pass = $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '';
+    // getenv() riflette putenv() (chiamato da load_env) in modo più affidabile
+    // di $_ENV che può contenere stringhe vuote pre-impostate da Apache/PHP-FPM.
+    $host = (getenv('DB_HOST') ?: null) ?? ($_ENV['DB_HOST'] ?? 'localhost');
+    $port = (getenv('DB_PORT') ?: null) ?? ($_ENV['DB_PORT'] ?? '3306');
+    $name = (getenv('DB_NAME') ?: null) ?? ($_ENV['DB_NAME'] ?? '');
+    $user = (getenv('DB_USER') ?: null) ?? ($_ENV['DB_USER'] ?? '');
+    $pass = (getenv('DB_PASSWORD') ?: null) ?? ($_ENV['DB_PASSWORD'] ?? '');
+    error_log("[api.php] DB connect: host=$host db=$name user=" . (empty($user) ? '(VUOTO!)' : '(set,len=' . strlen($user) . ')'));
     $dsn  = "mysql:host=$host;port=$port;dbname=$name;charset=utf8mb4";
     $pdo  = new PDO($dsn, $user, $pass, [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
