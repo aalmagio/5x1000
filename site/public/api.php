@@ -38,6 +38,7 @@ function load_env(string $dir): void {
         return;
     }
     error_log("[api.php] .env caricato da: $f");
+    $loaded = [];
     foreach (file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
         $line = trim($line);
         if ($line === '' || $line[0] === '#') continue;
@@ -47,8 +48,12 @@ function load_env(string $dir): void {
         if ($k !== '' && empty($_ENV[$k])) {
             $_ENV[$k] = $v;
             putenv("$k=$v");
+            $loaded[$k] = empty($v) ? '(VUOTO)' : '(set,len=' . strlen($v) . ')';
+        } elseif ($k !== '') {
+            $loaded[$k] = '(saltato,ENV già set)';
         }
     }
+    error_log("[api.php] .env keys: " . json_encode($loaded));
 }
 
 load_env(__DIR__);
