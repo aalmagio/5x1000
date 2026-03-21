@@ -339,10 +339,17 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int]) -> None:
             if col not in chunk.columns:
                 chunk[col] = None
 
-        # Sostituisci NaN con None (→ NULL in MySQL)
-        chunk = chunk.where(chunk.notna(), None)
+        # Sostituisci NaN con None (→ NULL in MySQL).
+        # chunk.where() non basta: pandas a volte lascia float('nan') residui.
+        # Usiamo un controllo esplicito in fase di building delle tuple.
+        def _to_none(v):
+            if v is None:
+                return None
+            if isinstance(v, float) and v != v:   # NaN != NaN è sempre True
+                return None
+            return v
 
-        rows = [tuple(row[c] for c in cols_db) for _, row in chunk.iterrows()]
+        rows = [tuple(_to_none(row[c]) for c in cols_db) for _, row in chunk.iterrows()]
         cur.executemany(insert_sql, rows)
         total_ins += len(rows)
 
