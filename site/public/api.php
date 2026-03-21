@@ -44,7 +44,7 @@ function load_env(string $dir): void {
         if (!str_contains($line, '=')) continue;
         [$k, $v] = explode('=', $line, 2);
         $k = trim($k); $v = trim($v, " \t\n\r\0\x0B\"'");
-        if ($k !== '' && !isset($_ENV[$k])) {
+        if ($k !== '' && empty($_ENV[$k])) {
             $_ENV[$k] = $v;
             putenv("$k=$v");
         }
