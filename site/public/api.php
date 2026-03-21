@@ -33,7 +33,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 function load_env(string $dir): void {
     $f = $dir . '/.env';
-    if (!is_file($f)) return;
+    if (!is_file($f)) {
+        error_log("[api.php] .env non trovato in: $f");
+        return;
+    }
+    error_log("[api.php] .env caricato da: $f");
     foreach (file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
         $line = trim($line);
         if ($line === '' || $line[0] === '#') continue;
