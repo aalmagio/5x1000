@@ -288,7 +288,19 @@ CAT_AREE_ALIASES = {
 }
 
 # Campi numerici
-N_SCELTE_ALIASES = {"numero scelte"}
+# Gli anni più vecchi usano nomi colonna diversi per il numero di scelte:
+#   "N. Scelte" → ncol → "n. scelte"
+#   "N Scelte"  → "n scelte"
+#   "Preferenze" → "preferenze"
+N_SCELTE_ALIASES = {
+    "numero scelte",
+    "n. scelte",
+    "n scelte",
+    "numero di scelte",
+    "preferenze",
+    "n preferenze",
+    "numero preferenze",
+}
 IMP_ESP_ALIASES = {
     "importo (euro) per scelte espresse",
     "importo (euro) importo delle scelte espresse",
@@ -361,7 +373,7 @@ def normalize_year(df: pd.DataFrame, anno: int) -> pd.DataFrame:
     cat_aree_col = find_col_partial(ci, CAT_AREE_ALIASES)
 
     # --- Colonne numeriche ---
-    n_scelte_col = find_col(ci, N_SCELTE_ALIASES)
+    n_scelte_col = find_col_partial(ci, N_SCELTE_ALIASES)
     imp_esp_col = find_col_partial(ci, IMP_ESP_ALIASES)
     imp_gen_col = find_col_partial(ci, IMP_GEN_ALIASES)
     imp_tot_col = find_col_partial(ci, IMP_TOT_ALIASES)

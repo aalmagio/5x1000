@@ -236,7 +236,7 @@ function action_enti(): void {
 
     foreach ($rows as &$r) {
         $r['anno']             = (int)$r['anno'];
-        $r['n_scelte']         = (int)$r['n_scelte'];
+        $r['n_scelte']         = $r['n_scelte'] !== null ? (int)$r['n_scelte'] : null;
         $r['importo_espresso'] = $r['importo_espresso'] !== null ? (float)$r['importo_espresso'] : null;
         $r['importo_generico'] = $r['importo_generico'] !== null ? (float)$r['importo_generico'] : null;
         $r['importo_totale']   = $r['importo_totale']   !== null ? (float)$r['importo_totale']   : null;
@@ -277,7 +277,7 @@ function action_ente(): void {
     foreach ($rows as $r) {
         $storico[] = [
             'anno'             => (int)$r['anno'],
-            'n_scelte'         => (int)$r['n_scelte'],
+            'n_scelte'         => $r['n_scelte'] !== null ? (int)$r['n_scelte'] : null,
             'importo_espresso' => $r['importo_espresso'] !== null ? (float)$r['importo_espresso'] : null,
             'importo_generico' => $r['importo_generico'] !== null ? (float)$r['importo_generico'] : null,
             'importo_totale'   => $r['importo_totale']   !== null ? (float)$r['importo_totale']   : null,
@@ -344,7 +344,7 @@ function action_confronta(): void {
         $storico = [];
         foreach ($rows as $r) {
             $storico[(int)$r['anno']] = [
-                'n_scelte'         => (int)$r['n_scelte'],
+                'n_scelte'         => $r['n_scelte'] !== null ? (int)$r['n_scelte'] : null,
                 'importo_totale'   => $r['importo_totale'] !== null ? (float)$r['importo_totale'] : null,
                 'importo_espresso' => $r['importo_espresso'] !== null ? (float)$r['importo_espresso'] : null,
                 'importo_generico' => $r['importo_generico'] !== null ? (float)$r['importo_generico'] : null,
@@ -480,6 +480,96 @@ function action_analisi_categorie(): void {
     ]);
 }
 
+function action_download(): void {
+    set_time_limit(0);
+
+    $tipo = str_param('tipo');  // csv | xlsx | report
+    $anno = str_param('anno');  // anno numerico oppure 'completo'
+
+    if (!in_array($tipo, ['csv', 'xlsx', 'report'], true)) {
+        err('Tipo non valido', 400);
+    }
+
+    $pdo = db();
+
+    // ── CSV per anno: streaming filtrato dal file completo ──────────────────
+    if ($tipo === 'csv' && $anno !== 'completo') {
+        $anno_int = (int)$anno;
+        if ($anno_int < 2006 || $anno_int > 2030) err('Anno non valido', 400);
+
+        $stmt = $pdo->prepare(
+            "SELECT percorso FROM dataset_files
+             WHERE tipo = 'completo' AND formato = 'csv' LIMIT 1"
+        );
+        $stmt->execute();
+        $row = $stmt->fetch();
+        if (!$row || !file_exists($row['percorso'])) {
+            err('Dataset completo non disponibile sul server', 404);
+        }
+
+        $prefix = $anno_int . ',';
+        header('Content-Type: text/csv; charset=utf-8');
+        header("Content-Disposition: attachment; filename=\"dati_{$anno_int}.csv\"");
+        header('Cache-Control: no-store');
+        header('X-Accel-Buffering: no');  // disabilita buffering nginx per lo streaming
+
+        $fh = fopen($row['percorso'], 'r');
+        echo fgets($fh);  // riga intestazione
+        flush();
+        while (($line = fgets($fh)) !== false) {
+            if (str_starts_with($line, $prefix)) {
+                echo $line;
+                flush();
+            }
+        }
+        fclose($fh);
+        exit;
+    }
+
+    // ── File statico (xlsx, report, csv completo) ───────────────────────────
+    $anno_q  = ($anno === 'completo') ? null : (int)$anno;
+    $tipo_db = match($tipo) {
+        'xlsx'   => 'normalizzato',
+        'report' => 'report',
+        'csv'    => 'completo',
+    };
+
+    if ($anno_q !== null) {
+        $stmt = $pdo->prepare(
+            "SELECT percorso, nome_file FROM dataset_files
+             WHERE anno = ? AND tipo = ? LIMIT 1"
+        );
+        $stmt->execute([$anno_q, $tipo_db]);
+    } else {
+        $stmt = $pdo->prepare(
+            "SELECT percorso, nome_file FROM dataset_files
+             WHERE anno IS NULL AND tipo = ? AND formato = ? LIMIT 1"
+        );
+        $stmt->execute([$tipo_db, $tipo]);
+    }
+
+    $row = $stmt->fetch();
+    if (!$row) err('File non trovato nel catalogo', 404);
+
+    $path = $row['percorso'];
+    if (!file_exists($path) || !is_readable($path)) {
+        err('File non disponibile sul server', 404);
+    }
+
+    $ext  = pathinfo($path, PATHINFO_EXTENSION);
+    $mime = $ext === 'csv'
+        ? 'text/csv; charset=utf-8'
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+    header('Content-Type: ' . $mime);
+    header('Content-Disposition: attachment; filename="' . basename($path) . '"');
+    header('Content-Length: ' . filesize($path));
+    header('Cache-Control: no-store');
+    readfile($path);
+    exit;
+}
+
+
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 try {
@@ -494,7 +584,8 @@ try {
         'confronta'          => action_confronta(),
         'analisi_categorie'  => action_analisi_categorie(),
         'files'              => action_files(),
-        default              => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, statistiche, enti, ente, confronta, analisi_categorie, files", 404),
+        'download'           => action_download(),
+        default              => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, statistiche, enti, ente, confronta, analisi_categorie, files, download", 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());
