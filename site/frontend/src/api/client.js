@@ -1,37 +1,41 @@
 /**
- * Client Axios centralizzato per le chiamate all'API FastAPI.
- * Il base URL punta all'API stessa; in sviluppo Vite fa da proxy.
+ * Client centralizzato per api.php (backend PHP).
+ * Tutti gli endpoint sono GET su /api.php?action=...
  */
 import axios from 'axios'
 
 const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: '/api.php',
   timeout: 30_000,
 })
 
+const get = (action, params = {}) => api.get('', { params: { action, ...params } })
+
 // Status & statistiche
-export const fetchStatus      = ()           => api.get('/status')
-export const fetchAnni        = ()           => api.get('/anni')
-export const fetchCategorie   = ()           => api.get('/categorie')
-export const fetchStatistiche = (anno)       => api.get('/statistiche', { params: anno ? { anno } : {} })
+export const fetchStatus      = ()      => get('status')
+export const fetchAnni        = ()      => get('anni')
+export const fetchCategorie   = ()      => get('categorie')
+export const fetchStatistiche = (anno)  => get('statistiche', anno ? { anno } : {})
 
 // Ricerca enti
-export const fetchEnti = (params) => api.get('/enti', { params })
+export const fetchEnti = (params) => get('enti', params)
 
-// Storico ente
-export const fetchEnteStorico = (cf) => api.get(`/enti/${encodeURIComponent(cf)}`)
+// Storico singolo ente
+export const fetchEnteStorico = (cf) => get('ente', { cf })
 
-// Catalogo download
-export const fetchFiles = (params) => axios.get('/download/files', { params })
-
-// ── Pipeline (protette da X-Pipeline-Key) ─────────────────────────────────
-const _pipelineHeaders = (key) => ({ headers: { 'X-Pipeline-Key': key } })
-
-export const pipelineAnalyze   = (key, anni)    => api.get('/pipeline/analyze', {
-  ..._pipelineHeaders(key),
-  params: anni ? { anni } : {},
+// Confronto fino a 5 CF
+export const fetchConfronta = (cfs) => api.get('', {
+  params: { action: 'confronta', 'cf[]': cfs },
+  // axios serializza array come cf[]=A&cf[]=B solo con paramsSerializer
+  paramsSerializer: (p) => {
+    const parts = [`action=confronta`]
+    ;(p['cf[]'] || []).forEach(cf => parts.push(`cf[]=${encodeURIComponent(cf)}`))
+    return parts.join('&')
+  },
 })
-export const pipelineRun       = (key, payload) => api.post('/pipeline/run',  payload, _pipelineHeaders(key))
-export const pipelineJobs      = (key)          => api.get('/pipeline/jobs',          _pipelineHeaders(key))
-export const pipelineJobDetail = (key, jobId)   => api.get(`/pipeline/jobs/${jobId}`, _pipelineHeaders(key))
-export const pipelineJobDelete = (key, jobId)   => api.delete(`/pipeline/jobs/${jobId}`, _pipelineHeaders(key))
+
+// Analisi per categoria (tutti gli anni o singolo anno)
+export const fetchAnalisiCategorie = (anno) => get('analisi_categorie', anno ? { anno } : {})
+
+// Catalogo file per Download
+export const fetchFiles = (params) => get('files', params ?? {})

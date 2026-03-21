@@ -70,15 +70,18 @@
           <div>
             <p class="font-semibold text-white mb-3">Esplora</p>
             <ul class="space-y-2">
-              <li><RouterLink to="/dati"     class="hover:text-white transition-colors">Ricerca enti</RouterLink></li>
-              <li><RouterLink to="/download" class="hover:text-white transition-colors">Download dataset</RouterLink></li>
-              <li><RouterLink to="/api"      class="hover:text-white transition-colors">Documentazione API</RouterLink></li>
+              <li><RouterLink to="/dati"      class="hover:text-white transition-colors">Ricerca enti</RouterLink></li>
+              <li><RouterLink to="/confronto" class="hover:text-white transition-colors">Confronto enti</RouterLink></li>
+              <li><RouterLink to="/categorie" class="hover:text-white transition-colors">Analisi categorie</RouterLink></li>
+              <li><RouterLink to="/download"  class="hover:text-white transition-colors">Download dataset</RouterLink></li>
+              <li><RouterLink to="/about"     class="hover:text-white transition-colors">Crediti &amp; licenza</RouterLink></li>
             </ul>
           </div>
           <div>
             <p class="font-semibold text-white mb-3">Progetto</p>
             <ul class="space-y-2">
-              <li><RouterLink to="/about" class="hover:text-white transition-colors">Crediti &amp; licenza</RouterLink></li>
+              <li><a href="https://github.com/aalmagio/5x1000" class="hover:text-white transition-colors" target="_blank" rel="noopener">GitHub</a></li>
+              <li><span class="text-gray-500 text-xs">Fonte: Agenzia delle Entrate &amp; RUNTS</span></li>
             </ul>
           </div>
         </div>
@@ -98,11 +101,11 @@ import { RouterLink, RouterView } from 'vue-router'
 const menuOpen = ref(false)
 
 const navLinks = [
-  { to: '/',          label: 'Home' },
-  { to: '/dati',      label: 'Esplora' },
-  { to: '/download',  label: 'Download' },
-  { to: '/api',       label: 'API' },
-  { to: '/about',     label: 'Info' },
-  { to: '/pipeline',  label: '⚙ Pipeline' },
+  { to: '/',           label: 'Home' },
+  { to: '/dati',       label: 'Esplora' },
+  { to: '/confronto',  label: 'Confronto' },
+  { to: '/categorie',  label: 'Categorie' },
+  { to: '/download',   label: 'Download' },
+  { to: '/about',      label: 'Info' },
 ]
 </script>
