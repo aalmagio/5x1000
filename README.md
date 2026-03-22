@@ -1,8 +1,8 @@
-# 5 per Mille — Pipeline dati
+# 5 per Mille — Pipeline dati + sito web
 
-Pipeline Python per scaricare, normalizzare e analizzare i dati dei beneficiari del **5 per mille** pubblicati dall'**Agenzia delle Entrate**, dal 2006 al 2024.
+Pipeline Python per scaricare, normalizzare e analizzare i dati dei beneficiari del **5 per mille** pubblicati dall'**Agenzia delle Entrate**, dal 2006 al 2025.
 
-Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i dati del **Registro Unico Nazionale del Terzo Settore (RUNTS)**, pronto per Looker Studio, Power BI, QlikView o qualsiasi strumento di analisi.
+Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i dati del **Registro Unico Nazionale del Terzo Settore (RUNTS)**, accessibile via sito web open data ([5x1000.almagioni.com](https://5x1000.almagioni.com)) e via API REST.
 
 ---
 
@@ -16,6 +16,8 @@ Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i
 | `etl.py` | Normalizza tutti i dati annuali in uno schema unificato e fa il join con il RUNTS |
 | `report.py` | Genera un report Excel multi-foglio stile ASSIF/Bedogni con classifiche, confronto YoY e aggregazioni regionali |
 | `gsheets.py` | Carica il dataset normalizzato su Google Sheets per Looker Studio |
+| `db_updater.py` | Aggiorna il database MySQL del sito web al termine della pipeline |
+| `pipeline_checker.py` | Analizza i file esistenti per la modalità `--smart` (salta step già aggiornati) |
 
 ---
 
@@ -25,7 +27,7 @@ Il file `Dati/enti_5x1000_norm.csv` prodotto da `etl.py` ha queste colonne:
 
 | Colonna | Tipo | Descrizione |
 |---|---|---|
-| `ANNO` | int | Anno di riferimento (2006–2024) |
+| `ANNO` | int | Anno di riferimento (2006–2025) |
 | `COD_FISCALE` | str | Codice fiscale (11 char, zero-padded se numerico) |
 | `DENOMINAZIONE` | str | Nome dell'ente |
 | `REGIONE` | str | Regione sede |
@@ -72,23 +74,21 @@ pip install pdfplumber openpyxl requests beautifulsoup4
 
 ### 0. Pipeline completa (consigliato)
 
-Per eseguire tutti gli step con un solo comando:
-
 ```bash
 # Pipeline completa interattiva
 python pipeline.py
 
-# Solo anno 2024, senza riscaricare
-python pipeline.py --anni 2024 --skip-download
+# Solo anno 2025, senza riscaricare
+python pipeline.py --anni 2025 --skip-download
 
 # Senza Google Sheets
-python pipeline.py --anni 2024 --skip-download --skip-gsheets
+python pipeline.py --anni 2025 --skip-download --skip-gsheets
 
-# Solo ETL + GSheets (dati gia' scaricati e convertiti)
+# Solo ETL + aggiornamento DB sito
 python pipeline.py --only etl,gsheets
 
 # Con Sheet ID specifico
-python pipeline.py --sheet-id 1ABC... --anni 2024
+python pipeline.py --sheet-id 1ABC... --anni 2025
 ```
 
 | Flag | Default | Descrizione |
@@ -105,9 +105,9 @@ python pipeline.py --sheet-id 1ABC... --anni 2024
 | `--anno-confronto` | anno-1 | Anno per il confronto YoY nel report |
 | `--no-confronto` | | Non calcolare il confronto anno precedente nel report |
 | `--skip-report` | | Salta la generazione del report |
+| `--smart` | | Salta automaticamente step/anni già aggiornati |
 
-La pipeline esegue in ordine: **download** → **categorie** → **etl** → **report** → **gsheets**.
-I file estratti vengono copiati automaticamente nella cartella `Dati/`.
+La pipeline esegue in ordine: **download** → **categorie** → **etl** → **report** → **gsheets** → **db** (aggiornamento sito).
 
 ### 1. Scaricare i dati dall'Agenzia delle Entrate
 
@@ -115,8 +115,8 @@ I file estratti vengono copiati automaticamente nella cartella `Dati/`.
 # Modalita' interattiva (chiede tutto passo passo)
 python cinque_per_mille.py
 
-# Batch: solo conversione CSV degli anni 2023 e 2024, senza download
-python cinque_per_mille.py --no-download --source csv --anni 2023,2024
+# Batch: solo conversione CSV degli anni 2024 e 2025, senza download
+python cinque_per_mille.py --no-download --source csv --anni 2024,2025
 
 # Batch: download + conversione PDF di tutti gli anni
 python cinque_per_mille.py --source pdf
@@ -128,34 +128,27 @@ python cinque_per_mille.py --no-convert
 | Flag | Default | Descrizione |
 |---|---|---|
 | `--root` | `.` | Cartella root del progetto |
-| `--anni` | tutti | Anni da elaborare (es. `2020,2021,2024`) |
+| `--anni` | tutti | Anni da elaborare (es. `2020,2021,2025`) |
 | `--source` | `ask` | Fonte dati: `pdf`, `csv`, o `ask` (chiede per ogni cartella) |
 | `--no-download` | | Salta la fase di download dall'AdE |
 | `--no-convert` | | Salta la fase di conversione in Excel |
 
-Senza flag aggiuntivi lo script e' interattivo (come prima). Con `--source` e `--anni` diventa completamente non-interattivo, adatto all'esecuzione schedulata.
-
-I file vengono salvati in sottocartelle `2006/`, `2007/`, ..., `2024/` e convertiti in `dati_ANNO.xlsx`, copiati automaticamente nella cartella `Dati/`.
+I file vengono salvati in sottocartelle `2006/`, `2007/`, ..., `2025/` e convertiti in `dati_ANNO.xlsx`, copiati automaticamente nella cartella `Dati/`.
 
 ### 1b. Scaricare i dati per categoria (ammessi/esclusi)
-
-Per lavorare a livello di singola categoria (con file ammessi e esclusi separati), si usa un file Excel con l'elenco dei link alle pagine delle categorie:
 
 ```bash
 # Download + estrazione (tutte le righe del file)
 python scarica_categorie.py --input categorie.xlsx
 
-# Solo anno 2024
-python scarica_categorie.py --input categorie.xlsx --anni 2024
+# Solo anno 2025
+python scarica_categorie.py --input categorie.xlsx --anni 2025
 
 # Solo download (senza creare gli Excel)
 python scarica_categorie.py --input categorie.xlsx --no-extract
 
 # Solo estrazione (file gia' scaricati)
 python scarica_categorie.py --input categorie.xlsx --no-download
-
-# Estrai da PDF invece che da CSV
-python scarica_categorie.py --input categorie.xlsx --source pdf
 ```
 
 Il file Excel di input deve avere le colonne: **Categoria**, **Link**, **Anno**. Per ogni riga lo script:
@@ -168,17 +161,14 @@ Il file Excel di input deve avere le colonne: **Categoria**, **Link**, **Anno**.
 ### 2. Normalizzare i dati (ETL)
 
 ```bash
-# Tutto (tutti gli anni, con merge RUNTS, genera solo CSV)
+# Tutto (tutti gli anni, con merge RUNTS)
 python etl.py --no-excel
 
 # Solo anni recenti
-python etl.py --anni 2020,2021,2022,2023,2024 --no-excel
+python etl.py --anni 2023,2024,2025 --no-excel
 
 # Senza RUNTS
 python etl.py --no-runts --no-excel
-
-# Con output Excel (lento per ~1M righe)
-python etl.py
 ```
 
 Output: `Dati/enti_5x1000_norm.csv` (~210 MB)
@@ -186,33 +176,15 @@ Output: `Dati/enti_5x1000_norm.csv` (~210 MB)
 ### 3. Generare il report Excel (stile ASSIF/Bedogni)
 
 ```bash
-# Report anno 2024 con confronto automatico 2023
-python report.py --anno 2024
-
-# Senza confronto anno precedente
-python report.py --anno 2024 --no-confronto
+# Report anno 2025 con confronto automatico 2024
+python report.py --anno 2025
 
 # Confronto con un anno specifico
-python report.py --anno 2024 --anno-confronto 2022
+python report.py --anno 2025 --anno-confronto 2023
 
 # Output personalizzato
-python report.py --anno 2024 --output mio_report.xlsx
+python report.py --anno 2025 --output mio_report.xlsx
 ```
-
-Combina i dati delle 7 categorie (ammessi + esclusi) in un workbook con 10 fogli:
-
-| Foglio | Contenuto |
-|---|---|
-| **COMPLESSIVO** | Tutte le entita' (~96K righe) con breakdown per categoria, totali, classifiche e confronto YoY |
-| **Volontariato** | Filtrato per ETS/ONLUS con classifica interna |
-| **Sport** | Filtrato per ASD |
-| **Scienza** | Ricerca scientifica |
-| **Sanita** | Ricerca sanitaria |
-| **Comuni** | Comuni |
-| **Cultura** | Beni culturali |
-| **Aree_Protette** | Enti gestori aree protette |
-| **Grafici** | Aggregazione regionale (enti, scelte, importo per regione x categoria) |
-| **Licenza** | Attribuzione dati AdE |
 
 Output: `Dati/report_{anno}.xlsx`
 
@@ -224,19 +196,15 @@ Prima di tutto, [crea le credenziali GCP](#setup-google-sheets):
 python gsheets.py --sheet-id TUO_SHEET_ID
 ```
 
-Il dataset è diviso per anno (un foglio per anno) per rispettare i limiti di Google Sheets.
-
 ---
 
 ## Configurazione (`config.yaml`)
 
-Il file `config.yaml` nella root del progetto permette di modificare i parametri principali **senza toccare il codice Python**: URL per anno, timeout di download, formattazione Excel, percorsi cartelle.
+Il file `config.yaml` nella root permette di modificare URL, timeout, formattazione Excel e percorsi senza toccare il codice. Se manca, gli script usano i default interni.
 
-Se il file non esiste o una chiave manca, gli script usano i valori di default interni. Il file e' commentato in italiano ed e' pensato per essere leggibile anche da chi non programma.
+Priorità: **flag CLI > config.yaml > default nel codice**
 
-Priorita' dei valori: **flag CLI > config.yaml > default nel codice**.
-
-> Richiede `PyYAML` (`pip install pyyaml`). Senza PyYAML gli script funzionano normalmente con i default.
+> Richiede `PyYAML` (`pip install pyyaml`). Senza PyYAML funziona normalmente con i default.
 
 ---
 
@@ -244,61 +212,88 @@ Priorita' dei valori: **flag CLI > config.yaml > default nel codice**.
 
 ```
 5x1000/
-├── pipeline.py           # Orchestratore: esegue tutti gli step in sequenza
-├── cinque_per_mille.py   # Download + conversione PDF/CSV → Excel (elenco complessivo)
-├── scarica_categorie.py  # Download + conversione per categoria (ammessi/esclusi)
+├── pipeline.py           # Orchestratore
+├── cinque_per_mille.py   # Download + conversione PDF/CSV → Excel
+├── scarica_categorie.py  # Download + conversione per categoria
 ├── etl.py                # ETL: normalizzazione + merge RUNTS
-├── report.py             # Report Excel multi-foglio (stile ASSIF/Bedogni)
+├── report.py             # Report Excel multi-foglio
 ├── gsheets.py            # Export su Google Sheets
-├── config.yaml           # Configurazione esterna (modificabile senza codice)
-├── categorie.xlsx        # Elenco link alle pagine delle categorie
+├── db_updater.py         # Aggiornamento DB sito web
+├── pipeline_checker.py   # Analisi smart mode
+├── config.yaml           # Configurazione esterna
 ├── requirements.txt
 │
+├── site/                 # Sito web (5x1000.almagioni.com)
+│   ├── db_schema.sql     # Schema MySQL del sito
+│   ├── public/           # Webroot (Apache/Plesk)
+│   │   ├── index.html    # SPA Vue
+│   │   ├── api.php       # API REST (PHP)
+│   │   ├── admin.php     # Pannello admin
+│   │   ├── .htaccess     # Vue Router + redirect download
+│   │   ├── .env.example  # Variabili d'ambiente (copiare in .env)
+│   │   └── assets/       # JS/CSS buildati da Vite
+│   └── frontend/         # Sorgenti Vue (Vite + Tailwind)
+│       ├── src/
+│       ├── package.json
+│       └── vite.config.js
+│
 ├── Dati/                 # Output finale (non in repo)
-│   ├── dati_2006.xlsx ... dati_2024.xlsx    # Elenco complessivo per anno
-│   ├── ETS_ONLUS/                           # File per categoria
-│   │   ├── 2024_ETS_ONLUS_ammessi.xlsx
-│   │   └── 2024_ETS_ONLUS_esclusi.xlsx
-│   ├── ASD/
-│   │   └── 2024_ASD_ammessi.xlsx
-│   ├── ...                                  # Altre categorie
-│   ├── enti_5x1000_norm.csv                 # ← output principale di etl.py
-│   ├── enti_5x1000_norm.xlsx
-│   └── report_2024.xlsx                     # ← output di report.py
+│   ├── dati_2006.xlsx ... dati_2025.xlsx
+│   ├── enti_5x1000_norm.csv      # ← output principale di etl.py
+│   └── report_2025.xlsx          # ← output di report.py
 │
 ├── Runts/                # File RUNTS (da scaricare manualmente, non in repo)
-│   └── *.xlsx
-│
-├── 2006/ ... 2024/       # File grezzi scaricati dall'AdE (non in repo)
-│   ├── *.pdf, *.csv
-│   └── {categoria}/      # Sotto-cartelle per categoria
-│       ├── *.pdf, *.csv
-│       └── {ANNO}_{CATEGORIA}_ammessi.xlsx
-│
+├── 2006/ ... 2025/       # File grezzi AdE (non in repo)
 ├── _EXAMPLE/             # File di esempio per testing
-│   └── dati_2006_ESEMPIO.xlsx
-│
-└── log/                  # Log delle esecuzioni (non in repo)
+└── log/                  # Log esecuzioni (non in repo)
+```
+
+---
+
+## Sito web
+
+Il sito [5x1000.almagioni.com](https://5x1000.almagioni.com) espone i dati via:
+- **Interfaccia web**: esplora enti, confronta anni, analisi per categoria
+- **API REST** (`/api/v1/`): endpoint JSON per integrazioni esterne (documentazione su `/api-docs`)
+- **Download** diretto dei dataset in CSV e Excel
+
+### Deploy su Plesk (Apache + PHP)
+
+```bash
+# 1. Build frontend
+cd site/frontend && npm run build
+# I file compilati vanno automaticamente in site/public/assets/
+
+# 2. Committa e pusha gli asset aggiornati
+git add site/public/assets/ site/public/index.html
+git commit -m "Build frontend"
+git push
+
+# 3. Su Plesk: copia site/public/ nel webroot del dominio
+#    e crea site/public/.env con le credenziali DB
+```
+
+Il `.env` del sito deve contenere:
+```
+SITE_DB_HOST=localhost
+SITE_DB_USER=...
+SITE_DB_PASSWORD=...
+SITE_DB_NAME=...
+ADMIN_PASSWORD=...  # hash bcrypt
 ```
 
 ---
 
 ## Setup Google Sheets
 
-Per caricare i dati su Google Sheets (sorgente dati per Looker Studio):
-
 1. Vai su [console.cloud.google.com](https://console.cloud.google.com) e crea un progetto
 2. Abilita **Google Sheets API** e **Google Drive API**
 3. Vai in **IAM → Account di servizio** → Crea account (es. `etl-5x1000`)
 4. Clicca sull'account → **Chiavi** → **Aggiungi chiave** → JSON
-5. Salva il file come `credentials.json` nella root del progetto
-6. Crea un Google Sheet vuoto, copia l'ID dall'URL:
-   `https://docs.google.com/spreadsheets/d/`**`[QUESTO_È_L_ID]`**`/edit`
-7. Condividi il foglio con l'email del service account (campo `client_email` in `credentials.json`) con permesso **Editor**
-8. Lancia:
-   ```bash
-   python gsheets.py --sheet-id TUO_SHEET_ID
-   ```
+5. Salva come `credentials.json` nella root del progetto
+6. Crea un Google Sheet vuoto, copia l'ID dall'URL
+7. Condividi il foglio con l'email del service account con permesso **Editor**
+8. Lancia: `python gsheets.py --sheet-id TUO_SHEET_ID`
 
 > `credentials.json` non va mai committato — è già in `.gitignore`.
 
@@ -306,10 +301,8 @@ Per caricare i dati su Google Sheets (sorgente dati per Looker Studio):
 
 ## Fonti dati
 
-- **Agenzia delle Entrate** — elenchi beneficiari 5 per mille:
-  [agenziaentrate.gov.it](https://www.agenziaentrate.gov.it)
-- **RUNTS** — Registro Unico Nazionale del Terzo Settore:
-  [registroterzoettore.gov.it](https://www.registroterzoettore.gov.it)
+- **Agenzia delle Entrate** — elenchi beneficiari 5 per mille: [agenziaentrate.gov.it](https://www.agenziaentrate.gov.it)
+- **RUNTS** — Registro Unico Nazionale del Terzo Settore: [registroterzoettore.gov.it](https://www.registroterzoettore.gov.it)
 
 I dati sono pubblici e di proprietà dell'Amministrazione pubblica italiana.
 
