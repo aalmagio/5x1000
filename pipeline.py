@@ -26,6 +26,7 @@ import argparse
 import subprocess
 import logging
 import datetime
+import shutil
 
 
 # ============================================================================
@@ -282,7 +283,113 @@ Step disponibili: download, categorie, etl, report, gsheets
         help="Override esplicito degli anni da scaricare (per categoria). "
              "Se omesso, usa --anni (o smart mode se attivo).",
     )
+    parser.add_argument(
+        "--reset", action="store_true",
+        help=(
+            "Azzera tutti i dati prima di partire: svuota la cartella Dati/ "
+            "e le tabelle DB (enti, dataset_files, pipeline_runs). "
+            "Richiede conferma interattiva a meno che non sia passato --force."
+        ),
+    )
+    parser.add_argument(
+        "--reset-db", action="store_true",
+        help="Come --reset ma solo per il DB (non tocca i file su disco).",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Salta la conferma interattiva richiesta da --reset / --reset-db.",
+    )
     return parser.parse_args()
+
+
+# ============================================================================
+# RESET
+# ============================================================================
+
+def reset_tutto(root_dir: str, solo_db: bool = False, force: bool = False) -> bool:
+    """
+    Azzera tutti i dati della pipeline.
+    - File: svuota Dati/ (solo_db=False)
+    - DB:   DELETE FROM enti, dataset_files, pipeline_runs
+
+    Ritorna True se il reset è completato, False se annullato dall'utente.
+    """
+    dati_dir = os.path.join(root_dir, "Dati")
+    log_dir  = os.path.join(root_dir, "log")
+    os.makedirs(log_dir, exist_ok=True)
+    ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(log_dir, f"reset_{ts}.log")
+
+    # Logging dedicato
+    reset_logger = logging.getLogger("reset")
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    reset_logger.addHandler(fh)
+    reset_logger.setLevel(logging.INFO)
+
+    print("\n" + "=" * 60)
+    print("  RESET — 5 per Mille")
+    print("=" * 60)
+    if not solo_db:
+        print(f"  ⚠  Verranno CANCELLATI tutti i file in: {dati_dir}")
+    print("  ⚠  Verranno svuotate le tabelle DB:")
+    print("       enti · dataset_files · pipeline_runs")
+    print("=" * 60)
+
+    if not force:
+        risposta = input("\nConfermi il reset? Questa operazione è irreversibile. [s/N] ").strip().lower()
+        if risposta not in ("s", "si", "sì", "y", "yes"):
+            print("Reset annullato.")
+            return False
+
+    # ── 1. File ──────────────────────────────────────────────────────────────
+    if not solo_db:
+        if os.path.isdir(dati_dir):
+            reset_logger.info(f"Cancellazione cartella Dati/: {dati_dir}")
+            shutil.rmtree(dati_dir)
+            reset_logger.info("Cartella Dati/ eliminata.")
+        os.makedirs(dati_dir, exist_ok=True)
+        reset_logger.info("Cartella Dati/ ricreata vuota.")
+        print("✓ Cartella Dati/ svuotata.")
+
+    # ── 2. DB ─────────────────────────────────────────────────────────────────
+    try:
+        import pymysql
+    except ImportError:
+        msg = "pymysql non installato — reset DB saltato."
+        reset_logger.warning(msg)
+        print(f"⚠  {msg}")
+    else:
+        db_cfg = {
+            "host":     os.getenv("SITE_DB_HOST", "localhost"),
+            "port":     int(os.getenv("SITE_DB_PORT", "3306")),
+            "user":     os.getenv("SITE_DB_USER", ""),
+            "password": os.getenv("SITE_DB_PASSWORD", ""),
+            "database": os.getenv("SITE_DB_NAME", ""),
+            "charset":  "utf8mb4",
+            "autocommit": True,
+        }
+        if not db_cfg["user"] or not db_cfg["database"]:
+            msg = "Credenziali DB non configurate (SITE_DB_USER/SITE_DB_NAME) — reset DB saltato."
+            reset_logger.warning(msg)
+            print(f"⚠  {msg}")
+        else:
+            try:
+                conn = pymysql.connect(**db_cfg)
+                with conn:
+                    cur = conn.cursor()
+                    for tabella in ("enti", "dataset_files", "pipeline_runs"):
+                        cur.execute(f"DELETE FROM `{tabella}`")
+                        n = cur.rowcount
+                        reset_logger.info(f"DELETE FROM {tabella}: {n} righe cancellate.")
+                        print(f"✓ Tabella {tabella}: {n} righe cancellate.")
+            except Exception as exc:
+                reset_logger.error(f"Errore reset DB: {exc}")
+                print(f"✗ Errore reset DB: {exc}")
+
+    reset_logger.info("Reset completato.")
+    print(f"\n✓ Reset completato. Log: {log_path}\n")
+    return True
 
 
 # ============================================================================
@@ -293,6 +400,26 @@ def main():
     args = parse_args()
 
     root_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # ── Reset (se richiesto) ─────────────────────────────────────────────────
+    if args.reset or args.reset_db:
+        eseguito = reset_tutto(
+            root_dir,
+            solo_db=args.reset_db and not args.reset,
+            force=args.force,
+        )
+        if not eseguito:
+            sys.exit(0)
+        # Se non è stato passato anche un altro flag operativo, termina qui
+        # (il reset da solo non avvia la pipeline)
+        operativo = (
+            args.anni or args.only or args.skip_download is False
+            or getattr(args, "smart", False)
+        )
+        if not operativo and not args.anni:
+            print("Reset completato. Passa --anni o altri flag per avviare la pipeline.")
+            sys.exit(0)
+
     log_file = setup_logging(root_dir)
 
     # Carica config pipeline

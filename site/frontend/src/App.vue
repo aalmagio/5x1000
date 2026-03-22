@@ -106,6 +106,7 @@ const navLinks = [
   { to: '/confronto',  label: 'Confronto' },
   { to: '/categorie',  label: 'Categorie' },
   { to: '/download',   label: 'Download' },
+  { to: '/api',        label: 'API' },
   { to: '/about',      label: 'Info' },
 ]
 </script>

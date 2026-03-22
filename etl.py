@@ -193,10 +193,12 @@ def parse_importo(val) -> float | None:
 
 
 def parse_intero(val) -> int | None:
-    """Converte numero scelte (può avere punti come migliaia)."""
+    """Converte numero scelte (può avere punti/virgole/spazi come migliaia)."""
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return None
-    s = str(val).strip().replace(".", "").replace(",", "")
+    # Rimuovi spazi interni prima di togliere i separatori di migliaia
+    # es. "3 46.183" → "346183"
+    s = str(val).strip().replace(" ", "").replace(".", "").replace(",", "")
     try:
         return int(float(s))
     except ValueError:
@@ -451,10 +453,10 @@ def normalize_year(df: pd.DataFrame, anno: int) -> pd.DataFrame:
             return "Enti gestori aree protette"
         if row["CAT_ASD"]:
             return "ASD"
-        if row["CAT_ETS_ONLUS"]:
-            return "ETS/ONLUS"
-        if row["CAT_VOLONTARIATO"]:
-            return "Volontariato"
+        if row["CAT_ETS_ONLUS"] or row["CAT_VOLONTARIATO"]:
+            # ETS/ONLUS (2022+) e Volontariato (pre-2022) sono la stessa categoria
+            # con nome cambiato per legge: usiamo un'unica label storica unificata
+            return "Volontariato / ETS"
         return "Non specificata"
 
     cat_cols = ["CAT_RICERCA_SCI", "CAT_RICERCA_SAN", "CAT_COMUNI",

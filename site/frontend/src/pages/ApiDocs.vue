@@ -5,7 +5,7 @@
       <p class="text-gray-500">API REST pubblica e gratuita. Nessuna registrazione o chiave di accesso richiesta.</p>
     </div>
 
-    <!-- CTA Swagger + Base URL -->
+    <!-- Base URL + info -->
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
       <div class="card bg-brand-50 border-brand-200 flex items-start gap-4">
         <div class="w-10 h-10 bg-brand-600 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -14,23 +14,18 @@
           </svg>
         </div>
         <div class="flex-1">
-          <p class="font-semibold text-brand-800 text-sm">Swagger UI interattivo</p>
-          <p class="text-xs text-brand-600 mt-0.5 mb-3">Prova gli endpoint direttamente nel browser</p>
-          <a href="/api/docs" target="_blank" class="btn-primary text-xs px-3 py-1.5 inline-flex items-center gap-1.5">
-            Apri Swagger
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-            </svg>
-          </a>
+          <p class="font-semibold text-brand-800 text-sm">API PHP — nessuna chiave richiesta</p>
+          <p class="text-xs text-brand-600 mt-0.5">Tutti gli endpoint sono GET su <code class="font-mono">/api.php?action=...</code></p>
+          <p class="text-xs text-brand-500 mt-1">Risposte JSON, encoding UTF-8, CORS aperto (<code class="font-mono">*</code>).</p>
         </div>
       </div>
 
       <div class="card">
         <p class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Base URL</p>
         <div class="relative group">
-          <pre class="bg-gray-900 text-emerald-400 rounded-lg px-4 py-3 text-sm font-mono overflow-x-auto">https://tuodominio.it/api/v1</pre>
+          <pre class="bg-gray-900 text-emerald-400 rounded-lg px-4 py-3 text-sm font-mono overflow-x-auto">{{ baseUrl }}/api.php?action=</pre>
         </div>
-        <p class="text-xs text-gray-400 mt-2">Risposte JSON, encoding UTF-8, CORS aperto.</p>
+        <p class="text-xs text-gray-400 mt-2">Esempio: <code class="font-mono text-brand-600">?action=enti&anno=2024&per_pagina=50</code></p>
       </div>
     </div>
 
@@ -133,6 +128,7 @@
 <script setup>
 import { ref } from 'vue'
 
+const baseUrl = window.location.origin
 const copied = ref(null)
 
 function copy(text, id) {

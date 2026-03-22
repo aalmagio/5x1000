@@ -11,6 +11,7 @@ const AnalisiCategorie  = () => import('./pages/AnalisiCategorie.vue')
 const Download          = () => import('./pages/Download.vue')
 const About             = () => import('./pages/About.vue')
 const EnteDetail        = () => import('./pages/EnteDetail.vue')
+const ApiDocs           = () => import('./pages/ApiDocs.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -21,6 +22,7 @@ const router = createRouter({
     { path: '/categorie',   component: AnalisiCategorie, name: 'categorie' },
     { path: '/download',    component: Download,         name: 'download' },
     { path: '/about',       component: About,            name: 'about' },
+    { path: '/api',         component: ApiDocs,          name: 'api' },
     { path: '/ente/:cf',    component: EnteDetail,       name: 'ente' },
   ],
   scrollBehavior: () => ({ top: 0 }),

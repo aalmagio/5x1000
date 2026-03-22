@@ -234,16 +234,21 @@ const formatEur = (n) => n != null
   : '–'
 
 const CAT_COLORS = {
-  volontariato:        'bg-green-100 text-green-700',
-  asd:                 'bg-blue-100 text-blue-700',
-  ets_onlus:           'bg-purple-100 text-purple-700',
-  ricerca_scientifica: 'bg-yellow-100 text-yellow-700',
-  ricerca_sanitaria:   'bg-red-100 text-red-700',
-  comuni:              'bg-orange-100 text-orange-700',
-  beni_culturali:      'bg-pink-100 text-pink-700',
-  aree_protette:       'bg-teal-100 text-teal-700',
+  'volontariato':         'bg-green-100 text-green-700',
+  'volontariato_/_ets':   'bg-green-100 text-green-700',
+  'ets/onlus':            'bg-green-100 text-green-700',
+  'asd':                  'bg-blue-100 text-blue-700',
+  'ricerca_scientifica':  'bg-yellow-100 text-yellow-700',
+  'ricerca_sanitaria':    'bg-red-100 text-red-700',
+  'comuni':               'bg-orange-100 text-orange-700',
+  'beni_culturali':       'bg-pink-100 text-pink-700',
+  'enti_gestori_aree_protette': 'bg-teal-100 text-teal-700',
+  'non_specificata':      'bg-gray-100 text-gray-500',
 }
-const catColor = (c) => CAT_COLORS[c] ?? 'bg-gray-100 text-gray-600'
+const catColor = (c) => {
+  const key = (c ?? '').toLowerCase().replace(/[\s/]+/g, '_')
+  return CAT_COLORS[key] ?? 'bg-gray-100 text-gray-600'
+}
 
 function toggleSort(col) {
   if (sortBy.value === col) {
@@ -264,7 +269,7 @@ async function search(p = 1) {
     if (filters.value.categoria)  params.categoria  = filters.value.categoria
     if (filters.value.regione)    params.regione    = filters.value.regione
     if (filters.value.q)          params.q          = filters.value.q
-    if (filters.value.runts_only) params.runts_only = true
+    if (filters.value.runts_only) params.runts_only = 1
 
     const res = await fetchEnti(params)
     result.value = res.data
