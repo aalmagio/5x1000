@@ -612,11 +612,14 @@ def main():
         return
 
     # Riepilogo
-    anni = sorted(set(e["anno"] for e in entries))
+    anni = sorted(set(e["anno"] for e in entries), reverse=True)
     categorie = sorted(set(e["slug"] for e in entries))
     logging.info(f"Anni: {anni}")
     logging.info(f"Categorie: {categorie}")
     logging.info(f"Totale operazioni: {len(entries)}")
+
+    # Ordina dal più recente al più vecchio (coerente con etl.py)
+    entries = sorted(entries, key=lambda e: e["anno"], reverse=True)
 
     # ---- FASE 1: DOWNLOAD ----
     all_errors = []

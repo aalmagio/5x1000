@@ -744,13 +744,13 @@ def main():
     if cfg:
         logging.info("Configurazione caricata da config.yaml")
 
-    available_years = sorted(YEAR_URLS.keys())
+    available_years = sorted(YEAR_URLS.keys(), reverse=True)
 
     # --- Parsing anni da CLI ---
     anni_cli = None
     if args.anni:
         try:
-            anni_cli = sorted(int(a.strip()) for a in args.anni.split(",") if a.strip())
+            anni_cli = sorted((int(a.strip()) for a in args.anni.split(",") if a.strip()), reverse=True)
             invalid = [a for a in anni_cli if a not in available_years]
             if invalid:
                 logging.error(f"Anni non validi: {invalid}. Disponibili: {min(available_years)}-{max(available_years)}")
