@@ -1094,6 +1094,13 @@ def main():
     logging.info(f"Report generato: {output_path} ({file_size:.1f} MB)")
     logging.info(f"Log completo: {log_file}")
 
+    # Registra il report nel catalogo DB del sito (se configurato)
+    try:
+        from db_updater import registra_file_output
+        registra_file_output(output_path, anno=anno, tipo="report")
+    except Exception as exc:
+        logging.debug(f"Registrazione DB saltata: {exc}")
+
 
 if __name__ == "__main__":
     main()

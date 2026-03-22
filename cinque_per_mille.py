@@ -652,7 +652,7 @@ def ask_years(available_years, label="Aggiorna"):
     while True:
         choice = input("Scelta [1/2]: ").strip()
         if choice == "1":
-            return sorted(available_years)
+            return sorted(available_years, reverse=True)
         if choice == "2":
             while True:
                 raw = input("Inserisci gli anni separati da virgola (es. 2020,2021,2022): ").strip()
@@ -665,7 +665,7 @@ def ask_years(available_years, label="Aggiorna"):
                     if not years:
                         print("  Nessun anno inserito. Riprova.")
                         continue
-                    return sorted(years)
+                    return sorted(years, reverse=True)
                 except ValueError:
                     print("  Formato non valido. Usa numeri separati da virgola.")
         print("  Scelta non valida, inserisci 1 o 2.")
@@ -744,13 +744,13 @@ def main():
     if cfg:
         logging.info("Configurazione caricata da config.yaml")
 
-    available_years = sorted(YEAR_URLS.keys())
+    available_years = sorted(YEAR_URLS.keys(), reverse=True)
 
     # --- Parsing anni da CLI ---
     anni_cli = None
     if args.anni:
         try:
-            anni_cli = sorted(int(a.strip()) for a in args.anni.split(",") if a.strip())
+            anni_cli = sorted((int(a.strip()) for a in args.anni.split(",") if a.strip()), reverse=True)
             invalid = [a for a in anni_cli if a not in available_years]
             if invalid:
                 logging.error(f"Anni non validi: {invalid}. Disponibili: {min(available_years)}-{max(available_years)}")

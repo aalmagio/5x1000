@@ -28,10 +28,10 @@
           <RouterLink to="/dati" class="btn-primary bg-yellow-400 text-brand-900 hover:bg-yellow-300 text-base px-6 py-3 shadow-lg">
             Esplora i dati
           </RouterLink>
-          <RouterLink to="/download" class="btn-secondary border-white/30 text-white hover:bg-white/10 text-base px-6 py-3">
+          <RouterLink to="/download" class="btn-ghost text-base px-6 py-3">
             Scarica dataset
           </RouterLink>
-          <RouterLink to="/api" class="btn-secondary border-white/30 text-white hover:bg-white/10 text-base px-6 py-3">
+          <RouterLink to="/api" class="btn-ghost text-base px-6 py-3">
             Documentazione API
           </RouterLink>
         </div>

@@ -34,12 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 function load_env(string $dir): void {
     $f = $dir . '/.env';
-    if (!is_file($f)) {
-        error_log("[api.php] .env non trovato in: $f");
-        return;
-    }
-    error_log("[api.php] .env caricato da: $f");
-    $loaded = [];
+    if (!is_file($f)) return;
     foreach (file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
         $line = trim($line);
         if ($line === '' || $line[0] === '#') continue;
@@ -49,12 +44,8 @@ function load_env(string $dir): void {
         if ($k !== '' && empty($_ENV[$k])) {
             $_ENV[$k] = $v;
             putenv("$k=$v");
-            $loaded[$k] = empty($v) ? '(VUOTO)' : '(set,len=' . strlen($v) . ')';
-        } elseif ($k !== '') {
-            $loaded[$k] = '(saltato,ENV già set)';
         }
     }
-    error_log("[api.php] .env keys: " . json_encode($loaded));
 }
 
 load_env(__DIR__);
@@ -69,7 +60,6 @@ function db(): PDO {
     $name = (getenv('SITE_DB_NAME') ?: null) ?? ($_ENV['SITE_DB_NAME'] ?? '');
     $user = (getenv('SITE_DB_USER') ?: null) ?? ($_ENV['SITE_DB_USER'] ?? '');
     $pass = (getenv('SITE_DB_PASSWORD') ?: null) ?? ($_ENV['SITE_DB_PASSWORD'] ?? '');
-    error_log("[api.php] DB connect: host=$host db=$name user=" . (empty($user) ? '(VUOTO!)' : '(set,len=' . strlen($user) . ')'));
     $dsn  = "mysql:host=$host;port=$port;dbname=$name;charset=utf8mb4";
     $pdo  = new PDO($dsn, $user, $pass, [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
@@ -500,6 +490,75 @@ function action_cerca_cf(): void {
     json_out($stmt->fetchAll());
 }
 
+function action_categoria_dettaglio(): void {
+    $pdo       = db();
+    $categoria = str_param('categoria');
+    $anno      = int_param('anno');
+    $pagina    = max(1, int_param('pagina', 1));
+    $per_pagina = min(200, max(1, int_param('per_pagina', 50)));
+
+    if (!$categoria) err('Parametro categoria mancante');
+    if (!$anno)      err('Parametro anno mancante');
+
+    // Totali + per regione
+    $stmt = $pdo->prepare(
+        "SELECT regione,
+                COUNT(*) AS n_enti,
+                SUM(n_scelte) AS totale_scelte,
+                SUM(importo_totale) AS totale_importo
+         FROM enti
+         WHERE anno = ? AND categoria_principale = ?
+         GROUP BY regione
+         ORDER BY totale_importo DESC"
+    );
+    $stmt->execute([$anno, $categoria]);
+    $per_regione = $stmt->fetchAll();
+    $totale_enti   = 0;
+    $totale_scelte = 0;
+    $totale_imp    = 0.0;
+    foreach ($per_regione as &$r) {
+        $r['n_enti']         = (int)$r['n_enti'];
+        $r['totale_scelte']  = (int)$r['totale_scelte'];
+        $r['totale_importo'] = (float)$r['totale_importo'];
+        $totale_enti   += $r['n_enti'];
+        $totale_scelte += $r['totale_scelte'];
+        $totale_imp    += $r['totale_importo'];
+    }
+
+    // Lista enti paginata
+    $pagine = max(1, (int)ceil($totale_enti / $per_pagina));
+    $offset = ($pagina - 1) * $per_pagina;
+    $stmt2 = $pdo->prepare(
+        "SELECT cod_fiscale, denominazione, regione, n_scelte, importo_totale, runts_5x1000
+         FROM enti
+         WHERE anno = ? AND categoria_principale = ?
+         ORDER BY importo_totale DESC
+         LIMIT $per_pagina OFFSET $offset"
+    );
+    $stmt2->execute([$anno, $categoria]);
+    $enti = $stmt2->fetchAll();
+    foreach ($enti as &$e) {
+        $e['n_scelte']       = $e['n_scelte'] !== null ? (int)$e['n_scelte'] : null;
+        $e['importo_totale'] = $e['importo_totale'] !== null ? (float)$e['importo_totale'] : null;
+        $e['runts_5x1000']   = (bool)$e['runts_5x1000'];
+    }
+
+    json_out([
+        'categoria'   => $categoria,
+        'anno'        => $anno,
+        'totali'      => [
+            'n_enti'         => $totale_enti,
+            'totale_scelte'  => $totale_scelte,
+            'totale_importo' => $totale_imp,
+        ],
+        'per_regione' => $per_regione,
+        'pagina'      => $pagina,
+        'pagine'      => $pagine,
+        'per_pagina'  => $per_pagina,
+        'enti'        => $enti,
+    ]);
+}
+
 function action_download(): void {
     set_time_limit(0);
 
@@ -603,10 +662,11 @@ try {
         'ente'               => action_ente(),
         'confronta'          => action_confronta(),
         'cerca_cf'           => action_cerca_cf(),
-        'analisi_categorie'  => action_analisi_categorie(),
-        'files'              => action_files(),
-        'download'           => action_download(),
-        default              => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, statistiche, enti, ente, confronta, analisi_categorie, files, download", 404),
+        'analisi_categorie'    => action_analisi_categorie(),
+        'categoria_dettaglio'  => action_categoria_dettaglio(),
+        'files'                => action_files(),
+        'download'             => action_download(),
+        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download", 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());

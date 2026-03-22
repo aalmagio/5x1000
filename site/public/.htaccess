@@ -1,0 +1,16 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # 1. File e directory esistenti vengono serviti direttamente
+  #    (api.php, admin.php, assets/, index.html, ecc.)
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # 2. Shortcut download: /download/{tipo}/{anno} → api.php
+  #    es. /download/csv/completo  /download/xlsx/2022  /download/report/2023
+  RewriteRule ^download/([^/]+)/(.+)$ api.php?action=download&tipo=$1&anno=$2 [QSA,L]
+
+  # 3. Tutte le altre route → index.html (Vue Router history mode)
+  RewriteRule ^ index.html [L]
+</IfModule>
