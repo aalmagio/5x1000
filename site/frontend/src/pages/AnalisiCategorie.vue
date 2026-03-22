@@ -82,7 +82,8 @@
             <div
               v-for="(row, i) in categorieOrdinate"
               :key="row.cat"
-              class="flex items-center gap-3"
+              class="flex items-center gap-3 cursor-pointer hover:opacity-80"
+              @click="router.push({ name: 'categoria_dettaglio', params: { categoria: row.cat, anno: annoSelezionato } })"
             >
               <div class="w-44 text-right flex-shrink-0">
                 <p class="text-sm font-medium text-gray-700 capitalize truncate">{{ row.cat.replace(/_/g, ' ') }}</p>
@@ -129,7 +130,12 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(row, i) in categorieOrdinate" :key="row.cat">
+                <tr
+                v-for="(row, i) in categorieOrdinate"
+                :key="row.cat"
+                class="cursor-pointer hover:bg-brand-50"
+                @click="router.push({ name: 'categoria_dettaglio', params: { categoria: row.cat, anno: annoSelezionato } })"
+              >
                   <td>
                     <span class="flex items-center gap-2">
                       <span class="w-3 h-3 rounded-full flex-shrink-0" :style="{ backgroundColor: CAT_COLORS[i % CAT_COLORS.length] }"></span>
@@ -249,7 +255,10 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { fetchAnni, fetchAnalisiCategorie } from '@/api/client'
+
+const router = useRouter()
 
 const CAT_COLORS = ['#3b82f6','#10b981','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#f97316','#ec4899']
 
@@ -344,7 +353,12 @@ async function loadData() {
     if (activePreset.value) {
       applyPreset(PRESETS.find(p => p.label === activePreset.value) ?? null)
     } else {
-      catAttive.value = new Set(data.value.categorie.slice(0, 4))
+      // Default: Ricerca sanitaria + Ricerca scientifica + Volontariato/ETS
+      const defaultKw = ['ricerca', 'sanitari', 'volontariato', 'ets', 'onlus']
+      const preferite = data.value.categorie.filter(cat =>
+        defaultKw.some(k => cat.toLowerCase().includes(k))
+      )
+      catAttive.value = new Set(preferite.length ? preferite : data.value.categorie.slice(0, 4))
     }
     setTimeout(() => { animated.value = true }, 100)
   } catch {

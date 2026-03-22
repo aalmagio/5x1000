@@ -40,5 +40,9 @@ export const fetchCercaCf = (q) => get('cerca_cf', { q })
 // Analisi per categoria (tutti gli anni o singolo anno)
 export const fetchAnalisiCategorie = (anno) => get('analisi_categorie', anno ? { anno } : {})
 
+// Dettaglio categoria: stats per regione + enti paginati
+export const fetchCategoriaDettaglio = (categoria, anno, pagina = 1) =>
+  get('categoria_dettaglio', { categoria, anno, pagina })
+
 // Catalogo file per Download
 export const fetchFiles = (params) => get('files', params ?? {})

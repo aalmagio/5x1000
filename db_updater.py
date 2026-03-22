@@ -163,6 +163,12 @@ def aggiorna_db_sito(
                         f"db_updater: tabella enti aggiornata per anni "
                         f"{anni_processati if anni_processati else 'tutti'}"
                     )
+                    # 4b. Aggiorna tabella runts con denominazioni canoniche
+                    try:
+                        _aggiorna_runts(cur, csv_path, pd)
+                        logger.info("db_updater: tabella runts aggiornata")
+                    except Exception as exc_r:
+                        logger.warning(f"db_updater: aggiornamento runts saltato – {exc_r}")
 
         logger.info(f"db_updater: completato in {time.time() - t0:.1f}s")
         return True
@@ -251,6 +257,103 @@ def _aggiorna_files(cur, dati_dir: Path) -> None:
             except (IndexError, ValueError):
                 continue
             _upsert_file(cur, anno, "categoria", cat_slug, "xlsx", f)
+
+
+# ---------------------------------------------------------------------------
+# Aggiornamento tabella runts (denominazione canonica per CF)
+# ---------------------------------------------------------------------------
+
+def _aggiorna_runts(cur, csv_path: Path, pd) -> None:
+    """
+    Popola / aggiorna la tabella `runts` con una riga per codice fiscale.
+    Strategia denominazione:
+      - Se l'ente ha RUNTS_DENOMINAZIONE in almeno un anno → usa quella.
+      - Altrimenti → usa la DENOMINAZIONE dell'anno più recente.
+    Dati RUNTS (sezione, sede, data_iscrizione) presi dall'anno più recente
+    con dati RUNTS disponibili.
+    """
+    cols_needed = {
+        "ANNO", "COD_FISCALE", "DENOMINAZIONE",
+        "RUNTS_DENOMINAZIONE", "RUNTS_SEZIONE",
+        "RUNTS_SEDE_COMUNE", "RUNTS_SEDE_PROV",
+        "RUNTS_5X1000", "RUNTS_DATA_ISCRIZIONE",
+    }
+
+    chunks = pd.read_csv(
+        csv_path,
+        dtype=str,
+        chunksize=10_000,
+        low_memory=False,
+        usecols=lambda c: c in cols_needed,
+    )
+    all_rows = pd.concat(list(chunks), ignore_index=True)
+
+    if "ANNO" in all_rows.columns:
+        all_rows["ANNO"] = pd.to_numeric(all_rows["ANNO"], errors="coerce")
+
+    # Riempi NaN con None-compatibili
+    all_rows = all_rows.where(all_rows.notna(), other=None)
+
+    result: dict[str, tuple] = {}
+
+    for cf, group in all_rows.groupby("COD_FISCALE"):
+        if not cf or str(cf) == "nan":
+            continue
+        group = group.sort_values("ANNO", ascending=False)
+
+        # Righe con dati RUNTS
+        runts_mask = (
+            group["RUNTS_DENOMINAZIONE"].notna()
+            & (group["RUNTS_DENOMINAZIONE"].astype(str).str.strip() != "")
+        )
+        runts_rows = group[runts_mask]
+
+        if not runts_rows.empty:
+            best = runts_rows.iloc[0]
+            denom       = best.get("RUNTS_DENOMINAZIONE") or group.iloc[0].get("DENOMINAZIONE")
+            sezione     = best.get("RUNTS_SEZIONE")        or None
+            sede_comune = best.get("RUNTS_SEDE_COMUNE")   or None
+            sede_prov   = best.get("RUNTS_SEDE_PROV")     or None
+            raw_attivo  = str(best.get("RUNTS_5X1000", "0") or "0").strip()
+            attivo      = 1 if raw_attivo in ("1", "True", "true") else 0
+            data_isc    = best.get("RUNTS_DATA_ISCRIZIONE") or None
+        else:
+            best        = group.iloc[0]
+            denom       = best.get("DENOMINAZIONE") or None
+            sezione = sede_comune = sede_prov = data_isc = None
+            attivo  = 0
+
+        # Converti NaN / "nan" a None
+        def _clean(v):
+            if v is None:
+                return None
+            s = str(v).strip()
+            return None if s in ("nan", "None", "") else s
+
+        result[str(cf)] = (
+            _clean(denom), _clean(sezione), _clean(sede_comune),
+            _clean(sede_prov), attivo, _clean(data_isc),
+        )
+
+    upsert_sql = """
+        INSERT INTO runts
+          (cod_fiscale, denominazione, sezione, sede_comune, sede_prov,
+           attivo_5x1000, data_iscrizione)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+          denominazione   = VALUES(denominazione),
+          sezione         = VALUES(sezione),
+          sede_comune     = VALUES(sede_comune),
+          sede_prov       = VALUES(sede_prov),
+          attivo_5x1000   = VALUES(attivo_5x1000),
+          data_iscrizione = VALUES(data_iscrizione),
+          aggiornato_il   = NOW()
+    """
+    rows = [(cf,) + vals for cf, vals in result.items()]
+    for i in range(0, len(rows), _CHUNK_SIZE):
+        cur.executemany(upsert_sql, rows[i : i + _CHUNK_SIZE])
+
+    logger.info(f"db_updater: {len(rows):,} righe upsert in tabella runts")
 
 
 # ---------------------------------------------------------------------------

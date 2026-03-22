@@ -199,7 +199,7 @@
           </div>
           <div>
             <dt class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-0.5">Data iscrizione</dt>
-            <dd class="text-gray-800">{{ latestRow?.runts_data_iscrizione ?? '–' }}</dd>
+            <dd class="text-gray-800">{{ formatDate(latestRow?.runts_data_iscrizione) }}</dd>
           </div>
         </dl>
       </div>
@@ -219,7 +219,10 @@ const loading  = ref(true)
 const error    = ref(false)
 const animated = ref(false)
 
-const formatNum = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
+const formatNum  = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
+const formatDate = (d) => d
+  ? new Date(d).toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' })
+  : '–'
 const formatEur = (n) => n != null
   ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
   : '–'

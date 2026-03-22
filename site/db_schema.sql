@@ -90,6 +90,24 @@ CREATE TABLE IF NOT EXISTS `enti` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
+-- 4. Registro RUNTS (una riga per codice fiscale)
+--    Denominazione canonica: RUNTS se disponibile, altrimenti
+--    quella dell'anno più recente nella tabella enti.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `runts` (
+  `cod_fiscale`      VARCHAR(20)   NOT NULL,
+  `denominazione`    VARCHAR(500)  DEFAULT NULL COMMENT 'Nome canonico (RUNTS o anno più recente)',
+  `sezione`          VARCHAR(100)  DEFAULT NULL,
+  `sede_comune`      VARCHAR(200)  DEFAULT NULL,
+  `sede_prov`        CHAR(3)       DEFAULT NULL,
+  `attivo_5x1000`    TINYINT(1)    DEFAULT 0,
+  `data_iscrizione`  DATE          DEFAULT NULL,
+  `aggiornato_il`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`cod_fiscale`),
+  KEY `idx_runts_denominazione` (`denominazione`(100))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
 -- Vista: ultimo aggiornamento per anno
 -- ------------------------------------------------------------
 CREATE OR REPLACE VIEW `v_ultimo_aggiornamento` AS
