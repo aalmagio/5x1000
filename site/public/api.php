@@ -34,12 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 function load_env(string $dir): void {
     $f = $dir . '/.env';
-    if (!is_file($f)) {
-        error_log("[api.php] .env non trovato in: $f");
-        return;
-    }
-    error_log("[api.php] .env caricato da: $f");
-    $loaded = [];
+    if (!is_file($f)) return;
     foreach (file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
         $line = trim($line);
         if ($line === '' || $line[0] === '#') continue;
@@ -49,12 +44,8 @@ function load_env(string $dir): void {
         if ($k !== '' && empty($_ENV[$k])) {
             $_ENV[$k] = $v;
             putenv("$k=$v");
-            $loaded[$k] = empty($v) ? '(VUOTO)' : '(set,len=' . strlen($v) . ')';
-        } elseif ($k !== '') {
-            $loaded[$k] = '(saltato,ENV già set)';
         }
     }
-    error_log("[api.php] .env keys: " . json_encode($loaded));
 }
 
 load_env(__DIR__);
@@ -69,7 +60,6 @@ function db(): PDO {
     $name = (getenv('SITE_DB_NAME') ?: null) ?? ($_ENV['SITE_DB_NAME'] ?? '');
     $user = (getenv('SITE_DB_USER') ?: null) ?? ($_ENV['SITE_DB_USER'] ?? '');
     $pass = (getenv('SITE_DB_PASSWORD') ?: null) ?? ($_ENV['SITE_DB_PASSWORD'] ?? '');
-    error_log("[api.php] DB connect: host=$host db=$name user=" . (empty($user) ? '(VUOTO!)' : '(set,len=' . strlen($user) . ')'));
     $dsn  = "mysql:host=$host;port=$port;dbname=$name;charset=utf8mb4";
     $pdo  = new PDO($dsn, $user, $pass, [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
