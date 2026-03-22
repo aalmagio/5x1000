@@ -49,7 +49,12 @@
             <h1 class="text-2xl font-bold text-gray-900 leading-tight">{{ ente.denominazione }}</h1>
             <p class="font-mono text-gray-400 text-sm mt-1 select-all">{{ ente.cod_fiscale }}</p>
             <div class="flex flex-wrap gap-2 mt-3">
-              <span class="badge bg-brand-100 text-brand-700 capitalize">{{ ente.categoria?.replace(/_/g, ' ') ?? '–' }}</span>
+              <span
+                v-for="cat in (ente.categorie?.length ? ente.categorie : [ente.categoria])"
+                :key="cat"
+                class="badge capitalize"
+                :class="catColor(cat)"
+              >{{ cat ?? '–' }}</span>
               <span v-if="ente.runts_denominazione" class="badge bg-green-100 text-green-700">✓ RUNTS</span>
             </div>
           </div>
@@ -218,6 +223,18 @@ const ente     = ref(null)
 const loading  = ref(true)
 const error    = ref(false)
 const animated = ref(false)
+
+const CAT_COLORS = {
+  'volontariato':        'bg-green-100 text-green-700',
+  'ets/onlus':           'bg-green-100 text-green-700',
+  'asd':                 'bg-blue-100 text-blue-700',
+  'ricerca scientifica': 'bg-yellow-100 text-yellow-700',
+  'ricerca sanitaria':   'bg-red-100 text-red-700',
+  'comuni':              'bg-orange-100 text-orange-700',
+  'beni culturali':      'bg-pink-100 text-pink-700',
+  'aree protette':       'bg-teal-100 text-teal-700',
+}
+const catColor = (c) => CAT_COLORS[(c ?? '').toLowerCase()] ?? 'bg-brand-100 text-brand-700'
 
 const formatNum  = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
 const formatDate = (d) => d

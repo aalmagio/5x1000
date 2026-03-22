@@ -713,9 +713,6 @@ def main():
     logging.info("=" * 60)
 
     # ---- Aggiornamento DB sito ----
-    # Se ETL ha già eseguito l'aggiornamento per-anno (--aggiorna-db), qui
-    # registriamo solo il pipeline_run e aggiorniamo il catalogo dataset_files,
-    # senza reimportare la tabella enti (che è già aggiornata anno per anno).
     try:
         from db_updater import aggiorna_db_sito
         import pathlib
@@ -725,13 +722,9 @@ def main():
         _anni_list = [int(a) for a in anni.split(",") if a.strip()] if anni else []
         _db_status = "ok" if all_ok else "parziale"
         _note = f"Errori in: {failed}" if not all_ok else ""
-        # Rimuovi "etl" dalla lista step: gli enti sono già stati aggiornati
-        # per-anno dentro etl.py --aggiorna-db; qui vogliamo solo registrare
-        # il run e aggiornare dataset_files.
-        _steps_db = [s for s in steps if s != "etl"]
         ok_db = aggiorna_db_sito(
             anni_processati=_anni_list,
-            steps_eseguiti=_steps_db,
+            steps_eseguiti=list(steps),
             csv_path=_csv_path,
             dati_dir=_dati_dir,
             status=_db_status,
