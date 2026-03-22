@@ -295,12 +295,21 @@ function adm_run_venv_setup(): array {
     $log_file = LOG_DIR . "/venv_setup_{$ts}.log";
     $venv     = PROJECT_ROOT . '/venv';
     $req      = PROJECT_ROOT . '/requirements.txt';
+
+    // In ambienti Apache/PHP, python3 -m venv fallisce con
+    // "Unable to determine path to the running Python interpreter"
+    // perché sys.executable è vuoto. Usiamo il percorso assoluto risolto da which.
+    $python3 = trim((string)@shell_exec('which python3 2>/dev/null'))
+            ?: trim((string)@shell_exec('which python 2>/dev/null'))
+            ?: 'python3';
+
     $pip_step = is_file($req)
         ? ' && ' . escapeshellarg("$venv/bin/pip") . ' install -r ' . escapeshellarg($req)
         : '';
     $cmd = sprintf(
-        'nohup bash -c "cd %s && python3 -m venv %s%s" > %s 2>&1 & echo $!',
+        'nohup bash -c "cd %s && %s -m venv %s%s" > %s 2>&1 & echo $!',
         escapeshellarg(PROJECT_ROOT),
+        escapeshellarg($python3),
         escapeshellarg($venv),
         $pip_step,
         escapeshellarg($log_file)
