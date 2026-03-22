@@ -1,6 +1,6 @@
 # 5 per Mille — Pipeline dati + sito web
 
-Pipeline Python per scaricare, normalizzare e analizzare i dati dei beneficiari del **5 per mille** pubblicati dall'**Agenzia delle Entrate**, dal 2006 al 2024.
+Pipeline Python per scaricare, normalizzare e analizzare i dati dei beneficiari del **5 per mille** pubblicati dall'**Agenzia delle Entrate**, dal 2006 ad oggi.
 
 Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i dati del **Registro Unico Nazionale del Terzo Settore (RUNTS)**, accessibile via sito web open data ([5x1000.almagioni.com](https://5x1000.almagioni.com)) e via API REST.
 
@@ -17,6 +17,7 @@ Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i
 | `report.py` | Genera un report Excel multi-foglio stile ASSIF/Bedogni con classifiche, confronto YoY e aggregazioni regionali |
 | `gsheets.py` | Carica il dataset normalizzato su Google Sheets per Looker Studio |
 | `db_updater.py` | Aggiorna il database MySQL del sito web al termine della pipeline |
+| `forecast.py` | Genera proiezioni trend via regressione lineare; output JSON per il sito |
 | `pipeline_checker.py` | Analizza i file esistenti per la modalità `--smart` (salta step già aggiornati) |
 
 ---
@@ -27,7 +28,7 @@ Il file `Dati/enti_5x1000_norm.csv` prodotto da `etl.py` ha queste colonne:
 
 | Colonna | Tipo | Descrizione |
 |---|---|---|
-| `ANNO` | int | Anno di riferimento (2006–2024) |
+| `ANNO` | int | Anno di riferimento (2006–anno corrente) |
 | `COD_FISCALE` | str | Codice fiscale (11 char, zero-padded se numerico) |
 | `DENOMINAZIONE` | str | Nome dell'ente |
 | `REGIONE` | str | Regione sede |
@@ -196,6 +197,36 @@ Prima di tutto, [crea le credenziali GCP](#setup-google-sheets):
 python gsheets.py --sheet-id TUO_SHEET_ID
 ```
 
+### 5. Generare le proiezioni trend (forecast)
+
+```bash
+# Proiezione standard: storico fino all'anno scorso, +2 anni
+python forecast.py
+
+# Numero di anni da proiettare personalizzato
+python forecast.py --anni 3
+
+# Specificare manualmente l'ultimo anno completo dello storico
+python forecast.py --anno-max 2024
+
+# Da CSV anziché dal DB
+python forecast.py --csv Dati/enti_5x1000_norm.csv
+
+# File di output personalizzato
+python forecast.py --out /percorso/forecast.json
+```
+
+Output: `site/public/data/forecast.json`
+
+| Flag | Default | Descrizione |
+|---|---|---|
+| `--anni` | `2` | Numero di anni futuri da proiettare |
+| `--anno-max` | `anno corrente - 1` | Ultimo anno incluso nello storico (esclude anni parziali) |
+| `--csv` | DB MySQL | CSV normalizzato di input |
+| `--out` | `site/public/data/forecast.json` | Percorso file JSON di output |
+
+> **Nota**: per default viene escluso l'anno in corso, che contiene dati incompleti. Le proiezioni partono quindi dal primo anno senza dati definitivi (es. se i dati completi arrivano fino al 2024, le proiezioni coprono il 2025 e il 2026).
+
 ---
 
 ## Configurazione (`config.yaml`)
@@ -219,6 +250,7 @@ Priorità: **flag CLI > config.yaml > default nel codice**
 ├── report.py             # Report Excel multi-foglio
 ├── gsheets.py            # Export su Google Sheets
 ├── db_updater.py         # Aggiornamento DB sito web
+├── forecast.py           # Proiezioni trend via regressione lineare
 ├── pipeline_checker.py   # Analisi smart mode
 ├── config.yaml           # Configurazione esterna
 ├── requirements.txt
@@ -231,6 +263,8 @@ Priorità: **flag CLI > config.yaml > default nel codice**
 │   │   ├── admin.php     # Pannello admin
 │   │   ├── .htaccess     # Vue Router + redirect download
 │   │   ├── .env.example  # Variabili d'ambiente (copiare in .env)
+│   │   ├── data/
+│   │   │   └── forecast.json  # Proiezioni generate da forecast.py
 │   │   └── assets/       # JS/CSS buildati da Vite
 │   └── frontend/         # Sorgenti Vue (Vite + Tailwind)
 │       ├── src/
@@ -243,7 +277,7 @@ Priorità: **flag CLI > config.yaml > default nel codice**
 │   └── report_2024.xlsx          # ← output di report.py
 │
 ├── Runts/                # File RUNTS (da scaricare manualmente, non in repo)
-├── 2006/ ... 2024/       # File grezzi AdE (non in repo)
+├── 2006/ ... /           # File grezzi AdE per anno (non in repo)
 ├── _EXAMPLE/             # File di esempio per testing
 └── log/                  # Log esecuzioni (non in repo)
 ```
@@ -253,7 +287,7 @@ Priorità: **flag CLI > config.yaml > default nel codice**
 ## Sito web
 
 Il sito [5x1000.almagioni.com](https://5x1000.almagioni.com) espone i dati via:
-- **Interfaccia web**: esplora enti, confronta anni, analisi per categoria
+- **Interfaccia web**: esplora enti, confronta anni, analisi per categoria, proiezioni trend
 - **API REST** (`/api/v1/`): endpoint JSON per integrazioni esterne (documentazione su `/api-docs`)
 - **Download** diretto dei dataset in CSV e Excel
 
