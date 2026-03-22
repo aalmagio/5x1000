@@ -62,8 +62,9 @@ STEPS_ALL = ["download", "categorie", "etl", "report", "gsheets"]
 
 DEFAULT_INPUT = "categorie.xlsx"
 
-# Python eseguibile: stesso interprete che sta eseguendo questo script
-PYTHON = sys.executable
+# Python eseguibile: stesso interprete che sta eseguendo questo script.
+# sys.executable può essere '' in ambienti embedded/CGI/PHP; fallback robusto.
+PYTHON = sys.executable or shutil.which("python3") or shutil.which("python") or "python3"
 
 
 def _load_pipeline_config(root_dir):
