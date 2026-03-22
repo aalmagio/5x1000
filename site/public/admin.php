@@ -48,7 +48,6 @@ function adm_load_env(string $path): void {
 }
 adm_load_env(ENV_FILE);
 
-$python_cmd    = getenv('PYTHON_CMD') ?: 'python3';
 $admin_pw_hash = (string)(getenv('ADMIN_PASSWORD') ?: '');
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -187,6 +186,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $tab = 'settings';
     }
+
+    // -- setup venv --
+    if ($pa === 'setup_venv') {
+        if (adm_is_running()) {
+            $flash = ['err', 'Un processo è già in esecuzione. Attendi prima di creare il venv.'];
+        } else {
+            [$ok, $msg, $log_file] = adm_run_venv_setup();
+            if ($ok) { header('Location: admin.php?tab=log&logfile=' . urlencode($log_file)); exit; }
+            $flash = ['err', $msg];
+        }
+        $tab = 'settings';
+    }
+
+    // -- set venv path --
+    if ($pa === 'set_venv_path') {
+        $vp = trim($_POST['venv_path'] ?? '');
+        if ($vp === '' || is_dir($vp)) {
+            adm_update_env_key(ENV_FILE, 'VENV_PATH', $vp);
+            adm_load_env(ENV_FILE);   // ricarica per aggiornare getenv in questa request
+            $flash = ['ok', $vp ? "VENV_PATH impostato su: $vp" : 'VENV_PATH rimosso (auto-detect).'];
+        } else {
+            $flash = ['err', "Cartella non trovata: $vp"];
+        }
+        $tab = 'settings';
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -210,13 +234,79 @@ function adm_kill(): void {
     @unlink(PID_FILE);
 }
 
+// ─── Rilevamento Python / venv ───────────────────────────────────────────────
+
+/**
+ * Restituisce info sul venv: ['path'=>..., 'python'=>..., 'exists'=>bool, 'source'=>'...'].
+ * Priorità: PYTHON_CMD > VENV_PATH > PROJECT_ROOT/venv > PROJECT_ROOT/.venv > python3
+ */
+function adm_venv_info(): array {
+    // Override esplicito comando python
+    $explicit = getenv('PYTHON_CMD') ?: '';
+    if ($explicit && (file_exists($explicit) || strpos($explicit, '/') === false)) {
+        return ['path' => '', 'python' => $explicit, 'exists' => true, 'source' => 'PYTHON_CMD'];
+    }
+
+    // Cartella venv esplicita
+    $venv_path_env = rtrim(getenv('VENV_PATH') ?: '', '/');
+    if ($venv_path_env) {
+        $py = $venv_path_env . '/bin/python3';
+        if (is_executable($py)) {
+            return ['path' => $venv_path_env, 'python' => $py, 'exists' => true, 'source' => 'VENV_PATH'];
+        }
+        return ['path' => $venv_path_env, 'python' => $py, 'exists' => false, 'source' => 'VENV_PATH (non trovato)'];
+    }
+
+    // Auto-detect: cartella venv o .venv nella PROJECT_ROOT
+    foreach (['venv', '.venv'] as $dir) {
+        $base = PROJECT_ROOT . '/' . $dir;
+        $py   = $base . '/bin/python3';
+        if (is_executable($py)) {
+            return ['path' => $base, 'python' => $py, 'exists' => true, 'source' => "auto ($dir)"];
+        }
+    }
+
+    // Fallback: python3 di sistema
+    return ['path' => '', 'python' => 'python3', 'exists' => false, 'source' => 'sistema (nessun venv)'];
+}
+
+/** Restituisce il comando python da usare per lanciare gli script. */
+function adm_python_cmd(): string {
+    return adm_venv_info()['python'];
+}
+
+/** Crea il venv e installa requirements.txt in background. */
+function adm_run_venv_setup(): array {
+    @mkdir(LOG_DIR, 0755, true);
+    $ts       = date('Ymd_His');
+    $log_file = LOG_DIR . "/venv_setup_{$ts}.log";
+    $venv     = PROJECT_ROOT . '/venv';
+    $req      = PROJECT_ROOT . '/requirements.txt';
+    $pip_step = is_file($req)
+        ? ' && ' . escapeshellarg("$venv/bin/pip") . ' install -r ' . escapeshellarg($req)
+        : '';
+    $cmd = sprintf(
+        'nohup bash -c "cd %s && python3 -m venv %s%s" > %s 2>&1 & echo $!',
+        escapeshellarg(PROJECT_ROOT),
+        escapeshellarg($venv),
+        $pip_step,
+        escapeshellarg($log_file)
+    );
+    $pid = (int)@shell_exec($cmd);
+    if ($pid <= 0) return [false, 'Impossibile avviare la creazione del venv. Verifica che shell_exec() e bash siano disponibili.', ''];
+    file_put_contents(PID_FILE, $pid);
+    return [true, "PID $pid", $log_file];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function adm_run_bg(string $script, array $args, string $log_prefix): array {
     @mkdir(LOG_DIR, 0755, true);
     $ts       = date('Ymd_His');
     $log_file = LOG_DIR . "/{$log_prefix}_{$ts}.log";
     if (!file_exists($script)) return [false, "Script non trovato: $script", ''];
 
-    $python = getenv('PYTHON_CMD') ?: 'python3';
+    $python = adm_python_cmd();
     $cmd = sprintf(
         'cd %s && nohup %s %s %s > %s 2>&1 & echo $!',
         escapeshellarg(PROJECT_ROOT),
@@ -392,6 +482,7 @@ $recent_runs = $dati_tree = $log_files = [];
 $enti_count = $last_anno = $files_count = $last_run = null;
 $db_ok       = false;
 $active_log  = null;
+$venv_info   = adm_venv_info();   // rilevato prima del login check così è disponibile ovunque
 
 if ($logged_in) {
     $is_running   = adm_is_running();
@@ -997,7 +1088,8 @@ $he = fn(string $s) => htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'
             'DATI_DIR'     => DATI_DIR,
             'LOG_DIR'      => LOG_DIR,
             'ENV_FILE'     => ENV_FILE,
-            'Python cmd'   => $python_cmd,
+            'Python usato' => $venv_info['python'],
+            'Venv source'  => $venv_info['source'],
             'PHP version'  => phpversion(),
             'DB host'      => getenv('SITE_DB_HOST') ?: 'localhost',
             'DB name'      => getenv('SITE_DB_NAME') ?: '(non configurato)',
@@ -1011,6 +1103,86 @@ $he = fn(string $s) => htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'
           </div>
           <?php endforeach; ?>
         </dl>
+      </div>
+
+      <!-- Venv card (span 2 cols on lg) -->
+      <div class="bg-white rounded-xl border border-gray-200 p-5 lg:col-span-2">
+        <h2 class="font-semibold text-gray-900 text-sm mb-1">Ambiente Python (venv)</h2>
+        <p class="text-xs text-gray-500 mb-4">
+          Il pannello cerca automaticamente un venv in <code>PROJECT_ROOT/venv</code> o <code>.venv</code>,
+          oppure usa <code>VENV_PATH</code> / <code>PYTHON_CMD</code> dal file <code>.env</code>.
+        </p>
+
+        <?php
+        $venv_exists = $venv_info['exists'] && $venv_info['path'];
+        $venv_path   = $venv_info['path'] ?: PROJECT_ROOT . '/venv';
+        $req_exists  = is_file(PROJECT_ROOT . '/requirements.txt');
+        ?>
+
+        <!-- Stato attuale -->
+        <div class="flex items-center gap-3 mb-4 p-3 rounded-lg <?= $venv_exists ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200' ?>">
+          <span class="text-lg"><?= $venv_exists ? '✅' : '⚠️' ?></span>
+          <div class="text-xs">
+            <?php if ($venv_exists): ?>
+              <p class="font-medium text-green-800">Venv trovato: <code class="font-mono"><?= $he($venv_info['path']) ?></code></p>
+              <p class="text-green-700">Python: <code class="font-mono"><?= $he($venv_info['python']) ?></code> &nbsp;·&nbsp; Rilevato via: <?= $he($venv_info['source']) ?></p>
+            <?php else: ?>
+              <p class="font-medium text-amber-800">Nessun venv trovato — verrà usato <code class="font-mono"><?= $he($venv_info['python']) ?></code> (sistema)</p>
+              <p class="text-amber-700">Se mancano dipendenze Python, crea il venv qui sotto.</p>
+            <?php endif; ?>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <!-- Crea / Ricrea venv -->
+          <div class="border border-gray-200 rounded-lg p-4">
+            <p class="text-xs font-medium text-gray-700 mb-1">
+              <?= $venv_exists ? 'Ricrea venv + reinstalla dipendenze' : 'Crea venv e installa dipendenze' ?>
+            </p>
+            <p class="text-xs text-gray-500 mb-3">
+              Esegue <code>python3 -m venv <?= $he($venv_path) ?></code>
+              <?= $req_exists ? ' e poi <code>pip install -r requirements.txt</code>' : ' (requirements.txt non trovato)' ?>.
+              Il log è visibile nel tab Log.
+            </p>
+            <form method="POST">
+              <input type="hidden" name="action" value="setup_venv">
+              <input type="hidden" name="csrf" value="<?= $he($csrf) ?>">
+              <?php if ($venv_exists): ?>
+              <label class="flex items-center gap-1.5 text-xs text-red-700 mb-2 cursor-pointer">
+                <input type="checkbox" required class="rounded text-red-600">
+                Confermo di voler sovrascrivere il venv esistente
+              </label>
+              <?php endif; ?>
+              <button type="submit" <?= $is_running ? 'disabled' : '' ?>
+                class="px-4 py-2 <?= $venv_exists ? 'bg-orange-500 hover:bg-orange-600' : 'bg-blue-600 hover:bg-blue-700' ?> disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+                <?= $venv_exists ? '🔄 Ricrea venv' : '⚙ Crea venv' ?>
+              </button>
+            </form>
+          </div>
+
+          <!-- Override VENV_PATH -->
+          <div class="border border-gray-200 rounded-lg p-4">
+            <p class="text-xs font-medium text-gray-700 mb-1">Percorso venv personalizzato</p>
+            <p class="text-xs text-gray-500 mb-3">
+              Imposta <code>VENV_PATH</code> in <code>.env</code> per usare un venv in un percorso
+              diverso dalla root del progetto. Lascia vuoto per auto-detect.
+            </p>
+            <form method="POST">
+              <input type="hidden" name="action" value="set_venv_path">
+              <input type="hidden" name="csrf" value="<?= $he($csrf) ?>">
+              <div class="flex gap-2">
+                <input type="text" name="venv_path"
+                  value="<?= $he(getenv('VENV_PATH') ?: '') ?>"
+                  placeholder="/percorso/assoluto/venv"
+                  class="flex-1 px-2 py-1.5 border border-gray-300 rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <button type="submit"
+                  class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white text-xs font-medium rounded transition-colors">
+                  Salva
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       </div>
     </div>
 
