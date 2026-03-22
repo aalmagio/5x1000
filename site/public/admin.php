@@ -136,7 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = ['err', 'Una pipeline è già in esecuzione (PID: ' . (int)@file_get_contents(PID_FILE) . '). Attendi o termina il processo.'];
             $tab   = 'pipeline';
         } else {
-            [$ok, $msg, $log_file] = adm_launch_pipeline($_POST, $python_cmd);
+            [$ok, $msg, $log_file] = adm_launch_pipeline($_POST);
             if ($ok) { header('Location: admin.php?tab=log&logfile=' . urlencode($log_file)); exit; }
             $flash = ['err', $msg]; $tab = 'pipeline';
         }
@@ -147,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (adm_is_running()) {
             $flash = ['err', 'Un processo è già in esecuzione.'];
         } else {
-            [$ok, $msg, $log_file] = adm_launch_db($_POST, $python_cmd);
+            [$ok, $msg, $log_file] = adm_launch_db($_POST);
             if ($ok) { header('Location: admin.php?tab=log&logfile=' . urlencode($log_file)); exit; }
             $flash = ['err', $msg];
         }
@@ -169,7 +169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash = ['err', 'Spunta la casella di conferma prima di eseguire il reset.'];
             $tab   = 'pipeline';
         } else {
-            [$ok, $msg, $log_file] = adm_launch_reset($_POST, $python_cmd);
+            [$ok, $msg, $log_file] = adm_launch_reset($_POST);
             if ($ok) { header('Location: admin.php?tab=log&logfile=' . urlencode($log_file)); exit; }
             $flash = ['err', $msg]; $tab = 'pipeline';
         }
@@ -258,10 +258,11 @@ function adm_venv_info(): array {
     }
 
     // Auto-detect: cartella venv o .venv nella PROJECT_ROOT
+    // Nota: is_executable() può fallire con open_basedir; file_exists() è sufficiente
     foreach (['venv', '.venv'] as $dir) {
         $base = PROJECT_ROOT . '/' . $dir;
         $py   = $base . '/bin/python3';
-        if (is_executable($py)) {
+        if (@file_exists($py)) {
             return ['path' => $base, 'python' => $py, 'exists' => true, 'source' => "auto ($dir)"];
         }
     }
@@ -322,7 +323,7 @@ function adm_run_bg(string $script, array $args, string $log_prefix): array {
     return [true, "PID $pid", $log_file];
 }
 
-function adm_launch_pipeline(array $post, string $python): array {
+function adm_launch_pipeline(array $post): array {
     $args = [];
 
     // Modalità Solo Report: ignora tutti gli altri step
@@ -366,7 +367,7 @@ function adm_launch_pipeline(array $post, string $python): array {
     return adm_run_bg(PROJECT_ROOT . '/pipeline.py', $args, 'pipeline');
 }
 
-function adm_launch_db(array $post, string $python): array {
+function adm_launch_db(array $post): array {
     $args = [];
     $anni = trim($post['db_anni'] ?? '');
     if ($anni !== '' && preg_match('/^[\d,\s]+$/', $anni)) {
@@ -376,7 +377,7 @@ function adm_launch_db(array $post, string $python): array {
     return adm_run_bg(PROJECT_ROOT . '/db_updater.py', $args, 'db_update');
 }
 
-function adm_launch_reset(array $post, string $python): array {
+function adm_launch_reset(array $post): array {
     $args = ['--reset', '--force'];
     if (!empty($post['solo_db'])) $args[] = '--reset-db';
     // Rimuovi --reset se solo_db (pipeline.py gestisce --reset-db separatamente)
