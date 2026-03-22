@@ -15,6 +15,9 @@ xlsxwriter>=3.1.0
 # Opzionale: senza PyYAML gli script usano i default interni
 PyYAML>=6.0
 
+# --- Database (db_updater.py, pipeline.py) ---
+pymysql>=1.1.0
+
 # --- Export Google Sheets (gsheets.py) ---
 # Installare solo se si usa l'export su Sheets/Looker Studio
 gspread>=6.0.0

@@ -145,12 +145,24 @@ def aggiorna_db_sito(
                 _aggiorna_files(cur, dati_dir)
                 logger.info("db_updater: dataset_files aggiornati")
 
-            # 4. Aggiorna la tabella enti (solo se ETL è stato eseguito)
-            if "etl" in steps_eseguiti and csv_path and csv_path.exists():
-                _aggiorna_enti(cur, csv_path, pd, anni_processati)
-                logger.info(
-                    f"db_updater: tabella enti aggiornata per anni {anni_processati}"
-                )
+            # 4. Aggiorna la tabella enti se il CSV esiste.
+            # Viene eseguito anche quando ETL è saltato (smart mode) ma
+            # la tabella enti è vuota o si vuole un reimport completo.
+            if csv_path and csv_path.exists():
+                # Controlla se la tabella è vuota: in quel caso importa sempre
+                cur.execute("SELECT COUNT(*) FROM enti")
+                row = cur.fetchone()
+                count_enti = row[0] if row else 0
+                force = (count_enti == 0)
+
+                if "etl" in steps_eseguiti or force:
+                    if force and "etl" not in steps_eseguiti:
+                        logger.info("db_updater: tabella enti vuota – reimport completo dal CSV")
+                    _aggiorna_enti(cur, csv_path, pd, anni_processati)
+                    logger.info(
+                        f"db_updater: tabella enti aggiornata per anni "
+                        f"{anni_processati if anni_processati else 'tutti'}"
+                    )
 
         logger.info(f"db_updater: completato in {time.time() - t0:.1f}s")
         return True
@@ -280,22 +292,27 @@ _CHUNK_SIZE = 5_000  # righe per batch INSERT
 def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int]) -> None:
     """
     Cancella e reinserisce le righe della tabella `enti` per gli anni indicati.
+    Se `anni` è vuota, reimporta TUTTI gli anni presenti nel CSV.
     Usa bulk INSERT a chunks per limitare il consumo di memoria.
     """
     anni_int = [int(a) for a in anni]
+    tutti    = len(anni_int) == 0          # lista vuota → tutti gli anni
     cols_db  = list(_COL_MAP.values())
     ph_row   = "(" + ",".join(["%s"] * len(cols_db)) + ")"
     insert_sql = (
         f"INSERT INTO enti ({','.join(cols_db)}) VALUES {ph_row}"
     )
 
-    # Cancella solo gli anni da rielaborare (preserva gli altri)
-    placeholders = ",".join(["%s"] * len(anni_int))
-    cur.execute(f"DELETE FROM enti WHERE anno IN ({placeholders})", anni_int)
-    logger.info(f"db_updater: cancellate righe anni {anni_int} da tabella enti")
+    if tutti:
+        cur.execute("DELETE FROM enti")
+        logger.info("db_updater: cancellate TUTTE le righe da tabella enti (reimport completo)")
+    else:
+        placeholders = ",".join(["%s"] * len(anni_int))
+        cur.execute(f"DELETE FROM enti WHERE anno IN ({placeholders})", anni_int)
+        logger.info(f"db_updater: cancellate righe anni {anni_int} da tabella enti")
 
-    anni_set    = set(anni_int)
-    total_ins   = 0
+    anni_set  = set(anni_int)
+    total_ins = 0
 
     for chunk in pd.read_csv(
         csv_path,
@@ -306,8 +323,8 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int]) -> None:
         # Rinomina colonne CSV → DB
         chunk = chunk.rename(columns=_COL_MAP)
 
-        # Filtra solo gli anni richiesti
-        if "anno" in chunk.columns:
+        # Filtra solo gli anni richiesti (se non è reimport completo)
+        if not tutti and "anno" in chunk.columns:
             chunk = chunk[
                 chunk["anno"].fillna("").str.extract(r"(\d{4})")[0]
                 .astype(float, errors="ignore")
@@ -322,11 +339,63 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int]) -> None:
             if col not in chunk.columns:
                 chunk[col] = None
 
-        # Sostituisci NaN con None (→ NULL in MySQL)
-        chunk = chunk.where(chunk.notna(), None)
+        # Sostituisci NaN con None (→ NULL in MySQL).
+        # chunk.where() non basta: pandas a volte lascia float('nan') residui.
+        # Usiamo un controllo esplicito in fase di building delle tuple.
+        def _to_none(v):
+            if v is None:
+                return None
+            if isinstance(v, float) and v != v:   # NaN != NaN è sempre True
+                return None
+            return v
 
-        rows = [tuple(row[c] for c in cols_db) for _, row in chunk.iterrows()]
+        rows = [tuple(_to_none(row[c]) for c in cols_db) for _, row in chunk.iterrows()]
         cur.executemany(insert_sql, rows)
         total_ins += len(rows)
 
     logger.info(f"db_updater: inserite {total_ins:,} righe in tabella enti")
+
+
+# ---------------------------------------------------------------------------
+# Esecuzione diretta: python db_updater.py [--anni 2023,2024]
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import argparse, pathlib, sys
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+    ap = argparse.ArgumentParser(description="Reimporta il CSV nel DB del sito")
+    ap.add_argument("--anni", default=None,
+                    help="Anni da reimportare, es. 2023,2024 (default: tutti)")
+    ap.add_argument("--csv", default=None,
+                    help="Percorso al CSV normalizzato (default: Dati/enti_5x1000_norm.csv)")
+    ap.add_argument("--dati-dir", default=None,
+                    help="Cartella Dati/ (default: ./Dati)")
+    args = ap.parse_args()
+
+    root = pathlib.Path(__file__).parent
+    dati_dir = pathlib.Path(args.dati_dir) if args.dati_dir else root / "Dati"
+    csv_path = pathlib.Path(args.csv) if args.csv else dati_dir / "enti_5x1000_norm.csv"
+
+    anni_list = []
+    if args.anni:
+        try:
+            anni_list = [int(a.strip()) for a in args.anni.split(",") if a.strip()]
+        except ValueError:
+            logger.error("--anni deve contenere numeri, es. 2023,2024")
+            sys.exit(1)
+
+    ok = aggiorna_db_sito(
+        anni_processati=anni_list,
+        steps_eseguiti=["etl"],   # forza aggiornamento enti
+        csv_path=csv_path,
+        dati_dir=dati_dir,
+        status="ok",
+        note="Reimport manuale",
+    )
+    sys.exit(0 if ok else 1)

@@ -70,6 +70,10 @@ venv/
 env/
 .env/
 
+# --- Frontend (Node) ---
+site/frontend/node_modules/
+site/frontend/dist/
+
 # --- IDE, OS e Claude Code ---
 .idea/
 .vscode/

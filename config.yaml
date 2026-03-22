@@ -22,7 +22,6 @@ download:
 # Ogni anno punta alla pagina ufficiale con i link ai file PDF/CSV.
 # Aggiungere nuovi anni qui quando l'AdE li pubblica.
 url_anni:
-  2025: "https://www.agenziaentrate.gov.it/portale/elenco-permanente-delle-onlus-accreditate-per-il-2025"
   2024: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-dei-beneficiari"
   2023: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-dei-beneficiari-2023"
   2022: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-degli-enti-ammessi-in-una-o-piu-categorie-di-beneficiari"
@@ -47,6 +46,12 @@ url_anni:
 pipeline:
   input_categorie: "categorie.xlsx"   # File Excel con link alle pagine delle categorie
   # sheet_id: "1ABC..."              # ID del Google Sheet (decommentare e valorizzare)
+  step_timeouts:
+    download:   7200   # secondi — download elenco completo AdE (può essere lento)
+    categorie:  7200   # secondi — download per categoria
+    etl:        3600   # secondi — normalizzazione e merge
+    report:     1800   # secondi — generazione report Excel
+    gsheets:    1800   # secondi — upload Google Sheets
 
 # --- ETL (etl.py) ---
 etl:

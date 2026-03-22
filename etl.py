@@ -193,10 +193,12 @@ def parse_importo(val) -> float | None:
 
 
 def parse_intero(val) -> int | None:
-    """Converte numero scelte (può avere punti come migliaia)."""
+    """Converte numero scelte (può avere punti/virgole/spazi come migliaia)."""
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return None
-    s = str(val).strip().replace(".", "").replace(",", "")
+    # Rimuovi spazi interni prima di togliere i separatori di migliaia
+    # es. "3 46.183" → "346183"
+    s = str(val).strip().replace(" ", "").replace(".", "").replace(",", "")
     try:
         return int(float(s))
     except ValueError:
@@ -288,7 +290,19 @@ CAT_AREE_ALIASES = {
 }
 
 # Campi numerici
-N_SCELTE_ALIASES = {"numero scelte"}
+# Gli anni più vecchi usano nomi colonna diversi per il numero di scelte:
+#   "N. Scelte" → ncol → "n. scelte"
+#   "N Scelte"  → "n scelte"
+#   "Preferenze" → "preferenze"
+N_SCELTE_ALIASES = {
+    "numero scelte",
+    "n. scelte",
+    "n scelte",
+    "numero di scelte",
+    "preferenze",
+    "n preferenze",
+    "numero preferenze",
+}
 IMP_ESP_ALIASES = {
     "importo (euro) per scelte espresse",
     "importo (euro) importo delle scelte espresse",
@@ -361,7 +375,7 @@ def normalize_year(df: pd.DataFrame, anno: int) -> pd.DataFrame:
     cat_aree_col = find_col_partial(ci, CAT_AREE_ALIASES)
 
     # --- Colonne numeriche ---
-    n_scelte_col = find_col(ci, N_SCELTE_ALIASES)
+    n_scelte_col = find_col_partial(ci, N_SCELTE_ALIASES)
     imp_esp_col = find_col_partial(ci, IMP_ESP_ALIASES)
     imp_gen_col = find_col_partial(ci, IMP_GEN_ALIASES)
     imp_tot_col = find_col_partial(ci, IMP_TOT_ALIASES)
@@ -439,10 +453,10 @@ def normalize_year(df: pd.DataFrame, anno: int) -> pd.DataFrame:
             return "Enti gestori aree protette"
         if row["CAT_ASD"]:
             return "ASD"
-        if row["CAT_ETS_ONLUS"]:
-            return "ETS/ONLUS"
-        if row["CAT_VOLONTARIATO"]:
-            return "Volontariato"
+        if row["CAT_ETS_ONLUS"] or row["CAT_VOLONTARIATO"]:
+            # ETS/ONLUS (2022+) e Volontariato (pre-2022) sono la stessa categoria
+            # con nome cambiato per legge: usiamo un'unica label storica unificata
+            return "Volontariato / ETS"
         return "Non specificata"
 
     cat_cols = ["CAT_RICERCA_SCI", "CAT_RICERCA_SAN", "CAT_COMUNI",
@@ -476,14 +490,17 @@ def process_streaming(
     out_csv: Path,
     df_runts: "pd.DataFrame | None",
     anni_filter: "list[int] | None" = None,
+    on_anno_done: "callable | None" = None,
 ) -> dict:
     """
-    Processa i file anno per anno in modalità streaming:
+    Processa i file anno per anno in modalità streaming (dal più recente al più vecchio):
     normalizza ogni anno, fa il join RUNTS, e scrive nel CSV riga per riga.
     Questo evita di tenere tutto il dataset in RAM simultaneamente.
+
+    on_anno_done(anno, df_norm): callback opzionale chiamato dopo ogni anno.
     Restituisce statistiche aggregate.
     """
-    files = sorted(dati_dir.glob("dati_[0-9][0-9][0-9][0-9].xlsx"))
+    files = sorted(dati_dir.glob("dati_[0-9][0-9][0-9][0-9].xlsx"), reverse=True)
     if not files:
         logging.error(f"Nessun file dati_XXXX.xlsx trovato in {dati_dir}")
         sys.exit(1)
@@ -540,6 +557,13 @@ def process_streaming(
 
             logging.info(f"  [{anno}] {n:,} righe -> CSV")
 
+            # Callback per-anno (es. aggiornamento DB immediato)
+            if on_anno_done is not None:
+                try:
+                    on_anno_done(anno, df_norm)
+                except Exception as cb_exc:
+                    logging.warning(f"  [{anno}] on_anno_done callback errore: {cb_exc}")
+
         except Exception as e:
             logging.error(f"  [{anno}] ERRORE: {e}")
             import traceback
@@ -554,7 +578,7 @@ def load_all_years(dati_dir: Path) -> "pd.DataFrame":
     Per grandi dataset usa process_streaming() invece.
     """
     import pandas as pd
-    files = sorted(dati_dir.glob("dati_[0-9][0-9][0-9][0-9].xlsx"))
+    files = sorted(dati_dir.glob("dati_[0-9][0-9][0-9][0-9].xlsx"), reverse=True)
     frames = []
     for f in files:
         anno = int(f.stem.split("_")[1])
@@ -920,6 +944,14 @@ def main():
         "--anni", type=str, default=None,
         help="Anni da processare, separati da virgola (es. 2020,2021,2022)"
     )
+    parser.add_argument(
+        "--aggiorna-db", action="store_true",
+        help=(
+            "Aggiorna il DB del sito dopo ogni anno elaborato "
+            "(richiede SITE_DB_* in .env). Ogni anno viene inserito "
+            "nel DB non appena il suo ETL è completato."
+        ),
+    )
     args = parser.parse_args()
 
     root = args.root
@@ -961,7 +993,61 @@ def main():
     csv_path = out_dir / "enti_5x1000_norm.csv"
     logging.info(f"Output CSV: {csv_path}")
 
-    stats = process_streaming(dati_dir, csv_path, df_runts, anni_filter)
+    # Callback per aggiornamento DB per-anno
+    _db_anno_callback = None
+    if args.aggiorna_db:
+        try:
+            import pymysql, os as _os
+            _db_cfg = {
+                "host":     _os.getenv("SITE_DB_HOST", "localhost"),
+                "port":     int(_os.getenv("SITE_DB_PORT", "3306")),
+                "user":     _os.getenv("SITE_DB_USER", ""),
+                "password": _os.getenv("SITE_DB_PASSWORD", ""),
+                "database": _os.getenv("SITE_DB_NAME", ""),
+                "charset":  "utf8mb4",
+                "autocommit": True,
+            }
+            if _db_cfg["user"] and _db_cfg["database"]:
+                from db_updater import _COL_MAP
+                def _make_db_callback(db_cfg, col_map):
+                    def _cb(anno: int, df: "pd.DataFrame") -> None:
+                        import pymysql as _pm
+                        cols_db = list(col_map.values())
+                        ph_row  = "(" + ",".join(["%s"] * len(cols_db)) + ")"
+                        ins_sql = f"INSERT INTO enti ({','.join(cols_db)}) VALUES {ph_row}"
+                        def _to_none(v):
+                            if v is None: return None
+                            if isinstance(v, float) and v != v: return None
+                            return v
+                        try:
+                            conn = _pm.connect(**db_cfg)
+                            with conn:
+                                cur = conn.cursor()
+                                cur.execute("DELETE FROM enti WHERE anno = %s", (anno,))
+                                logging.info(f"  [DB] Anno {anno}: righe precedenti cancellate.")
+                                df_ins = df.rename(columns=col_map)
+                                for col in cols_db:
+                                    if col not in df_ins.columns:
+                                        df_ins[col] = None
+                                rows = [
+                                    tuple(_to_none(row[c]) for c in cols_db)
+                                    for _, row in df_ins.iterrows()
+                                ]
+                                chunk_size = 5_000
+                                for i in range(0, len(rows), chunk_size):
+                                    cur.executemany(ins_sql, rows[i:i + chunk_size])
+                                logging.info(f"  [DB] Anno {anno}: {len(rows):,} righe inserite.")
+                        except Exception as exc:
+                            logging.warning(f"  [DB] Anno {anno}: errore DB – {exc}")
+                    return _cb
+                _db_anno_callback = _make_db_callback(_db_cfg, _COL_MAP)
+                logging.info("Aggiornamento DB per-anno: attivo.")
+            else:
+                logging.warning("--aggiorna-db: SITE_DB_USER / SITE_DB_NAME non configurati – saltato.")
+        except ImportError as _ie:
+            logging.warning(f"--aggiorna-db: dipendenza mancante ({_ie}) – saltato.")
+
+    stats = process_streaming(dati_dir, csv_path, df_runts, anni_filter, _db_anno_callback)
 
     # --- Stats riassuntive ---
     logging.info("\n" + "=" * 60)

@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from config import settings
-from routers import download, enti, status
+from routers import download, enti, pipeline, status
 
 # ---------------------------------------------------------------------------
 # App
@@ -43,7 +43,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -52,6 +52,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 app.include_router(status.router,   prefix="/api/v1")
 app.include_router(enti.router,     prefix="/api/v1")
+app.include_router(pipeline.router)  # prefissato internamente su /api/v1/pipeline
 app.include_router(download.router)  # prefissato internamente su /download
 
 # ---------------------------------------------------------------------------

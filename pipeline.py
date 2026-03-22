@@ -26,6 +26,32 @@ import argparse
 import subprocess
 import logging
 import datetime
+import shutil
+
+
+# ============================================================================
+# Carica variabili d'ambiente da .env (se presente)
+# ============================================================================
+
+def _load_dotenv(root_dir):
+    env_path = os.path.join(root_dir, ".env")
+    if not os.path.isfile(env_path):
+        return
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            # Rimuove eventuale prefisso 'export '
+            if line.startswith("export "):
+                line = line[7:]
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+_load_dotenv(os.path.dirname(os.path.abspath(__file__)))
 
 
 # ============================================================================
@@ -36,8 +62,9 @@ STEPS_ALL = ["download", "categorie", "etl", "report", "gsheets"]
 
 DEFAULT_INPUT = "categorie.xlsx"
 
-# Python eseguibile: stesso interprete che sta eseguendo questo script
-PYTHON = sys.executable
+# Python eseguibile: stesso interprete che sta eseguendo questo script.
+# sys.executable può essere '' in ambienti embedded/CGI/PHP; fallback robusto.
+PYTHON = sys.executable or shutil.which("python3") or shutil.which("python") or "python3"
 
 
 def _load_pipeline_config(root_dir):
@@ -119,37 +146,56 @@ def ask_choice(prompt, choices, default=None):
 # ESECUZIONE STEP
 # ============================================================================
 
-def run_step(name, cmd, root_dir):
+_DEFAULT_STEP_TIMEOUT = 3600  # fallback se non configurato
+
+
+def run_step(name, cmd, root_dir, timeout=None):
     """
     Esegue un comando subprocess per uno step della pipeline.
     Restituisce (success: bool, duration_secs: float).
+    Il timeout (secondi) è configurabile; il processo viene ucciso alla scadenza.
     """
+    if timeout is None:
+        timeout = _DEFAULT_STEP_TIMEOUT
+
     logging.info(f"\n{'='*60}")
     logging.info(f"STEP: {name}")
     logging.info(f"Comando: {' '.join(cmd)}")
+    logging.info(f"Timeout: {timeout}s")
     logging.info(f"{'='*60}")
 
     start = time.time()
+    proc = None
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=root_dir,
-            timeout=3600,  # 1 ora max per step
-        )
+        proc = subprocess.Popen(cmd, cwd=root_dir)
+        proc.wait(timeout=timeout)
         elapsed = time.time() - start
-        if result.returncode == 0:
+        if proc.returncode == 0:
             logging.info(f"[OK] {name} completato in {elapsed:.0f}s")
             return True, elapsed
         else:
-            logging.error(f"[ERRORE] {name} fallito (exit code {result.returncode})")
+            logging.error(f"[ERRORE] {name} fallito (exit code {proc.returncode})")
             return False, elapsed
     except subprocess.TimeoutExpired:
         elapsed = time.time() - start
-        logging.error(f"[TIMEOUT] {name} interrotto dopo {elapsed:.0f}s")
+        logging.error(f"[TIMEOUT] {name} interrotto dopo {elapsed:.0f}s (limite: {timeout}s)")
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait()
+                logging.info(f"Processo {proc.pid} terminato forzatamente.")
+            except Exception as kill_exc:
+                logging.warning(f"Impossibile terminare il processo: {kill_exc}")
         return False, elapsed
     except Exception as e:
         elapsed = time.time() - start
         logging.error(f"[ERRORE] {name}: {e}")
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.wait()
+            except Exception:
+                pass
         return False, elapsed
 
 
@@ -220,7 +266,138 @@ Step disponibili: download, categorie, etl, report, gsheets
         "--skip-report", action="store_true",
         help="Salta la generazione del report Excel",
     )
+    parser.add_argument(
+        "--smart", action="store_true",
+        help=(
+            "Analizza i file già presenti e salta automaticamente gli step/anni "
+            "già aggiornati. Download e categorie vengono eseguiti solo per gli "
+            "anni mancanti; ETL solo se l'output è obsoleto."
+        ),
+    )
+    parser.add_argument(
+        "--anni-download", type=str, default=None,
+        help="Override esplicito degli anni da scaricare (liste complete). "
+             "Se omesso, usa --anni (o smart mode se attivo).",
+    )
+    parser.add_argument(
+        "--anni-categorie", type=str, default=None,
+        help="Override esplicito degli anni da scaricare (per categoria). "
+             "Se omesso, usa --anni (o smart mode se attivo).",
+    )
+    parser.add_argument(
+        "--reset", action="store_true",
+        help=(
+            "Azzera tutti i dati prima di partire: svuota la cartella Dati/ "
+            "e le tabelle DB (enti, dataset_files, pipeline_runs). "
+            "Richiede conferma interattiva a meno che non sia passato --force."
+        ),
+    )
+    parser.add_argument(
+        "--reset-db", action="store_true",
+        help="Come --reset ma solo per il DB (non tocca i file su disco).",
+    )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Salta la conferma interattiva richiesta da --reset / --reset-db.",
+    )
+    parser.add_argument(
+        "--report-only", action="store_true",
+        help=(
+            "Scorciatoia: esegui solo lo step 'report' (equivalente a --only report). "
+            "Utile per rigenerare il report Excel senza riscaricare o rielaborare i dati."
+        ),
+    )
     return parser.parse_args()
+
+
+# ============================================================================
+# RESET
+# ============================================================================
+
+def reset_tutto(root_dir: str, solo_db: bool = False, force: bool = False) -> bool:
+    """
+    Azzera tutti i dati della pipeline.
+    - File: svuota Dati/ (solo_db=False)
+    - DB:   DELETE FROM enti, dataset_files, pipeline_runs
+
+    Ritorna True se il reset è completato, False se annullato dall'utente.
+    """
+    dati_dir = os.path.join(root_dir, "Dati")
+    log_dir  = os.path.join(root_dir, "log")
+    os.makedirs(log_dir, exist_ok=True)
+    ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(log_dir, f"reset_{ts}.log")
+
+    # Logging dedicato
+    reset_logger = logging.getLogger("reset")
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    reset_logger.addHandler(fh)
+    reset_logger.setLevel(logging.INFO)
+
+    print("\n" + "=" * 60)
+    print("  RESET — 5 per Mille")
+    print("=" * 60)
+    if not solo_db:
+        print(f"  ⚠  Verranno CANCELLATI tutti i file in: {dati_dir}")
+    print("  ⚠  Verranno svuotate le tabelle DB:")
+    print("       enti · dataset_files · pipeline_runs")
+    print("=" * 60)
+
+    if not force:
+        risposta = input("\nConfermi il reset? Questa operazione è irreversibile. [s/N] ").strip().lower()
+        if risposta not in ("s", "si", "sì", "y", "yes"):
+            print("Reset annullato.")
+            return False
+
+    # ── 1. File ──────────────────────────────────────────────────────────────
+    if not solo_db:
+        if os.path.isdir(dati_dir):
+            reset_logger.info(f"Cancellazione cartella Dati/: {dati_dir}")
+            shutil.rmtree(dati_dir)
+            reset_logger.info("Cartella Dati/ eliminata.")
+        os.makedirs(dati_dir, exist_ok=True)
+        reset_logger.info("Cartella Dati/ ricreata vuota.")
+        print("✓ Cartella Dati/ svuotata.")
+
+    # ── 2. DB ─────────────────────────────────────────────────────────────────
+    try:
+        import pymysql
+    except ImportError:
+        msg = "pymysql non installato — reset DB saltato."
+        reset_logger.warning(msg)
+        print(f"⚠  {msg}")
+    else:
+        db_cfg = {
+            "host":     os.getenv("SITE_DB_HOST", "localhost"),
+            "port":     int(os.getenv("SITE_DB_PORT", "3306")),
+            "user":     os.getenv("SITE_DB_USER", ""),
+            "password": os.getenv("SITE_DB_PASSWORD", ""),
+            "database": os.getenv("SITE_DB_NAME", ""),
+            "charset":  "utf8mb4",
+            "autocommit": True,
+        }
+        if not db_cfg["user"] or not db_cfg["database"]:
+            msg = "Credenziali DB non configurate (SITE_DB_USER/SITE_DB_NAME) — reset DB saltato."
+            reset_logger.warning(msg)
+            print(f"⚠  {msg}")
+        else:
+            try:
+                conn = pymysql.connect(**db_cfg)
+                with conn:
+                    cur = conn.cursor()
+                    for tabella in ("enti", "dataset_files", "pipeline_runs"):
+                        cur.execute(f"DELETE FROM `{tabella}`")
+                        n = cur.rowcount
+                        reset_logger.info(f"DELETE FROM {tabella}: {n} righe cancellate.")
+                        print(f"✓ Tabella {tabella}: {n} righe cancellate.")
+            except Exception as exc:
+                reset_logger.error(f"Errore reset DB: {exc}")
+                print(f"✗ Errore reset DB: {exc}")
+
+    reset_logger.info("Reset completato.")
+    print(f"\n✓ Reset completato. Log: {log_path}\n")
+    return True
 
 
 # ============================================================================
@@ -231,10 +408,39 @@ def main():
     args = parse_args()
 
     root_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # ── Reset (se richiesto) ─────────────────────────────────────────────────
+    if args.reset or args.reset_db:
+        eseguito = reset_tutto(
+            root_dir,
+            solo_db=args.reset_db and not args.reset,
+            force=args.force,
+        )
+        if not eseguito:
+            sys.exit(0)
+        # Se non è stato passato anche un altro flag operativo, termina qui
+        # (il reset da solo non avvia la pipeline)
+        operativo = (
+            args.anni or args.only or args.skip_download is False
+            or getattr(args, "smart", False)
+        )
+        if not operativo and not args.anni:
+            print("Reset completato. Passa --anni o altri flag per avviare la pipeline.")
+            sys.exit(0)
+
+    # --report-only è una scorciatoia per --only report
+    if args.report_only and not args.only:
+        args.only = "report"
+
     log_file = setup_logging(root_dir)
 
     # Carica config pipeline
     pcfg = _load_pipeline_config(root_dir)
+
+    # Timeout per step (secondi) — da config.yaml o default
+    _step_timeouts_cfg = pcfg.get("step_timeouts", {})
+    def _timeout(step_name):
+        return int(_step_timeouts_cfg.get(step_name, _DEFAULT_STEP_TIMEOUT))
 
     print("\n" + "=" * 60)
     print("  5 PER MILLE - PIPELINE COMPLETA")
@@ -282,11 +488,14 @@ def main():
             if not ask_yes_no("Scaricare i dati PER CATEGORIA? (scarica_categorie.py)"):
                 skip_download_categorie = True
 
-    # Se gsheets e' negli step ma non c'e' sheet_id, chiedi
-    if "gsheets" in steps and not sheet_id and sys.stdin.isatty():
-        sheet_id = input("\nID del Google Sheet (lascia vuoto per crearne uno nuovo): ").strip()
-        if not sheet_id:
-            sheet_id = None
+    # Se gsheets e' negli step, chiedi se eseguirlo e l'eventuale sheet_id
+    if "gsheets" in steps and sys.stdin.isatty():
+        if not ask_yes_no("\nEseguire l'upload su Google Sheets? (gsheets.py)", default="n"):
+            steps = [s for s in steps if s != "gsheets"]
+        elif not sheet_id:
+            sheet_id = input("ID del Google Sheet (lascia vuoto per crearne uno nuovo): ").strip()
+            if not sheet_id:
+                sheet_id = None
 
     # Se report e' negli step, determina anni per il report
     report_anni = None
@@ -345,6 +554,51 @@ def main():
             steps.remove("categorie")
             logging.warning("Step 'categorie' rimosso dalla pipeline")
 
+    # ---- Override espliciti anni per step specifici ----
+    smart_anni_download  = args.anni_download   # None = usa anni originali / smart
+    smart_anni_categorie = args.anni_categorie
+    _skip_etl_smart      = False
+
+    if args.smart:
+        try:
+            from pipeline_checker import full_analysis
+            anni_list = [int(a.strip()) for a in anni.split(",") if a.strip()] if anni else None
+            check = full_analysis(root_dir, anni_list)
+
+            logging.info("\n[SMART] Analisi file esistenti:")
+            logging.info(f"  Download:   {check['riepilogo']['download']}")
+            logging.info(f"  Categorie:  {check['riepilogo']['categorie']}")
+            logging.info(f"  ETL:        {check['riepilogo']['etl']}")
+
+            # Download: scarica solo gli anni mancanti (solo se non c'è override esplicito)
+            if "download" in steps and smart_anni_download is None:
+                mancanti = check["anni_mancanti_download"]
+                if not mancanti:
+                    logging.info("[SMART] Step 'download' saltato: tutti gli anni già presenti.")
+                    steps = [s for s in steps if s != "download"]
+                else:
+                    smart_anni_download = ",".join(str(a) for a in mancanti)
+                    logging.info(f"[SMART] Download solo per anni mancanti: {mancanti}")
+
+            # Categorie: elabora solo gli anni con file mancanti (solo se non c'è override esplicito)
+            if "categorie" in steps and smart_anni_categorie is None:
+                mancanti_cat = check["anni_mancanti_categorie"]
+                if not mancanti_cat:
+                    logging.info("[SMART] Step 'categorie' saltato: tutti gli anni già presenti.")
+                    steps = [s for s in steps if s != "categorie"]
+                else:
+                    smart_anni_categorie = ",".join(str(a) for a in mancanti_cat)
+                    logging.info(f"[SMART] Categorie solo per anni mancanti: {mancanti_cat}")
+
+            # ETL: salta se CSV è aggiornato e non ci sono nuovi input
+            if "etl" in steps and check["etl"]["status"] == "ok":
+                if not check["anni_mancanti_download"] and not check["anni_mancanti_categorie"]:
+                    logging.info("[SMART] Step 'etl' saltato: CSV normalizzato aggiornato.")
+                    steps = [s for s in steps if s != "etl"]
+
+        except Exception as _e:
+            logging.warning(f"[SMART] Analisi non riuscita ({_e}), eseguo tutto normalmente.")
+
     # ---- Riepilogo ----
     logging.info(f"\nConfigurazione pipeline:")
     logging.info(f"  Root:       {root_dir}")
@@ -377,23 +631,25 @@ def main():
     # STEP 1: Download elenco complessivo + estrazione
     if "download" in steps:
         cmd = [PYTHON, "cinque_per_mille.py", "--source", source]
-        if anni:
-            cmd += ["--anni", anni]
+        _anni_dl = smart_anni_download if smart_anni_download is not None else anni
+        if _anni_dl:
+            cmd += ["--anni", _anni_dl]
         if skip_download_completo:
             cmd.append("--no-download")
         step_label = "Estrazione (elenco complessivo)" if skip_download_completo else "Download + Estrazione (elenco complessivo)"
-        ok, dur = run_step(step_label, cmd, root_dir)
+        ok, dur = run_step(step_label, cmd, root_dir, timeout=_timeout("download"))
         results["download"] = (ok, dur)
 
     # STEP 2: Download categorie + estrazione
     if "categorie" in steps:
         cmd = [PYTHON, "scarica_categorie.py", "--input", input_path, "--source", source]
-        if anni:
-            cmd += ["--anni", anni]
+        _anni_cat = smart_anni_categorie if smart_anni_categorie is not None else anni
+        if _anni_cat:
+            cmd += ["--anni", _anni_cat]
         if skip_download_categorie:
             cmd.append("--no-download")
         step_label = "Estrazione (per categoria)" if skip_download_categorie else "Download + Estrazione (per categoria)"
-        ok, dur = run_step(step_label, cmd, root_dir)
+        ok, dur = run_step(step_label, cmd, root_dir, timeout=_timeout("categorie"))
         results["categorie"] = (ok, dur)
 
     # STEP 3: ETL
@@ -405,7 +661,8 @@ def main():
             cmd.append("--no-runts")
         if args.no_excel_etl:
             cmd.append("--no-excel")
-        ok, dur = run_step("ETL (normalizzazione + export)", cmd, root_dir)
+        cmd.append("--aggiorna-db")   # aggiorna il DB al termine di ogni anno
+        ok, dur = run_step("ETL (normalizzazione + export + DB per-anno)", cmd, root_dir, timeout=_timeout("etl"))
         results["etl"] = (ok, dur)
 
     # STEP 4: Report Excel
@@ -414,7 +671,7 @@ def main():
             cmd = [PYTHON, "report.py", "--anno", report_anni]
             if args.no_confronto:
                 cmd.append("--no-confronto")
-            ok, dur = run_step("Report Excel (stile ASSIF)", cmd, root_dir)
+            ok, dur = run_step("Report Excel (stile ASSIF)", cmd, root_dir, timeout=_timeout("report"))
             results["report"] = (ok, dur)
         else:
             logging.warning("Report saltato: nessun anno specificato")
@@ -426,7 +683,7 @@ def main():
             cmd += ["--sheet-id", sheet_id]
         if anni:
             cmd += ["--anni", anni]
-        ok, dur = run_step("Upload Google Sheets", cmd, root_dir)
+        ok, dur = run_step("Upload Google Sheets", cmd, root_dir, timeout=_timeout("gsheets"))
         results["gsheets"] = (ok, dur)
 
     # ---- Riepilogo finale ----
@@ -456,6 +713,9 @@ def main():
     logging.info("=" * 60)
 
     # ---- Aggiornamento DB sito ----
+    # Se ETL ha già eseguito l'aggiornamento per-anno (--aggiorna-db), qui
+    # registriamo solo il pipeline_run e aggiorniamo il catalogo dataset_files,
+    # senza reimportare la tabella enti (che è già aggiornata anno per anno).
     try:
         from db_updater import aggiorna_db_sito
         import pathlib
@@ -465,9 +725,13 @@ def main():
         _anni_list = [int(a) for a in anni.split(",") if a.strip()] if anni else []
         _db_status = "ok" if all_ok else "parziale"
         _note = f"Errori in: {failed}" if not all_ok else ""
+        # Rimuovi "etl" dalla lista step: gli enti sono già stati aggiornati
+        # per-anno dentro etl.py --aggiorna-db; qui vogliamo solo registrare
+        # il run e aggiornare dataset_files.
+        _steps_db = [s for s in steps if s != "etl"]
         ok_db = aggiorna_db_sito(
             anni_processati=_anni_list,
-            steps_eseguiti=steps,
+            steps_eseguiti=_steps_db,
             csv_path=_csv_path,
             dati_dir=_dati_dir,
             status=_db_status,
@@ -475,7 +739,7 @@ def main():
             t_inizio=total_start,
         )
         if ok_db:
-            logging.info("DB sito aggiornato con successo.")
+            logging.info("DB sito aggiornato con successo (run registrato, file catalogo aggiornato).")
         else:
             logging.info("Aggiornamento DB sito saltato (non configurato o errore).")
     except Exception as _e:

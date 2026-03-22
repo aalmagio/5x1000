@@ -11,12 +11,14 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api':      'http://localhost:8000',
-      '/download': 'http://localhost:8000',
+      '/api.php': 'http://localhost:8080',
     },
   },
   build: {
-    outDir: 'dist',
-    emptyOutDir: true,
+    // Output nella cartella public/ (document root nginx)
+    // emptyOutDir: false per non cancellare api.php e .env
+    outDir: '../public',
+    emptyOutDir: false,
+    assetsDir: 'assets',
   },
 })

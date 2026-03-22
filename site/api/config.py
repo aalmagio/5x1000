@@ -33,6 +33,10 @@ class Settings:
         if o.strip()
     ]
 
+    # Pipeline
+    pipeline_root_dir: str = os.getenv("PIPELINE_ROOT_DIR", str(Path(__file__).parent.parent.parent))
+    pipeline_api_key:  str = os.getenv("PIPELINE_API_KEY", "")
+
     # Paginazione default
     page_size_default: int = 50
     page_size_max:     int = 1000
