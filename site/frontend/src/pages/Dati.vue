@@ -43,10 +43,24 @@
           <span>{{ loading ? 'Caricamento…' : 'Cerca' }}</span>
         </button>
         <button class="btn-secondary" @click="reset" :disabled="loading">Reset</button>
-        <label class="flex items-center gap-2 text-sm text-gray-600 ml-auto cursor-pointer select-none">
-          <input type="checkbox" v-model="filters.runts_only" class="rounded accent-brand-600" />
-          Solo enti RUNTS
-        </label>
+        <!-- Filtro RUNTS tri-state -->
+        <div class="ml-auto flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs">
+          <button
+            @click="filters.runts_filter = 'all'"
+            class="px-2.5 py-1 rounded-md transition-colors font-medium"
+            :class="filters.runts_filter === 'all' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'"
+          >Tutti</button>
+          <button
+            @click="filters.runts_filter = 'runts'"
+            class="px-2.5 py-1 rounded-md transition-colors font-medium"
+            :class="filters.runts_filter === 'runts' ? 'bg-white shadow text-green-700' : 'text-gray-500 hover:text-gray-700'"
+          >✓ RUNTS</button>
+          <button
+            @click="filters.runts_filter = 'non_runts'"
+            class="px-2.5 py-1 rounded-md transition-colors font-medium"
+            :class="filters.runts_filter === 'non_runts' ? 'bg-white shadow text-orange-700' : 'text-gray-500 hover:text-gray-700'"
+          >Non RUNTS</button>
+        </div>
       </div>
     </div>
 
@@ -207,15 +221,15 @@ const sortBy    = ref('importo_totale')
 const sortAsc   = ref(false)
 
 const filters = ref({
-  anno:       null,
-  categoria:  null,
-  regione:    '',
-  q:          '',
-  runts_only: false,
+  anno:         null,
+  categoria:    null,
+  regione:      '',
+  q:            '',
+  runts_filter: 'all',  // 'all' | 'runts' | 'non_runts'
 })
 
 const hasActiveFilters = computed(() =>
-  filters.value.anno || filters.value.categoria || filters.value.regione || filters.value.q || filters.value.runts_only
+  filters.value.anno || filters.value.categoria || filters.value.regione || filters.value.q || filters.value.runts_filter !== 'all'
 )
 
 const sortedData = computed(() => {
@@ -265,11 +279,12 @@ async function search(p = 1) {
   page.value    = p
   try {
     const params = { pagina: p, per_pagina: 50 }
-    if (filters.value.anno)       params.anno       = filters.value.anno
-    if (filters.value.categoria)  params.categoria  = filters.value.categoria
-    if (filters.value.regione)    params.regione    = filters.value.regione
-    if (filters.value.q)          params.q          = filters.value.q
-    if (filters.value.runts_only) params.runts_only = 1
+    if (filters.value.anno)       params.anno      = filters.value.anno
+    if (filters.value.categoria)  params.categoria = filters.value.categoria
+    if (filters.value.regione)    params.regione   = filters.value.regione
+    if (filters.value.q)          params.q         = filters.value.q
+    if (filters.value.runts_filter === 'runts')     params.runts_only = 1
+    if (filters.value.runts_filter === 'non_runts') params.non_runts  = 1
 
     const res = await fetchEnti(params)
     result.value = res.data
@@ -281,7 +296,7 @@ async function search(p = 1) {
 }
 
 function reset() {
-  filters.value = { anno: null, categoria: null, regione: '', q: '', runts_only: false }
+  filters.value = { anno: null, categoria: null, regione: '', q: '', runts_filter: 'all' }
   search()
 }
 

@@ -11,10 +11,11 @@
  *   ?action=anni
  *   ?action=categorie
  *   ?action=statistiche[&anno=YYYY]
- *   ?action=enti[&q=...][&anno=...][&categoria=...][&regione=...][&runts_only=1]
+ *   ?action=enti[&q=...][&anno=...][&categoria=...][&regione=...][&runts_only=1][&non_runts=1]
  *              [&pagina=1][&per_pagina=50][&sort=importo_totale][&asc=0]
  *   ?action=ente&cf=CODICE_FISCALE
  *   ?action=confronta&cf[]=CF1&cf[]=CF2[&cf[]=CF3...]   (max 5)
+ *   ?action=cerca_cf&q=NOME_ENTE                        (ricerca CF per nome, max 20 risultati)
  *   ?action=analisi_categorie[&anno=YYYY]
  */
 
@@ -178,6 +179,7 @@ function action_enti(): void {
     $categoria  = str_param('categoria');
     $regione    = str_param('regione');
     $runts_only = int_param('runts_only');
+    $non_runts  = int_param('non_runts');
     $pagina     = max(1, int_param('pagina', 1));
     $per_pagina = min(200, max(1, int_param('per_pagina', 50)));
     $sort       = str_param('sort', 'importo_totale');
@@ -209,6 +211,8 @@ function action_enti(): void {
     }
     if ($runts_only) {
         $where[] = 'runts_5x1000 = 1';
+    } elseif ($non_runts) {
+        $where[] = '(runts_5x1000 = 0 OR runts_5x1000 IS NULL)';
     }
 
     $sql_where = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
@@ -480,6 +484,22 @@ function action_analisi_categorie(): void {
     ]);
 }
 
+function action_cerca_cf(): void {
+    $q = str_param('q');
+    if (strlen($q) < 2) err('Parametro q troppo corto (min. 2 caratteri)');
+
+    $pdo  = db();
+    $stmt = $pdo->prepare(
+        "SELECT DISTINCT cod_fiscale, denominazione, regione, categoria_principale
+         FROM enti
+         WHERE denominazione LIKE ? OR cod_fiscale LIKE ?
+         ORDER BY denominazione
+         LIMIT 20"
+    );
+    $stmt->execute(['%' . $q . '%', '%' . $q . '%']);
+    json_out($stmt->fetchAll());
+}
+
 function action_download(): void {
     set_time_limit(0);
 
@@ -582,6 +602,7 @@ try {
         'enti'               => action_enti(),
         'ente'               => action_ente(),
         'confronta'          => action_confronta(),
+        'cerca_cf'           => action_cerca_cf(),
         'analisi_categorie'  => action_analisi_categorie(),
         'files'              => action_files(),
         'download'           => action_download(),

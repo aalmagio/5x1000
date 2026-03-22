@@ -34,6 +34,9 @@ export const fetchConfronta = (cfs) => api.get('', {
   },
 })
 
+// Ricerca ente per nome → restituisce lista {cod_fiscale, denominazione, regione, categoria_principale}
+export const fetchCercaCf = (q) => get('cerca_cf', { q })
+
 // Analisi per categoria (tutti gli anni o singolo anno)
 export const fetchAnalisiCategorie = (anno) => get('analisi_categorie', anno ? { anno } : {})
 

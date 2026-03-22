@@ -7,7 +7,7 @@
 
     <!-- Filtro anno -->
     <div class="card mb-6">
-      <div class="flex flex-wrap items-end gap-4">
+      <div class="flex flex-wrap items-end gap-4 mb-4">
         <div class="flex-1 min-w-48">
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Anno di riferimento</label>
           <select v-model="annoSelezionato" class="input-field">
@@ -22,6 +22,32 @@
             <option value="totale_scelte">Numero di scelte</option>
             <option value="n_enti">Numero di enti</option>
           </select>
+        </div>
+      </div>
+      <!-- Selezione rapida categorie predefinite -->
+      <div>
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Selezione rapida</p>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="preset in PRESETS"
+            :key="preset.label"
+            @click="applyPreset(preset)"
+            class="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
+            :class="activePreset === preset.label
+              ? 'bg-brand-600 text-white border-brand-600'
+              : 'bg-white text-gray-600 border-gray-300 hover:border-brand-400 hover:text-brand-700'"
+          >
+            {{ preset.label }}
+          </button>
+          <button
+            @click="applyPreset(null)"
+            class="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
+            :class="activePreset === null
+              ? 'bg-gray-700 text-white border-gray-700'
+              : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'"
+          >
+            Tutte
+          </button>
         </div>
       </div>
     </div>
@@ -227,6 +253,13 @@ import { fetchAnni, fetchAnalisiCategorie } from '@/api/client'
 
 const CAT_COLORS = ['#3b82f6','#10b981','#8b5cf6','#ef4444','#f59e0b','#06b6d4','#f97316','#ec4899']
 
+// Parole chiave da cercare nel nome categoria (case-insensitive)
+const PRESETS = [
+  { label: 'Ricerca Scientifica', keywords: ['ricerca_scientifica', 'ricerca scientifica'] },
+  { label: 'Sanitari',            keywords: ['sanitari', 'ricerca_sanitaria', 'ricerca sanitaria'] },
+  { label: 'Volontariato / ETS',  keywords: ['volontariato', 'ets', 'onlus'] },
+]
+
 const anniDisponibili  = ref([])
 const annoSelezionato  = ref(null)
 const metrica          = ref('totale_importo')
@@ -235,6 +268,21 @@ const loading          = ref(false)
 const error            = ref(false)
 const animated         = ref(false)
 const catAttive        = ref(new Set())
+const activePreset     = ref(null)
+
+function applyPreset(preset) {
+  if (!data.value) return
+  activePreset.value = preset ? preset.label : null
+  if (!preset) {
+    catAttive.value = new Set(data.value.categorie)
+    return
+  }
+  const matched = data.value.categorie.filter(cat => {
+    const c = cat.toLowerCase()
+    return preset.keywords.some(k => c.includes(k))
+  })
+  catAttive.value = new Set(matched.length ? matched : data.value.categorie.slice(0, 4))
+}
 
 const metricaLabel = computed(() => ({
   totale_importo: 'Importo totale',
@@ -246,6 +294,7 @@ const categorieOrdinate = computed(() => {
   if (!data.value || !annoSelezionato.value) return []
   const perAnno = data.value.per_anno[annoSelezionato.value] ?? {}
   return data.value.categorie
+    .filter(cat => catAttive.value.size === 0 || catAttive.value.has(cat))
     .map(cat => ({ cat, data: perAnno[cat] ?? null, val: perAnno[cat]?.[metrica.value] ?? 0 }))
     .filter(r => r.data)
     .sort((a, b) => b.val - a.val)
@@ -289,10 +338,14 @@ async function loadData() {
   animated.value = false
 
   try {
-    const res   = await fetchAnalisiCategorie(annoSelezionato.value)
-    data.value  = res.data
-    // Inizializza categorie attive (prime 4)
-    catAttive.value = new Set(data.value.categorie.slice(0, 4))
+    const res  = await fetchAnalisiCategorie(annoSelezionato.value)
+    data.value = res.data
+    // Mantieni il preset attivo (se applicabile) altrimenti prime 4
+    if (activePreset.value) {
+      applyPreset(PRESETS.find(p => p.label === activePreset.value) ?? null)
+    } else {
+      catAttive.value = new Set(data.value.categorie.slice(0, 4))
+    }
     setTimeout(() => { animated.value = true }, 100)
   } catch {
     error.value = true

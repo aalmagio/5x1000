@@ -142,6 +142,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // -- aggiornamento solo RUNTS (riesegue solo ETL con merge RUNTS) --
+    if ($pa === 'launch_runts') {
+        if (adm_is_running()) {
+            $flash = ['err', 'Un processo è già in esecuzione.'];
+        } else {
+            [$ok, $msg, $log_file] = adm_launch_runts();
+            if ($ok) { header('Location: admin.php?tab=log&logfile=' . urlencode($log_file)); exit; }
+            $flash = ['err', $msg];
+        }
+        $tab = 'pipeline';
+    }
+
     // -- launch db_updater --
     if ($pa === 'launch_db') {
         if (adm_is_running()) {
@@ -251,7 +263,7 @@ function adm_venv_info(): array {
     $venv_path_env = rtrim(getenv('VENV_PATH') ?: '', '/');
     if ($venv_path_env) {
         $py = $venv_path_env . '/bin/python3';
-        if (is_executable($py)) {
+        if (@file_exists($py)) {
             return ['path' => $venv_path_env, 'python' => $py, 'exists' => true, 'source' => 'VENV_PATH'];
         }
         return ['path' => $venv_path_env, 'python' => $py, 'exists' => false, 'source' => 'VENV_PATH (non trovato)'];
@@ -365,6 +377,11 @@ function adm_launch_pipeline(array $post): array {
     if ($ac >= ANNI_MIN && $ac <= ANNI_MAX) $args[] = '--anno-confronto ' . $ac;
 
     return adm_run_bg(PROJECT_ROOT . '/pipeline.py', $args, 'pipeline');
+}
+
+/** Riesegue solo lo step ETL (merge RUNTS incluso) senza ri-scaricare dati. */
+function adm_launch_runts(): array {
+    return adm_run_bg(PROJECT_ROOT . '/pipeline.py', ['--only etl'], 'runts_update');
 }
 
 function adm_launch_db(array $post): array {
@@ -860,6 +877,29 @@ $he = fn(string $s) => htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'
             </button>
           </div>
         </form>
+      </div>
+
+      <!-- Aggiornamento RUNTS (collapsible) -->
+      <div x-data="{open:false}" class="bg-white rounded-xl border border-gray-200 mb-5">
+        <button @click="open=!open" class="w-full flex items-center justify-between px-5 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-xl transition-colors">
+          <span>🔄 Aggiorna solo RUNTS (riesegue ETL con nuovo file Runts/)</span>
+          <span x-text="open ? '▲' : '▼'" class="text-gray-400"></span>
+        </button>
+        <div x-show="open" x-collapse class="border-t border-gray-100 px-5 pb-5 pt-4">
+          <p class="text-xs text-gray-500 mb-3 leading-relaxed">
+            Usa questa funzione quando hai aggiornato manualmente il file nella cartella <code>Runts/</code>.
+            Riesegue solo lo step <strong>etl</strong> (normalizzazione + merge RUNTS + aggiornamento DB)
+            senza re-scaricare i file dall'Agenzia delle Entrate.
+          </p>
+          <form method="POST">
+            <input type="hidden" name="action" value="launch_runts">
+            <input type="hidden" name="csrf" value="<?= $he($csrf) ?>">
+            <button type="submit" <?= $is_running ? 'disabled' : '' ?>
+              class="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+              Avvia aggiornamento RUNTS
+            </button>
+          </form>
+        </div>
       </div>
 
       <!-- DB Updater (collapsible) -->

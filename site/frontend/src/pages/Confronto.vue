@@ -5,6 +5,39 @@
       <p class="text-gray-500">Confronta fino a 5 enti inserendo i loro codici fiscali.</p>
     </div>
 
+    <!-- Ricerca per nome -->
+    <div class="card mb-4">
+      <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Cerca ente per nome</p>
+      <div class="relative">
+        <input
+          v-model="searchNome"
+          placeholder="Es. Croce Rossa, Caritas…"
+          class="input-field pr-8"
+          @input="onSearchNome"
+        />
+        <svg class="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+      </div>
+      <!-- Risultati dropdown -->
+      <div v-if="searchResults.length" class="mt-2 border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100">
+        <button
+          v-for="r in searchResults"
+          :key="r.cod_fiscale"
+          @click="addFromSearch(r)"
+          class="w-full flex items-center gap-3 px-3 py-2 hover:bg-brand-50 text-left transition-colors"
+        >
+          <span class="font-mono text-xs text-gray-400 w-32 flex-shrink-0">{{ r.cod_fiscale }}</span>
+          <span class="text-sm font-medium text-gray-800 flex-1 truncate">{{ r.denominazione }}</span>
+          <span class="text-xs text-gray-400 flex-shrink-0">{{ r.regione }}</span>
+          <svg class="w-4 h-4 text-brand-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+        </button>
+      </div>
+      <p v-if="searchNome.length >= 2 && !searchResults.length && !searchLoading" class="text-xs text-gray-400 mt-2">Nessun ente trovato.</p>
+    </div>
+
     <!-- Input CF -->
     <div class="card mb-6">
       <div class="space-y-3 mb-4">
@@ -255,15 +288,46 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { fetchConfronta } from '@/api/client'
+import { fetchConfronta, fetchCercaCf } from '@/api/client'
 
 const COLORS = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6']
 
-const cfList  = ref(['', ''])
-const result  = ref(null)
-const loading = ref(false)
-const error   = ref('')
-const animated = ref(false)
+const cfList       = ref(['', ''])
+const result       = ref(null)
+const loading      = ref(false)
+const error        = ref('')
+const animated     = ref(false)
+const searchNome   = ref('')
+const searchResults = ref([])
+const searchLoading = ref(false)
+let   searchTimer  = null
+
+async function onSearchNome() {
+  clearTimeout(searchTimer)
+  searchResults.value = []
+  if (searchNome.value.length < 2) return
+  searchTimer = setTimeout(async () => {
+    searchLoading.value = true
+    try {
+      const res = await fetchCercaCf(searchNome.value)
+      searchResults.value = res.data
+    } catch { /* ignora */ } finally {
+      searchLoading.value = false
+    }
+  }, 300)
+}
+
+function addFromSearch(r) {
+  // Trova il primo slot vuoto o aggiunge
+  const emptyIdx = cfList.value.findIndex(v => !v.trim())
+  if (emptyIdx !== -1) {
+    cfList.value[emptyIdx] = r.cod_fiscale
+  } else if (cfList.value.length < 5) {
+    cfList.value.push(r.cod_fiscale)
+  }
+  searchNome.value   = ''
+  searchResults.value = []
+}
 
 const entiTrovati = computed(() => result.value?.enti.filter(e => e.trovato) ?? [])
 
