@@ -478,12 +478,6 @@ def normalize_year(df: pd.DataFrame, anno: int) -> pd.DataFrame:
         df[imp_tot_col].apply(parse_importo) if imp_tot_col else None
     )
 
-    # Flag sotto soglia: ente scelto (N_SCELTE > 0) ma importo nullo
-    out["SOTTO_SOGLIA"] = (
-        (out["N_SCELTE"].fillna(0) > 0) &
-        (out["IMPORTO_TOTALE"].fillna(0) == 0)
-    )
-
     return out
 
 
@@ -560,10 +554,6 @@ def process_streaming(
 
             imp_sum = df_norm["IMPORTO_TOTALE"].sum()
             stats["importo_per_anno"][anno] = float(imp_sum) if pd.notna(imp_sum) else 0.0
-
-            if "SOTTO_SOGLIA" in df_norm.columns:
-                n_sotto = int(df_norm["SOTTO_SOGLIA"].sum())
-                stats["sotto_soglia"] = stats.get("sotto_soglia", 0) + n_sotto
 
             logging.info(f"  [{anno}] {n:,} righe -> CSV")
 
@@ -1066,8 +1056,6 @@ def main():
     logging.info(f"  Righe totali:    {stats['total_rows']:,}")
     logging.info(f"  Anni coperti:    {stats['anni']}")
     logging.info(f"  Match RUNTS:     {stats['runts_matches']:,}")
-    if stats.get("sotto_soglia"):
-        logging.info(f"  Sotto soglia:    {stats['sotto_soglia']:,}  (scelte > 0, importo = 0)")
     logging.info("\n  Categorie:")
     for cat, cnt in sorted(stats["cat_counts"].items(), key=lambda x: -x[1]):
         logging.info(f"    {cat:<35} {cnt:>8,}")
