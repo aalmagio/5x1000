@@ -13,6 +13,8 @@ const About             = () => import('./pages/About.vue')
 const EnteDetail        = () => import('./pages/EnteDetail.vue')
 const ApiDocs            = () => import('./pages/ApiDocs.vue')
 const CategoriaDettaglio = () => import('./pages/CategoriaDettaglio.vue')
+const Inoptato           = () => import('./pages/Inoptato.vue')
+const Forecast           = () => import('./pages/Forecast.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -22,6 +24,8 @@ const router = createRouter({
     { path: '/confronto',                     component: Confronto,        name: 'confronto' },
     { path: '/categorie',                     component: AnalisiCategorie, name: 'categorie' },
     { path: '/categorie/:categoria/:anno',    component: CategoriaDettaglio, name: 'categoria_dettaglio' },
+    { path: '/inoptato',                      component: Inoptato,         name: 'inoptato' },
+    { path: '/forecast',                      component: Forecast,         name: 'forecast' },
     { path: '/download',                      component: Download,         name: 'download' },
     { path: '/about',                         component: About,            name: 'about' },
     { path: '/api',                           component: ApiDocs,          name: 'api' },

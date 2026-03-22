@@ -526,6 +526,20 @@ if __name__ == "__main__":
         handlers=[logging.StreamHandler(sys.stdout)],
     )
 
+    # Carica .env dalla root del progetto (stesso comportamento della pipeline)
+    _env_file = pathlib.Path(__file__).parent / ".env"
+    if _env_file.is_file():
+        with open(_env_file, encoding="utf-8") as _fh:
+            for _line in _fh:
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _k, _v = _line.split("=", 1)
+                _k = _k.strip()
+                _v = _v.strip().strip("\"'")
+                if _k and not os.environ.get(_k):
+                    os.environ[_k] = _v
+
     ap = argparse.ArgumentParser(description="Reimporta il CSV nel DB del sito")
     ap.add_argument("--anni", default=None,
                     help="Anni da reimportare, es. 2023,2024 (default: tutti)")

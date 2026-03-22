@@ -183,46 +183,52 @@ function action_enti(): void {
     $params = [];
 
     if ($anno) {
-        $where[] = 'anno = ?';
+        $where[] = 'e.anno = ?';
         $params[] = $anno;
     }
     if ($categoria) {
-        $where[] = 'categoria_principale = ?';
+        $where[] = 'e.categoria_principale = ?';
         $params[] = $categoria;
     }
     if ($regione) {
-        $where[] = 'regione LIKE ?';
+        $where[] = 'e.regione LIKE ?';
         $params[] = '%' . $regione . '%';
     }
     if ($q) {
-        $where[] = '(denominazione LIKE ? OR cod_fiscale LIKE ?)';
+        $where[] = '(e.denominazione LIKE ? OR e.cod_fiscale LIKE ?)';
         $params[] = '%' . $q . '%';
         $params[] = '%' . $q . '%';
     }
     if ($runts_only) {
-        $where[] = 'runts_5x1000 = 1';
+        $where[] = 'e.runts_5x1000 = 1';
     } elseif ($non_runts) {
-        $where[] = '(runts_5x1000 = 0 OR runts_5x1000 IS NULL)';
+        $where[] = '(e.runts_5x1000 = 0 OR e.runts_5x1000 IS NULL)';
     }
 
     $sql_where = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
     // Conteggio totale
-    $count_stmt = $pdo->prepare("SELECT COUNT(*) FROM enti $sql_where");
+    $count_stmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM enti e LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale $sql_where"
+    );
     $count_stmt->execute($params);
     $totale = (int)$count_stmt->fetchColumn();
 
     $pagine = max(1, (int)ceil($totale / $per_pagina));
     $offset = ($pagina - 1) * $per_pagina;
 
-    // Dati
+    // Dati — denominazione canonica: RUNTS se disponibile, altrimenti anno corrente
     $data_stmt = $pdo->prepare(
-        "SELECT anno, cod_fiscale, denominazione, regione, provincia, comune,
-                categoria_principale, n_scelte, importo_espresso, importo_generico, importo_totale,
-                runts_5x1000
-         FROM enti
+        "SELECT e.anno, e.cod_fiscale,
+                COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
+                e.regione, e.provincia, e.comune,
+                e.categoria_principale,
+                e.n_scelte, e.importo_espresso, e.importo_generico, e.importo_totale,
+                e.runts_5x1000
+         FROM enti e
+         LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
          $sql_where
-         ORDER BY $sort $dir
+         ORDER BY e.$sort $dir
          LIMIT $per_pagina OFFSET $offset"
     );
     $data_stmt->execute($params);
@@ -254,6 +260,8 @@ function action_ente(): void {
     $stmt = $pdo->prepare(
         "SELECT anno, cod_fiscale, denominazione, regione, provincia, comune,
                 categoria_principale,
+                cat_volontariato, cat_asd, cat_ets_onlus, cat_ricerca_sci,
+                cat_ricerca_san, cat_comuni, cat_beni_cult, cat_aree_prot,
                 n_scelte, importo_espresso, importo_generico, importo_totale,
                 runts_denominazione, runts_sezione, runts_sede_comune, runts_sede_prov,
                 runts_5x1000, runts_data_iscrizione
@@ -267,10 +275,31 @@ function action_ente(): void {
     if (!$rows) err('Ente non trovato', 404);
 
     $first = $rows[0];
+
+    // Denominazione canonica: RUNTS se disponibile, altrimenti anno più recente
+    $denom_canonica = ($first['runts_denominazione'] ?: null) ?? $first['denominazione'];
+
+    // Categorie attive nell'anno più recente
+    $cat_map = [
+        'cat_volontariato' => 'Volontariato',
+        'cat_asd'          => 'ASD',
+        'cat_ets_onlus'    => 'ETS/ONLUS',
+        'cat_ricerca_sci'  => 'Ricerca Scientifica',
+        'cat_ricerca_san'  => 'Ricerca Sanitaria',
+        'cat_comuni'       => 'Comuni',
+        'cat_beni_cult'    => 'Beni Culturali',
+        'cat_aree_prot'    => 'Aree Protette',
+    ];
+    $categorie = [];
+    foreach ($cat_map as $col => $label) {
+        if ($first[$col]) $categorie[] = $label;
+    }
+
     $storico = [];
     foreach ($rows as $r) {
         $storico[] = [
             'anno'             => (int)$r['anno'],
+            'denominazione'    => $r['denominazione'],
             'n_scelte'         => $r['n_scelte'] !== null ? (int)$r['n_scelte'] : null,
             'importo_espresso' => $r['importo_espresso'] !== null ? (float)$r['importo_espresso'] : null,
             'importo_generico' => $r['importo_generico'] !== null ? (float)$r['importo_generico'] : null,
@@ -283,16 +312,17 @@ function action_ente(): void {
     }
 
     json_out([
-        'cod_fiscale'       => $first['cod_fiscale'],
-        'denominazione'     => $first['denominazione'],
-        'regione'           => $first['regione'],
-        'provincia'         => $first['provincia'],
-        'comune'            => $first['comune'],
-        'categoria'         => $first['categoria_principale'],
-        'runts_denominazione' => $first['runts_denominazione'],
-        'runts_5x1000'      => (bool)$first['runts_5x1000'],
-        'anni_presenti'     => array_column($storico, 'anno'),
-        'storico'           => $storico,
+        'cod_fiscale'         => $first['cod_fiscale'],
+        'denominazione'       => $denom_canonica,
+        'regione'             => $first['regione'],
+        'provincia'           => $first['provincia'],
+        'comune'              => $first['comune'],
+        'categoria'           => $first['categoria_principale'],
+        'categorie'           => $categorie,
+        'runts_denominazione' => $first['runts_denominazione'] ?: null,
+        'runts_5x1000'        => (bool)$first['runts_5x1000'],
+        'anni_presenti'       => array_column($storico, 'anno'),
+        'storico'             => $storico,
     ]);
 }
 
@@ -649,6 +679,129 @@ function action_download(): void {
 }
 
 
+// ─── Inoptato ───────────────────────────────────────────────────────────────
+
+function action_inoptato(): void {
+    $pdo       = db();
+    $categoria = str_param('categoria');
+    $regione   = str_param('regione');
+    $breakdown = str_param('breakdown'); // 'regione' | 'categoria' | ''
+
+    $where  = [];
+    $params = [];
+    if ($categoria) { $where[] = 'categoria_principale = ?'; $params[] = $categoria; }
+    if ($regione)   { $where[] = 'regione LIKE ?';           $params[] = '%' . $regione . '%'; }
+    $sql_where = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+
+    // Storico aggregato per anno
+    $stmt = $pdo->prepare(
+        "SELECT anno,
+                SUM(importo_espresso) AS tot_espresso,
+                SUM(importo_generico) AS tot_generico,
+                SUM(importo_totale)   AS tot_totale,
+                SUM(n_scelte)         AS tot_scelte
+         FROM enti
+         $sql_where
+         GROUP BY anno
+         ORDER BY anno ASC"
+    );
+    $stmt->execute($params);
+    $per_anno = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $gen = (float)$r['tot_generico'];
+        $tot = (float)$r['tot_totale'];
+        $per_anno[] = [
+            'anno'          => (int)$r['anno'],
+            'tot_espresso'  => (float)$r['tot_espresso'],
+            'tot_generico'  => $gen,
+            'tot_totale'    => $tot,
+            'tot_scelte'    => (int)$r['tot_scelte'],
+            'perc_generico' => $tot > 0 ? round($gen / $tot * 100, 2) : null,
+        ];
+    }
+
+    $out = ['per_anno' => $per_anno];
+
+    // Breakdown per regione (anno più recente)
+    if ($breakdown === 'regione') {
+        $anno_max = (int)$pdo->query("SELECT MAX(anno) FROM enti")->fetchColumn();
+        $w2 = ['anno = ?'];
+        $p2 = [$anno_max];
+        if ($categoria) { $w2[] = 'categoria_principale = ?'; $p2[] = $categoria; }
+        $stmt2 = $pdo->prepare(
+            "SELECT regione,
+                    SUM(importo_espresso) AS tot_espresso,
+                    SUM(importo_generico) AS tot_generico,
+                    SUM(importo_totale)   AS tot_totale
+             FROM enti
+             WHERE " . implode(' AND ', $w2) . "
+             GROUP BY regione
+             ORDER BY tot_totale DESC"
+        );
+        $stmt2->execute($p2);
+        $per_regione = [];
+        foreach ($stmt2->fetchAll() as $r) {
+            $gen = (float)$r['tot_generico'];
+            $tot = (float)$r['tot_totale'];
+            $per_regione[] = [
+                'regione'       => $r['regione'],
+                'tot_espresso'  => (float)$r['tot_espresso'],
+                'tot_generico'  => $gen,
+                'tot_totale'    => $tot,
+                'perc_generico' => $tot > 0 ? round($gen / $tot * 100, 2) : null,
+            ];
+        }
+        $out['anno_riferimento'] = $anno_max;
+        $out['per_regione']      = $per_regione;
+
+    // Breakdown per categoria (anno più recente)
+    } elseif ($breakdown === 'categoria') {
+        $anno_max = (int)$pdo->query("SELECT MAX(anno) FROM enti")->fetchColumn();
+        $stmt2    = $pdo->prepare(
+            "SELECT categoria_principale,
+                    SUM(importo_espresso) AS tot_espresso,
+                    SUM(importo_generico) AS tot_generico,
+                    SUM(importo_totale)   AS tot_totale
+             FROM enti
+             WHERE anno = ? AND categoria_principale IS NOT NULL
+             GROUP BY categoria_principale
+             ORDER BY tot_totale DESC"
+        );
+        $stmt2->execute([$anno_max]);
+        $per_cat = [];
+        foreach ($stmt2->fetchAll() as $r) {
+            $gen = (float)$r['tot_generico'];
+            $tot = (float)$r['tot_totale'];
+            $per_cat[] = [
+                'categoria'     => $r['categoria_principale'],
+                'tot_espresso'  => (float)$r['tot_espresso'],
+                'tot_generico'  => $gen,
+                'tot_totale'    => $tot,
+                'perc_generico' => $tot > 0 ? round($gen / $tot * 100, 2) : null,
+            ];
+        }
+        $out['anno_riferimento'] = $anno_max;
+        $out['per_categoria']    = $per_cat;
+    }
+
+    json_out($out);
+}
+
+// ─── Forecast ───────────────────────────────────────────────────────────────
+
+function action_forecast(): void {
+    $path = __DIR__ . '/data/forecast.json';
+    if (!file_exists($path)) {
+        err('Dati forecast non disponibili. Eseguire forecast.py per generarli.', 404);
+    }
+    $json = file_get_contents($path);
+    if ($json === false) err('Errore lettura dati forecast', 500);
+    // Re-emit as JSON (avoid double encoding)
+    http_response_code(200);
+    echo $json;
+    exit;
+}
+
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 try {
@@ -666,7 +819,9 @@ try {
         'categoria_dettaglio'  => action_categoria_dettaglio(),
         'files'                => action_files(),
         'download'             => action_download(),
-        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download", 404),
+        'inoptato'             => action_inoptato(),
+        'forecast'             => action_forecast(),
+        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, forecast", 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());
