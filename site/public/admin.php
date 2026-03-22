@@ -234,6 +234,22 @@ function adm_run_bg(string $script, array $args, string $log_prefix): array {
 
 function adm_launch_pipeline(array $post, string $python): array {
     $args = [];
+
+    // Modalità Solo Report: ignora tutti gli altri step
+    if (!empty($post['report_only'])) {
+        $args[] = '--report-only';
+        $anni = trim($post['anni'] ?? '');
+        if ($anni !== '' && preg_match('/^[\d,\s]+$/', $anni)) {
+            $ys = array_filter(array_map('intval', explode(',', $anni)));
+            $ys = array_filter($ys, fn($y) => $y >= ANNI_MIN && $y <= ANNI_MAX + 1);
+            if ($ys) $args[] = '--anni ' . escapeshellarg(implode(',', $ys));
+        }
+        $ac = (int)($post['anno_confronto'] ?? 0);
+        if ($ac >= ANNI_MIN && $ac <= ANNI_MAX) $args[] = '--anno-confronto ' . $ac;
+        if (!empty($post['no_confronto'])) $args[] = '--no-confronto';
+        return adm_run_bg(PROJECT_ROOT . '/pipeline.py', $args, 'report');
+    }
+
     $anni = trim($post['anni'] ?? '');
     if ($anni !== '' && preg_match('/^[\d,\s]+$/', $anni)) {
         $ys = array_filter(array_map('intval', explode(',', $anni)));
@@ -740,10 +756,17 @@ $he = fn(string $s) => htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'
             </div>
           </div>
 
-          <button type="submit" <?= $is_running ? 'disabled' : '' ?>
-            class="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
-            ▶ Avvia pipeline
-          </button>
+          <div class="flex items-center gap-3 flex-wrap">
+            <button type="submit" name="report_only" value="" <?= $is_running ? 'disabled' : '' ?>
+              class="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+              ▶ Avvia pipeline
+            </button>
+            <button type="submit" name="report_only" value="1" <?= $is_running ? 'disabled' : '' ?>
+              class="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+              title="Esegue solo lo step 'report' (--report-only): rigenera il report Excel senza riscaricare i dati">
+              📊 Solo Report
+            </button>
+          </div>
         </form>
       </div>
 

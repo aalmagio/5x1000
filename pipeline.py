@@ -299,6 +299,13 @@ Step disponibili: download, categorie, etl, report, gsheets
         "--force", action="store_true",
         help="Salta la conferma interattiva richiesta da --reset / --reset-db.",
     )
+    parser.add_argument(
+        "--report-only", action="store_true",
+        help=(
+            "Scorciatoia: esegui solo lo step 'report' (equivalente a --only report). "
+            "Utile per rigenerare il report Excel senza riscaricare o rielaborare i dati."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -419,6 +426,10 @@ def main():
         if not operativo and not args.anni:
             print("Reset completato. Passa --anni o altri flag per avviare la pipeline.")
             sys.exit(0)
+
+    # --report-only è una scorciatoia per --only report
+    if args.report_only and not args.only:
+        args.only = "report"
 
     log_file = setup_logging(root_dir)
 
@@ -649,7 +660,8 @@ def main():
             cmd.append("--no-runts")
         if args.no_excel_etl:
             cmd.append("--no-excel")
-        ok, dur = run_step("ETL (normalizzazione + export)", cmd, root_dir, timeout=_timeout("etl"))
+        cmd.append("--aggiorna-db")   # aggiorna il DB al termine di ogni anno
+        ok, dur = run_step("ETL (normalizzazione + export + DB per-anno)", cmd, root_dir, timeout=_timeout("etl"))
         results["etl"] = (ok, dur)
 
     # STEP 4: Report Excel
@@ -700,6 +712,9 @@ def main():
     logging.info("=" * 60)
 
     # ---- Aggiornamento DB sito ----
+    # Se ETL ha già eseguito l'aggiornamento per-anno (--aggiorna-db), qui
+    # registriamo solo il pipeline_run e aggiorniamo il catalogo dataset_files,
+    # senza reimportare la tabella enti (che è già aggiornata anno per anno).
     try:
         from db_updater import aggiorna_db_sito
         import pathlib
@@ -709,9 +724,13 @@ def main():
         _anni_list = [int(a) for a in anni.split(",") if a.strip()] if anni else []
         _db_status = "ok" if all_ok else "parziale"
         _note = f"Errori in: {failed}" if not all_ok else ""
+        # Rimuovi "etl" dalla lista step: gli enti sono già stati aggiornati
+        # per-anno dentro etl.py --aggiorna-db; qui vogliamo solo registrare
+        # il run e aggiornare dataset_files.
+        _steps_db = [s for s in steps if s != "etl"]
         ok_db = aggiorna_db_sito(
             anni_processati=_anni_list,
-            steps_eseguiti=steps,
+            steps_eseguiti=_steps_db,
             csv_path=_csv_path,
             dati_dir=_dati_dir,
             status=_db_status,
@@ -719,7 +738,7 @@ def main():
             t_inizio=total_start,
         )
         if ok_db:
-            logging.info("DB sito aggiornato con successo.")
+            logging.info("DB sito aggiornato con successo (run registrato, file catalogo aggiornato).")
         else:
             logging.info("Aggiornamento DB sito saltato (non configurato o errore).")
     except Exception as _e:
