@@ -58,6 +58,60 @@ def _db_config(override: dict | None = None) -> dict:
 # Funzione principale
 # ---------------------------------------------------------------------------
 
+def registra_file_output(
+    path: "Path | str",
+    anno: "int | None" = None,
+    tipo: str = "report",
+    categoria: "str | None" = None,
+    db_config: "dict | None" = None,
+) -> bool:
+    """
+    Registra (o aggiorna) un singolo file nel catalogo ``dataset_files``.
+
+    Utile per script stand-alone (es. ``report.py``) che generano file
+    senza passare dall'intera pipeline.
+
+    Parametri
+    ---------
+    path       : percorso al file generato
+    anno       : anno di riferimento (None = file multi-anno)
+    tipo       : 'report' | 'normalizzato' | 'completo' | 'categoria'
+    categoria  : slug categoria (solo se tipo='categoria')
+    db_config  : override configurazione DB (vedi _db_config)
+    """
+    try:
+        import pymysql
+    except ImportError:
+        logger.warning("db_updater: pymysql non installato – registrazione file saltata")
+        return False
+
+    cfg = _db_config(db_config)
+    if not cfg["user"] or not cfg["database"]:
+        logger.warning("db_updater: SITE_DB_USER/SITE_DB_NAME non configurati – saltato")
+        return False
+
+    path = Path(path)
+    if not path.exists():
+        logger.warning(f"db_updater: file non trovato: {path}")
+        return False
+
+    ext = path.suffix.lstrip(".")
+    if ext not in ("csv", "xlsx"):
+        logger.warning(f"db_updater: formato non supportato ({ext}) per {path.name}")
+        return False
+
+    try:
+        conn = pymysql.connect(**cfg)
+        with conn:
+            cur = conn.cursor()
+            _upsert_file(cur, anno, tipo, categoria, ext, path)
+        logger.info(f"db_updater: file registrato nel catalogo: {path.name}")
+        return True
+    except Exception as exc:
+        logger.error(f"db_updater: errore registrazione file – {exc}", exc_info=True)
+        return False
+
+
 def aggiorna_db_sito(
     anni_processati: list[int],
     steps_eseguiti: list[str],
