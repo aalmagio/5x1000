@@ -105,7 +105,7 @@ def linear_forecast(anni: list, valori: list, n_future: int = 2) -> dict:
     }
 
 
-def run(root: pathlib.Path, csv_path: pathlib.Path | None = None, n_future: int = 2) -> dict:
+def run(root: pathlib.Path, csv_path: pathlib.Path | None = None, n_future: int = 2, anno_max: int | None = None) -> dict:
     if csv_path and csv_path.is_file():
         df = load_data_csv(csv_path)
     else:
@@ -121,6 +121,13 @@ def run(root: pathlib.Path, csv_path: pathlib.Path | None = None, n_future: int 
     df["anno"] = df["anno"].astype(int)
     df["n_scelte"] = pd.to_numeric(df.get("n_scelte", 0), errors="coerce").fillna(0)
     df["importo_totale"] = pd.to_numeric(df.get("importo_totale", 0), errors="coerce").fillna(0)
+
+    # Esclude anni parziali: usa anno_max esplicito o l'anno prima del corrente
+    if anno_max is None:
+        import datetime
+        anno_max = datetime.date.today().year - 1
+    df = df[df["anno"] <= anno_max]
+    log.info("Serie storica troncata a anno <= %d", anno_max)
 
     categorie = sorted(df["categoria_principale"].dropna().unique())
 
@@ -202,6 +209,8 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(description="Genera proiezioni trend 5×1000 via regressione lineare")
     ap.add_argument("--anni", type=int, default=2, help="Anni da proiettare (default: 2)")
+    ap.add_argument("--anno-max", type=int, default=None,
+                    help="Ultimo anno da includere nello storico (default: anno corrente - 1)")
     ap.add_argument("--csv", default=None, help="Percorso CSV normalizzato (default: Dati/enti_5x1000_norm.csv)")
     ap.add_argument("--out", default=None, help="File output JSON (default: site/public/data/forecast.json)")
     args = ap.parse_args()
@@ -211,7 +220,7 @@ if __name__ == "__main__":
 
     csv_path = pathlib.Path(args.csv) if args.csv else None
     log.info("Avvio forecast 5×1000 (proiezione %d anni)", args.anni)
-    risultati = run(root, csv_path=csv_path, n_future=args.anni)
+    risultati = run(root, csv_path=csv_path, n_future=args.anni, anno_max=args.anno_max)
 
     out_path = pathlib.Path(args.out) if args.out else root / "site" / "public" / "data" / "forecast.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
