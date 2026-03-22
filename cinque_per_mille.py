@@ -652,7 +652,7 @@ def ask_years(available_years, label="Aggiorna"):
     while True:
         choice = input("Scelta [1/2]: ").strip()
         if choice == "1":
-            return sorted(available_years)
+            return sorted(available_years, reverse=True)
         if choice == "2":
             while True:
                 raw = input("Inserisci gli anni separati da virgola (es. 2020,2021,2022): ").strip()
@@ -665,7 +665,7 @@ def ask_years(available_years, label="Aggiorna"):
                     if not years:
                         print("  Nessun anno inserito. Riprova.")
                         continue
-                    return sorted(years)
+                    return sorted(years, reverse=True)
                 except ValueError:
                     print("  Formato non valido. Usa numeri separati da virgola.")
         print("  Scelta non valida, inserisci 1 o 2.")
