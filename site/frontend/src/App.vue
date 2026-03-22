@@ -73,6 +73,8 @@
               <li><RouterLink to="/dati"      class="hover:text-white transition-colors">Ricerca enti</RouterLink></li>
               <li><RouterLink to="/confronto" class="hover:text-white transition-colors">Confronto enti</RouterLink></li>
               <li><RouterLink to="/categorie" class="hover:text-white transition-colors">Analisi categorie</RouterLink></li>
+              <li><RouterLink to="/inoptato"  class="hover:text-white transition-colors">Inoptato</RouterLink></li>
+              <li><RouterLink to="/forecast"  class="hover:text-white transition-colors">Proiezioni trend</RouterLink></li>
               <li><RouterLink to="/download"  class="hover:text-white transition-colors">Download dataset</RouterLink></li>
               <li><RouterLink to="/about"     class="hover:text-white transition-colors">Crediti &amp; licenza</RouterLink></li>
             </ul>
@@ -105,6 +107,8 @@ const navLinks = [
   { to: '/dati',       label: 'Esplora' },
   { to: '/confronto',  label: 'Confronto' },
   { to: '/categorie',  label: 'Categorie' },
+  { to: '/inoptato',   label: 'Inoptato' },
+  { to: '/forecast',   label: 'Proiezioni' },
   { to: '/download',   label: 'Download' },
   { to: '/api',        label: 'API' },
   { to: '/about',      label: 'Info' },

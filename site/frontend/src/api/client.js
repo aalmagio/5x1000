@@ -46,3 +46,15 @@ export const fetchCategoriaDettaglio = (categoria, anno, pagina = 1) =>
 
 // Catalogo file per Download
 export const fetchFiles = (params) => get('files', params ?? {})
+
+// Analisi inoptato (scelte generiche)
+// breakdown: '' | 'regione' | 'categoria'
+export const fetchInoptato = ({ categoria, regione, breakdown } = {}) =>
+  get('inoptato', {
+    ...(categoria  ? { categoria }  : {}),
+    ...(regione    ? { regione }    : {}),
+    ...(breakdown  ? { breakdown }  : {}),
+  })
+
+// Proiezioni forecast (richiede forecast.py già eseguito)
+export const fetchForecast = () => get('forecast')
