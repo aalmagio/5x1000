@@ -1,6 +1,6 @@
 # 5 per Mille — Pipeline dati + sito web
 
-Pipeline Python per scaricare, normalizzare e analizzare i dati dei beneficiari del **5 per mille** pubblicati dall'**Agenzia delle Entrate**, dal 2006 al 2025.
+Pipeline Python per scaricare, normalizzare e analizzare i dati dei beneficiari del **5 per mille** pubblicati dall'**Agenzia delle Entrate**, dal 2006 al 2024.
 
 Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i dati del **Registro Unico Nazionale del Terzo Settore (RUNTS)**, accessibile via sito web open data ([5x1000.almagioni.com](https://5x1000.almagioni.com)) e via API REST.
 
@@ -27,7 +27,7 @@ Il file `Dati/enti_5x1000_norm.csv` prodotto da `etl.py` ha queste colonne:
 
 | Colonna | Tipo | Descrizione |
 |---|---|---|
-| `ANNO` | int | Anno di riferimento (2006–2025) |
+| `ANNO` | int | Anno di riferimento (2006–2024) |
 | `COD_FISCALE` | str | Codice fiscale (11 char, zero-padded se numerico) |
 | `DENOMINAZIONE` | str | Nome dell'ente |
 | `REGIONE` | str | Regione sede |
@@ -78,17 +78,17 @@ pip install pdfplumber openpyxl requests beautifulsoup4
 # Pipeline completa interattiva
 python pipeline.py
 
-# Solo anno 2025, senza riscaricare
-python pipeline.py --anni 2025 --skip-download
+# Solo anno 2024, senza riscaricare
+python pipeline.py --anni 2024 --skip-download
 
 # Senza Google Sheets
-python pipeline.py --anni 2025 --skip-download --skip-gsheets
+python pipeline.py --anni 2024 --skip-download --skip-gsheets
 
 # Solo ETL + aggiornamento DB sito
 python pipeline.py --only etl,gsheets
 
 # Con Sheet ID specifico
-python pipeline.py --sheet-id 1ABC... --anni 2025
+python pipeline.py --sheet-id 1ABC... --anni 2024
 ```
 
 | Flag | Default | Descrizione |
@@ -115,8 +115,8 @@ La pipeline esegue in ordine: **download** → **categorie** → **etl** → **r
 # Modalita' interattiva (chiede tutto passo passo)
 python cinque_per_mille.py
 
-# Batch: solo conversione CSV degli anni 2024 e 2025, senza download
-python cinque_per_mille.py --no-download --source csv --anni 2024,2025
+# Batch: solo conversione CSV degli anni 2023 e 2024, senza download
+python cinque_per_mille.py --no-download --source csv --anni 2023,2024
 
 # Batch: download + conversione PDF di tutti gli anni
 python cinque_per_mille.py --source pdf
@@ -128,12 +128,12 @@ python cinque_per_mille.py --no-convert
 | Flag | Default | Descrizione |
 |---|---|---|
 | `--root` | `.` | Cartella root del progetto |
-| `--anni` | tutti | Anni da elaborare (es. `2020,2021,2025`) |
+| `--anni` | tutti | Anni da elaborare (es. `2020,2021,2024`) |
 | `--source` | `ask` | Fonte dati: `pdf`, `csv`, o `ask` (chiede per ogni cartella) |
 | `--no-download` | | Salta la fase di download dall'AdE |
 | `--no-convert` | | Salta la fase di conversione in Excel |
 
-I file vengono salvati in sottocartelle `2006/`, `2007/`, ..., `2025/` e convertiti in `dati_ANNO.xlsx`, copiati automaticamente nella cartella `Dati/`.
+I file vengono salvati in sottocartelle `2006/`, `2007/`, ..., `2024/` e convertiti in `dati_ANNO.xlsx`, copiati automaticamente nella cartella `Dati/`.
 
 ### 1b. Scaricare i dati per categoria (ammessi/esclusi)
 
@@ -141,8 +141,8 @@ I file vengono salvati in sottocartelle `2006/`, `2007/`, ..., `2025/` e convert
 # Download + estrazione (tutte le righe del file)
 python scarica_categorie.py --input categorie.xlsx
 
-# Solo anno 2025
-python scarica_categorie.py --input categorie.xlsx --anni 2025
+# Solo anno 2024
+python scarica_categorie.py --input categorie.xlsx --anni 2024
 
 # Solo download (senza creare gli Excel)
 python scarica_categorie.py --input categorie.xlsx --no-extract
@@ -165,7 +165,7 @@ Il file Excel di input deve avere le colonne: **Categoria**, **Link**, **Anno**.
 python etl.py --no-excel
 
 # Solo anni recenti
-python etl.py --anni 2023,2024,2025 --no-excel
+python etl.py --anni 2022,2023,2024 --no-excel
 
 # Senza RUNTS
 python etl.py --no-runts --no-excel
@@ -176,14 +176,14 @@ Output: `Dati/enti_5x1000_norm.csv` (~210 MB)
 ### 3. Generare il report Excel (stile ASSIF/Bedogni)
 
 ```bash
-# Report anno 2025 con confronto automatico 2024
-python report.py --anno 2025
+# Report anno 2024 con confronto automatico 2023
+python report.py --anno 2024
 
 # Confronto con un anno specifico
-python report.py --anno 2025 --anno-confronto 2023
+python report.py --anno 2024 --anno-confronto 2023
 
 # Output personalizzato
-python report.py --anno 2025 --output mio_report.xlsx
+python report.py --anno 2024 --output mio_report.xlsx
 ```
 
 Output: `Dati/report_{anno}.xlsx`
@@ -238,12 +238,12 @@ Priorità: **flag CLI > config.yaml > default nel codice**
 │       └── vite.config.js
 │
 ├── Dati/                 # Output finale (non in repo)
-│   ├── dati_2006.xlsx ... dati_2025.xlsx
+│   ├── dati_2006.xlsx ... dati_2024.xlsx
 │   ├── enti_5x1000_norm.csv      # ← output principale di etl.py
-│   └── report_2025.xlsx          # ← output di report.py
+│   └── report_2024.xlsx          # ← output di report.py
 │
 ├── Runts/                # File RUNTS (da scaricare manualmente, non in repo)
-├── 2006/ ... 2025/       # File grezzi AdE (non in repo)
+├── 2006/ ... 2024/       # File grezzi AdE (non in repo)
 ├── _EXAMPLE/             # File di esempio per testing
 └── log/                  # Log esecuzioni (non in repo)
 ```
