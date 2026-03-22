@@ -1,6 +1,6 @@
 # 5 per Mille — Pipeline dati + sito web
 
-Pipeline Python per scaricare, normalizzare e analizzare i dati dei beneficiari del **5 per mille** pubblicati dall'**Agenzia delle Entrate**, dal 2006 al 2025.
+Pipeline Python per scaricare, normalizzare e analizzare i dati dei beneficiari del **5 per mille** pubblicati dall'**Agenzia delle Entrate**, dal 2006 al 2024.
 
 Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i dati del **Registro Unico Nazionale del Terzo Settore (RUNTS)**, accessibile via sito web open data ([5x1000.almagioni.com](https://5x1000.almagioni.com)) e via API REST.
 
