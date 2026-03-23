@@ -1147,6 +1147,142 @@ function action_forecast(): void {
     exit;
 }
 
+// ─── Ripartizioni ────────────────────────────────────────────────────────────
+// Restituisce i dati pre-aggregati dalla tabella ripartizioni.
+//
+// ?action=ripartizioni
+//   &anno=YYYY           filtra per anno (opzionale; default: anno più recente)
+//   &categoria=NomeCAT   filtra per categoria (opzionale)
+//   &regione=NomeREG     filtra per regione display (opzionale; NULL = nazionale)
+//   &breakdown=regione   aggiunge dettaglio per regione
+//   &breakdown=anno      serie storica (tutti gli anni)
+//   &breakdown=categoria distribuzione tra categorie per l'anno scelto
+
+function action_ripartizioni(): void {
+    $pdo       = db();
+    $anno      = int_param('anno');
+    $categoria = str_param('categoria');
+    $regione   = str_param('regione');    // nome display normalizzato
+    $breakdown = str_param('breakdown');  // 'regione' | 'anno' | 'categoria' | ''
+
+    // Anno default: il più recente disponibile
+    if (!$anno && $breakdown !== 'anno') {
+        $anno = (int)$pdo->query("SELECT MAX(anno) FROM ripartizioni")->fetchColumn();
+        if (!$anno) {
+            // Tabella vuota: fallback su enti
+            $anno = (int)$pdo->query("SELECT MAX(anno) FROM enti")->fetchColumn();
+        }
+    }
+
+    $where  = [];
+    $params = [];
+
+    if ($anno && $breakdown !== 'anno') {
+        $where[]  = 'anno = ?';
+        $params[] = $anno;
+    }
+    if ($categoria) {
+        $where[]  = 'categoria = ?';
+        $params[] = $categoria;
+    }
+    if ($regione !== '') {
+        // '' = tutti; NULL esplicito = solo nazionali
+        if ($regione === 'nazionale' || $regione === 'null') {
+            $where[] = 'regione IS NULL';
+        } else {
+            $where[]  = 'regione = ?';
+            $params[] = $regione;
+        }
+    }
+    $sql_where = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+
+    // ── Breakdown per regione ────────────────────────────────────────────────
+    if ($breakdown === 'regione') {
+        $sql = "SELECT regione, categoria, anno,
+                       n_enti, n_contribuenti,
+                       importo_espresso, importo_generico, importo_totale
+                FROM ripartizioni
+                $sql_where AND regione IS NOT NULL
+                ORDER BY importo_totale DESC";
+        // aggiunge AND manualmente se sql_where è vuoto
+        if (!$where) {
+            $sql = str_replace('$sql_where AND', 'WHERE', $sql);
+            $sql = "SELECT regione, categoria, anno,
+                           n_enti, n_contribuenti,
+                           importo_espresso, importo_generico, importo_totale
+                    FROM ripartizioni
+                    WHERE regione IS NOT NULL
+                    ORDER BY importo_totale DESC";
+        } else {
+            $sql = "SELECT regione, categoria, anno,
+                           n_enti, n_contribuenti,
+                           importo_espresso, importo_generico, importo_totale
+                    FROM ripartizioni
+                    $sql_where AND regione IS NOT NULL
+                    ORDER BY importo_totale DESC";
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        _cast_ripartizioni($rows);
+        json_out(['anno' => $anno, 'per_regione' => $rows]);
+        return;
+    }
+
+    // ── Serie storica (breakdown=anno) ───────────────────────────────────────
+    if ($breakdown === 'anno') {
+        $where2  = ['regione IS NULL'];  // totali nazionali
+        $params2 = [];
+        if ($categoria) { $where2[] = 'categoria = ?'; $params2[] = $categoria; }
+        $sql2 = "SELECT anno, categoria,
+                        n_enti, n_contribuenti,
+                        importo_espresso, importo_generico, importo_totale
+                 FROM ripartizioni
+                 WHERE " . implode(' AND ', $where2) . "
+                 ORDER BY anno ASC, importo_totale DESC";
+        $stmt2 = $pdo->prepare($sql2);
+        $stmt2->execute($params2);
+        $rows2 = $stmt2->fetchAll();
+        _cast_ripartizioni($rows2);
+        json_out(['serie_storica' => $rows2]);
+        return;
+    }
+
+    // ── Default: distribuzione per categoria (nazionali, anno scelto) ────────
+    $w_naz  = array_merge($where, ['regione IS NULL']);
+    $sql_d  = "SELECT categoria, anno,
+                      n_enti, n_contribuenti,
+                      importo_espresso, importo_generico, importo_totale
+               FROM ripartizioni
+               WHERE " . implode(' AND ', $w_naz) . "
+               ORDER BY importo_totale DESC";
+    $stmt_d = $pdo->prepare($sql_d);
+    $stmt_d->execute($params);
+    $rows_d = $stmt_d->fetchAll();
+    _cast_ripartizioni($rows_d);
+
+    // Totale dell'anno per calcolo percentuali
+    $totale_anno = array_sum(array_column($rows_d, 'importo_totale'));
+    foreach ($rows_d as &$r) {
+        $r['perc_importo'] = $totale_anno > 0
+            ? round($r['importo_totale'] / $totale_anno * 100, 2)
+            : null;
+    }
+
+    json_out(['anno' => $anno, 'per_categoria' => $rows_d, 'totale' => $totale_anno]);
+}
+
+function _cast_ripartizioni(array &$rows): void {
+    foreach ($rows as &$r) {
+        $r['anno']             = (int)$r['anno'];
+        $r['n_enti']           = (int)$r['n_enti'];
+        $r['n_contribuenti']   = (int)$r['n_contribuenti'];
+        $r['importo_espresso'] = $r['importo_espresso'] !== null ? (float)$r['importo_espresso'] : null;
+        $r['importo_generico'] = $r['importo_generico'] !== null ? (float)$r['importo_generico'] : null;
+        $r['importo_totale']   = $r['importo_totale']   !== null ? (float)$r['importo_totale']   : null;
+    }
+}
+
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 try {
@@ -1170,7 +1306,8 @@ try {
         'inoptato'             => action_inoptato(),
         'salva_lead'           => action_salva_lead(),
         'forecast'             => action_forecast(),
-        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast", 404),
+        'ripartizioni'         => action_ripartizioni(),
+        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni", 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());

@@ -141,6 +141,64 @@ def setup_logging(root: Path) -> None:
 
 
 # ============================================================================
+# UTILITY: NORMALIZZAZIONE NOMI REGIONE
+# ============================================================================
+
+# Mappa raw (maiuscolo) → display (20 regioni ufficiali italiane).
+# Speculare alla funzione normalize_regione() in api.php.
+_REGIONE_NORM_MAP: dict[str, str] = {
+    "ABRUZZO":                            "Abruzzo",
+    "BASILICATA":                         "Basilicata",
+    "CALABRIA":                           "Calabria",
+    "CAMPANIA":                           "Campania",
+    "EMILIA-ROMAGNA":                     "Emilia-Romagna",
+    "EMILIA ROMAGNA":                     "Emilia-Romagna",
+    "FRIULI-VENEZIA GIULIA":              "Friuli-Venezia Giulia",
+    "FRIULI VENEZIA GIULIA":              "Friuli-Venezia Giulia",
+    "LAZIO":                              "Lazio",
+    "LIGURIA":                            "Liguria",
+    "LOMBARDIA":                          "Lombardia",
+    "MARCHE":                             "Marche",
+    "MOLISE":                             "Molise",
+    "PIEMONTE":                           "Piemonte",
+    "PUGLIA":                             "Puglia",
+    "SARDEGNA":                           "Sardegna",
+    "SICILIA":                            "Sicilia",
+    "TOSCANA":                            "Toscana",
+    "UMBRIA":                             "Umbria",
+    "VALLE D'AOSTA":                      "Valle d'Aosta",
+    "VALLE D'AOSTA/VALLEE D'AOSTE":       "Valle d'Aosta",
+    "VENETO":                             "Veneto",
+    # Province autonome → raggruppate nella regione ufficiale
+    "TRENTO":                             "Trentino-Alto Adige",
+    "BOLZANO":                            "Trentino-Alto Adige",
+    "TRENTINO-ALTO ADIGE":                "Trentino-Alto Adige",
+    "TRENTINO ALTO ADIGE":                "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA DI TRENTO":       "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA DI BOLZANO":      "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA TRENTO":          "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA BOLZANO":         "Trentino-Alto Adige",
+    "ALTO ADIGE":                         "Trentino-Alto Adige",
+    "P.A. TRENTO":                        "Trentino-Alto Adige",
+    "P.A. BOLZANO":                       "Trentino-Alto Adige",
+}
+
+
+def normalize_regione(val: str) -> str:
+    """Normalizza il nome regione al formato display standard.
+
+    Restituisce la stringa mappata (es. 'CAMPANIA' → 'Campania',
+    'TRENTO' → 'Trentino-Alto Adige') o il valore in title-case se sconosciuto.
+    """
+    if not val:
+        return ""
+    key = val.strip().upper()
+    if key in ("NAN", "NONE", ""):
+        return ""
+    return _REGIONE_NORM_MAP.get(key, val.strip().title())
+
+
+# ============================================================================
 # UTILITY: NORMALIZZAZIONE NOMI COLONNA
 # ============================================================================
 
@@ -398,7 +456,7 @@ def normalize_year(df: pd.DataFrame, anno: int) -> pd.DataFrame:
         df[denom_col].astype(str).str.strip() if denom_col else ""
     )
     out["REGIONE"] = (
-        df[reg_col].astype(str).str.strip().str.upper() if reg_col else ""
+        df[reg_col].astype(str).str.strip().apply(normalize_regione) if reg_col else ""
     )
     out["PROVINCIA"] = (
         df[prov_col].astype(str).str.strip().str.upper()

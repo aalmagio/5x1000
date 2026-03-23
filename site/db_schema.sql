@@ -108,7 +108,34 @@ CREATE TABLE IF NOT EXISTS `runts` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
--- 5. Lead generation (email raccolta prima del download)
+-- 5. Ripartizioni aggregate (precalcolate da _aggiorna_ripartizioni)
+--    Una riga per (anno, categoria, regione).
+--    regione = NULL → totale nazionale.
+--    Popolata da db_updater.py dopo ogni aggiornamento ETL.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ripartizioni` (
+  `id`               INT           NOT NULL AUTO_INCREMENT,
+  `anno`             SMALLINT      NOT NULL,
+  `categoria`        VARCHAR(50)   NOT NULL,
+  `regione`          VARCHAR(100)           DEFAULT NULL
+                     COMMENT 'NULL = totale nazionale',
+  `n_enti`           INT           NOT NULL DEFAULT 0
+                     COMMENT 'nr. enti beneficiari',
+  `n_contribuenti`   INT           NOT NULL DEFAULT 0
+                     COMMENT 'firme (scelte espresse)',
+  `importo_espresso` DECIMAL(15,2)          DEFAULT NULL,
+  `importo_generico` DECIMAL(15,2)          DEFAULT NULL,
+  `importo_totale`   DECIMAL(15,2)          DEFAULT NULL,
+  `aggiornato_il`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
+                     ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_rip`    (`anno`, `categoria`, `regione`),
+  KEY `idx_rip_anno`     (`anno`),
+  KEY `idx_rip_cat`      (`anno`, `categoria`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- 6. Lead generation (email raccolta prima del download)
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `leads` (
   `id`         INT          NOT NULL AUTO_INCREMENT,
