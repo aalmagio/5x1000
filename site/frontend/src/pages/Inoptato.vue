@@ -1,11 +1,26 @@
 <template>
   <div class="max-w-7xl mx-auto px-4 sm:px-6 py-10">
-    <div class="mb-6">
-      <h1 class="mb-1">Contribuenti che non scelgono</h1>
-      <p class="text-gray-500">
-        Analisi della quota di 5×1000 distribuita come <strong>scelta generica</strong>: contribuenti che hanno
-        destinato il 5×1000 senza indicare un ente specifico.
-      </p>
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="mb-1">Contribuenti che non scelgono</h1>
+        <p class="text-gray-500">
+          Analisi della quota di 5×1000 distribuita come <strong>scelta generica</strong>: contribuenti che hanno
+          destinato il 5×1000 senza indicare un ente specifico.
+        </p>
+      </div>
+      <!-- Toggle metrica -->
+      <div class="flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs flex-shrink-0">
+        <button
+          @click="metrica = 'importo'"
+          class="px-3 py-1.5 rounded-md transition-colors font-medium"
+          :class="metrica === 'importo' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'"
+        >€ Importo</button>
+        <button
+          @click="metrica = 'scelte'"
+          class="px-3 py-1.5 rounded-md transition-colors font-medium"
+          :class="metrica === 'scelte' ? 'bg-white shadow text-emerald-700' : 'text-gray-500 hover:text-gray-700'"
+        ># Firme</button>
+      </div>
     </div>
 
     <!-- Skeleton -->
@@ -29,30 +44,34 @@
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
         <div class="card bg-gradient-to-br from-amber-50 to-white border-amber-100">
           <p class="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1">% Generica ({{ ultimoAnno }})</p>
-          <p class="text-2xl font-bold text-amber-700">{{ ultimaPerc !== null ? ultimaPerc.toFixed(1) + '%' : '–' }}</p>
-          <p class="text-xs text-gray-400 mt-1">del totale distribuito</p>
+          <p class="text-2xl font-bold text-amber-700">{{ ultimaPercDisplay }}</p>
+          <p class="text-xs text-gray-400 mt-1">{{ metrica === 'importo' ? 'del totale distribuito' : 'delle firme totali' }}</p>
         </div>
         <div class="card bg-gradient-to-br from-brand-50 to-white border-brand-100">
-          <p class="text-xs font-medium text-brand-500 uppercase tracking-wide mb-1">Importo generico ({{ ultimoAnno }})</p>
-          <p class="text-2xl font-bold text-brand-700">{{ formatEur(ultimoGenerico) }}</p>
+          <p class="text-xs font-medium text-brand-500 uppercase tracking-wide mb-1">
+            {{ metrica === 'importo' ? 'Importo generico' : 'Firme generiche' }} ({{ ultimoAnno }})
+          </p>
+          <p class="text-2xl font-bold text-brand-700">
+            {{ metrica === 'importo' ? formatEur(ultimoGenerico) : formatNum(ultimoSceltaGenerica) }}
+          </p>
           <p class="text-xs text-gray-400 mt-1">scelte generiche</p>
         </div>
         <div
           class="card bg-gradient-to-br border"
-          :class="variazionePerc !== null && variazionePerc < 0
+          :class="variazioneDisplay !== null && variazioneDisplay < 0
             ? 'from-green-50 to-white border-green-100'
             : 'from-orange-50 to-white border-orange-100'"
         >
           <p
             class="text-xs font-medium uppercase tracking-wide mb-1"
-            :class="variazionePerc !== null && variazionePerc < 0 ? 'text-green-600' : 'text-orange-600'"
+            :class="variazioneDisplay !== null && variazioneDisplay < 0 ? 'text-green-600' : 'text-orange-600'"
           >Variazione YoY</p>
           <p
             class="text-2xl font-bold"
-            :class="variazionePerc !== null && variazionePerc < 0 ? 'text-green-700' : 'text-orange-700'"
+            :class="variazioneDisplay !== null && variazioneDisplay < 0 ? 'text-green-700' : 'text-orange-700'"
           >
-            <template v-if="variazionePerc !== null">
-              {{ variazionePerc > 0 ? '+' : '' }}{{ variazionePerc.toFixed(2) }} pp
+            <template v-if="variazioneDisplay !== null">
+              {{ variazioneDisplay > 0 ? '+' : '' }}{{ variazioneDisplay.toFixed(2) }} pp
             </template>
             <template v-else>–</template>
           </p>
@@ -74,17 +93,22 @@
         </div>
       </div>
 
-      <!-- Grafico storico % generica -->
+      <!-- Grafico storico % generica / firme generiche -->
       <div class="card mb-6">
         <div class="flex items-center justify-between mb-5">
           <div>
-            <h2 class="text-gray-900">Trend storico: % scelta generica</h2>
-            <p class="text-sm text-gray-400 mt-0.5">Quota del totale distribuita come generica, per anno</p>
+            <h2 class="text-gray-900">
+              {{ metrica === 'importo' ? 'Trend storico: % scelta generica' : 'Trend storico: firme generiche' }}
+            </h2>
+            <p class="text-sm text-gray-400 mt-0.5">
+              {{ metrica === 'importo' ? 'Quota del totale distribuita come generica, per anno' : 'Numero di firme (scelte) generiche per anno' }}
+            </p>
           </div>
           <span class="text-xs text-gray-400">{{ dati.per_anno.length }} anni</span>
         </div>
 
-        <div class="space-y-2">
+        <!-- Importo mode -->
+        <div v-if="metrica === 'importo'" class="space-y-2">
           <div
             v-for="r in dati.per_anno"
             :key="r.anno"
@@ -97,14 +121,9 @@
               >{{ r.anno }}</span>
             </div>
             <div class="flex-1 relative h-7 bg-gray-100 rounded overflow-hidden">
-              <!-- Barra generica (arancione) -->
               <div
                 class="absolute inset-y-0 left-0 rounded transition-all duration-500"
                 :style="{ width: (r.perc_generico ?? 0) + '%', background: 'rgba(245,158,11,0.55)' }"
-              ></div>
-              <!-- Barra espressa (blu) -->
-              <div
-                class="absolute inset-y-0 left-0 rounded-r opacity-0"
               ></div>
             </div>
             <div class="w-32 flex-shrink-0 text-right">
@@ -116,15 +135,43 @@
           </div>
         </div>
 
+        <!-- Firme mode -->
+        <div v-else class="space-y-2">
+          <div
+            v-for="r in dati.per_anno"
+            :key="r.anno"
+            class="flex items-center gap-3"
+          >
+            <div class="w-12 text-right flex-shrink-0">
+              <span
+                class="text-sm font-medium"
+                :class="r.anno === ultimoAnno ? 'text-emerald-700' : 'text-gray-500'"
+              >{{ r.anno }}</span>
+            </div>
+            <div class="flex-1 relative h-7 bg-gray-100 rounded overflow-hidden">
+              <div
+                class="absolute inset-y-0 left-0 rounded transition-all duration-500 bg-emerald-400"
+                :style="{ width: maxSceltaGenerica > 0 ? ((r.scelte_generiche ?? 0) / maxSceltaGenerica * 100).toFixed(1) + '%' : '0%' }"
+              ></div>
+            </div>
+            <div class="w-32 flex-shrink-0 text-right">
+              <span class="text-sm font-semibold tabular-nums" :class="r.anno === ultimoAnno ? 'text-emerald-700' : 'text-gray-700'">
+                {{ r.perc_scelte_generiche !== null && r.perc_scelte_generiche !== undefined ? r.perc_scelte_generiche.toFixed(1) + '%' : '–' }}
+              </span>
+              <span class="text-xs text-gray-400 ml-1">{{ formatNum(r.scelte_generiche) }}</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Legenda -->
         <div class="flex gap-4 mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
-          <span class="flex items-center gap-1.5">
+          <span v-if="metrica === 'importo'" class="flex items-center gap-1.5">
             <span class="inline-block w-3 h-3 rounded" style="background:rgba(245,158,11,0.55)"></span>
             Generica (inoptato)
           </span>
-          <span class="flex items-center gap-1.5">
-            <span class="inline-block w-3 h-3 rounded bg-brand-200"></span>
-            Espressa
+          <span v-else class="flex items-center gap-1.5">
+            <span class="inline-block w-3 h-3 rounded bg-emerald-400"></span>
+            Firme generiche
           </span>
         </div>
       </div>
@@ -268,6 +315,7 @@ const dati            = ref(null)
 const loadingBreakdown = ref(false)
 const breakdownTab    = ref('categoria')
 const breakdownRaw    = ref(null)
+const metrica         = ref('importo') // 'importo' | 'scelte'
 
 async function load() {
   loading.value = true
@@ -343,6 +391,43 @@ const variazionePerc = computed(() => {
   const prev = rows.at(-2).perc_generico
   if (last === null || prev === null) return null
   return +(last - prev).toFixed(2)
+})
+
+// Scelte generiche (firme inoptate) nell'ultimo anno
+const ultimoSceltaGenerica = computed(() => {
+  if (!dati.value?.per_anno?.length) return null
+  return dati.value.per_anno.at(-1).scelte_generiche ?? null
+})
+
+// % scelte generiche sul totale scelte
+const ultimaPercScelte = computed(() => {
+  if (!dati.value?.per_anno?.length) return null
+  return dati.value.per_anno.at(-1).perc_scelte_generiche ?? null
+})
+
+const maxSceltaGenerica = computed(() => {
+  if (!dati.value?.per_anno?.length) return 1
+  return Math.max(...dati.value.per_anno.map(r => r.scelte_generiche ?? 0), 1)
+})
+
+// Computed adattivi al metrica corrente
+const ultimaPercDisplay = computed(() => {
+  if (metrica.value === 'scelte') {
+    return ultimaPercScelte.value !== null ? ultimaPercScelte.value.toFixed(1) + '%' : '–'
+  }
+  return ultimaPerc.value !== null ? ultimaPerc.value.toFixed(1) + '%' : '–'
+})
+
+const variazioneDisplay = computed(() => {
+  if (metrica.value === 'scelte') {
+    const rows = dati.value?.per_anno
+    if (!rows || rows.length < 2) return null
+    const last = rows.at(-1).perc_scelte_generiche
+    const prev = rows.at(-2).perc_scelte_generiche
+    if (last == null || prev == null) return null
+    return +(last - prev).toFixed(2)
+  }
+  return variazionePerc.value
 })
 
 const breakdownAnno = computed(() => breakdownRaw.value?.anno_riferimento ?? ultimoAnno.value ?? '–')

@@ -60,12 +60,19 @@ export const fetchInoptato = ({ categoria, regione, breakdown } = {}) =>
 // Proiezioni forecast (richiede forecast.py già eseguito)
 export const fetchForecast = () => get('forecast')
 
+// Classifica (top/crescita/calo/newcomer)
+export const fetchClassifica = (params) => get('classifica', params ?? {})
+
+// Province (con cascading da regione)
+export const fetchProvince = (regione) => get('province', regione ? { regione } : {})
+
 // Lead generation: salva email prima del download
-export const salvaLead = ({ email, nome, tipo, anno } = {}) =>
+export const salvaLead = ({ email, nome, tipo, anno, vuole_newsletter } = {}) =>
   api.post('', new URLSearchParams({
     action: 'salva_lead',
     email,
-    ...(nome ? { nome } : {}),
-    ...(tipo ? { tipo } : {}),
-    ...(anno ? { anno } : {}),
+    ...(nome              ? { nome }              : {}),
+    ...(tipo              ? { tipo }              : {}),
+    ...(anno              ? { anno }              : {}),
+    ...(vuole_newsletter  ? { vuole_newsletter: '1' } : {}),
   }), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })

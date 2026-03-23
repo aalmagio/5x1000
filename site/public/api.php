@@ -176,6 +176,7 @@ function action_enti(): void {
     $anno       = int_param('anno');
     $categoria  = str_param('categoria');
     $regione    = str_param('regione');
+    $provincia  = str_param('provincia');
     $runts_only = int_param('runts_only');
     $non_runts  = int_param('non_runts');
     $pagina     = max(1, int_param('pagina', 1));
@@ -199,8 +200,12 @@ function action_enti(): void {
         $params[] = $categoria;
     }
     if ($regione) {
-        $where[] = 'e.regione LIKE ?';
-        $params[] = '%' . $regione . '%';
+        $where[] = 'e.regione = ?';
+        $params[] = $regione;
+    }
+    if ($provincia) {
+        $where[] = 'e.provincia = ?';
+        $params[] = $provincia;
     }
     if ($q) {
         $where[] = '(e.denominazione LIKE ? OR e.cod_fiscale LIKE ?)';
@@ -848,10 +853,11 @@ function action_inoptato(): void {
 // ─── Lead generation ────────────────────────────────────────────────────────
 
 function action_salva_lead(): void {
-    $email = str_param('email');
-    $nome  = str_param('nome');
-    $tipo  = str_param('tipo');
-    $anno  = (int)str_param('anno');
+    $email            = str_param('email');
+    $nome             = str_param('nome');
+    $tipo             = str_param('tipo');
+    $anno             = (int)str_param('anno');
+    $vuole_newsletter = (int)(bool)str_param('vuole_newsletter');
 
     if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         err('Email non valida', 400);
@@ -862,8 +868,8 @@ function action_salva_lead(): void {
 
     try {
         $stmt = $pdo->prepare(
-            "INSERT INTO leads (email, nome, fonte, file_tipo, file_anno, ip_hash)
-             VALUES (?, ?, 'download', ?, ?, ?)"
+            "INSERT INTO leads (email, nome, fonte, file_tipo, file_anno, ip_hash, vuole_newsletter)
+             VALUES (?, ?, 'download', ?, ?, ?, ?)"
         );
         $stmt->execute([
             strtolower($email),
@@ -871,6 +877,7 @@ function action_salva_lead(): void {
             $tipo ?: null,
             $anno ?: null,
             $ip_hash,
+            $vuole_newsletter,
         ]);
     } catch (\Throwable $e) {
         // Tabella non ancora creata sul server: degrada silenziosamente
@@ -878,6 +885,121 @@ function action_salva_lead(): void {
     }
 
     json_out(['ok' => true]);
+}
+
+// ─── Classifica ─────────────────────────────────────────────────────────────
+
+function action_classifica(): void {
+    $pdo        = db();
+    $anno       = int_param('anno');
+    $metrica    = str_param('metrica', 'importo'); // importo | scelte
+    $tipo       = str_param('tipo',    'top');      // top | crescita | calo | newcomer
+    $categoria  = str_param('categoria');
+    $regione    = str_param('regione');
+    $per_pagina = min(100, max(1, int_param('per_pagina', 25)));
+
+    if (!$anno) {
+        $anno = (int)$pdo->query("SELECT MAX(anno) FROM enti")->fetchColumn();
+    }
+    $anno_prec = $anno - 1;
+    $col = $metrica === 'scelte' ? 'n_scelte' : 'importo_totale';
+
+    // Filtri opzionali (oltre anno)
+    $cond    = [];
+    $cparams = [];
+    if ($categoria) { $cond[] = 'e.categoria_principale = ?'; $cparams[] = $categoria; }
+    if ($regione)   { $cond[] = 'e.regione = ?';              $cparams[] = $regione; }
+    $extra = $cond ? 'AND ' . implode(' AND ', $cond) : '';
+
+    if ($tipo === 'top') {
+        $params = array_merge([$anno], $cparams);
+        $stmt   = $pdo->prepare("
+            SELECT e.cod_fiscale,
+                   COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
+                   e.regione, e.categoria_principale, e.n_scelte, e.importo_totale
+            FROM enti e LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
+            WHERE e.anno = ? $extra AND e.$col > 0
+            ORDER BY e.$col DESC LIMIT $per_pagina");
+        $stmt->execute($params);
+
+    } elseif ($tipo === 'crescita' || $tipo === 'calo') {
+        $order  = $tipo === 'crescita' ? 'DESC' : 'ASC';
+        $extra_p = str_replace('e.', 'p.', $extra);
+        $params  = array_merge([$anno_prec, $anno], $cparams);
+        $stmt    = $pdo->prepare("
+            SELECT e.cod_fiscale,
+                   COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
+                   e.regione, e.categoria_principale,
+                   e.n_scelte AS scelte_cur,   e.importo_totale AS importo_cur,
+                   p.n_scelte AS scelte_prec,  p.importo_totale AS importo_prec,
+                   ROUND((e.$col - p.$col) / NULLIF(p.$col, 0) * 100, 1) AS perc_var,
+                   (e.$col - p.$col) AS var_assoluta
+            FROM enti e
+            JOIN enti p ON p.cod_fiscale = e.cod_fiscale AND p.anno = ?
+            LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
+            WHERE e.anno = ? $extra AND e.$col > 0 AND p.$col > 0
+            ORDER BY perc_var $order LIMIT $per_pagina");
+        $stmt->execute($params);
+
+    } elseif ($tipo === 'newcomer') {
+        $params = array_merge([$anno], $cparams, [$anno_prec]);
+        $stmt   = $pdo->prepare("
+            SELECT e.cod_fiscale,
+                   COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
+                   e.regione, e.categoria_principale, e.n_scelte, e.importo_totale
+            FROM enti e LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
+            WHERE e.anno = ? $extra AND e.n_scelte > 0
+              AND NOT EXISTS (
+                SELECT 1 FROM enti p WHERE p.cod_fiscale = e.cod_fiscale AND p.anno = ?
+              )
+            ORDER BY e.$col DESC LIMIT $per_pagina");
+        $stmt->execute($params);
+
+    } else {
+        err('tipo non valido: top | crescita | calo | newcomer');
+    }
+
+    $rows = $stmt->fetchAll();
+    foreach ($rows as $i => &$row) {
+        $row['rank'] = $i + 1;
+        // Normalizza tipi
+        foreach (['n_scelte','scelte_cur','scelte_prec'] as $k) {
+            if (array_key_exists($k, $row))
+                $row[$k] = $row[$k] !== null ? (int)$row[$k] : null;
+        }
+        foreach (['importo_totale','importo_cur','importo_prec','perc_var','var_assoluta'] as $k) {
+            if (array_key_exists($k, $row))
+                $row[$k] = $row[$k] !== null ? (float)$row[$k] : null;
+        }
+    }
+
+    json_out([
+        'anno'      => $anno,
+        'anno_prec' => $anno_prec,
+        'tipo'      => $tipo,
+        'metrica'   => $metrica,
+        'enti'      => $rows,
+    ]);
+}
+
+function action_province(): void {
+    $regione = str_param('regione');
+    $pdo     = db();
+    if ($regione) {
+        $stmt = $pdo->prepare(
+            "SELECT DISTINCT provincia FROM enti
+             WHERE regione = ? AND provincia IS NOT NULL AND provincia != ''
+             ORDER BY provincia"
+        );
+        $stmt->execute([$regione]);
+    } else {
+        $stmt = $pdo->query(
+            "SELECT DISTINCT provincia FROM enti
+             WHERE provincia IS NOT NULL AND provincia != ''
+             ORDER BY provincia"
+        );
+    }
+    json_out($stmt->fetchAll(PDO::FETCH_COLUMN));
 }
 
 // ─── Forecast ───────────────────────────────────────────────────────────────
@@ -911,6 +1033,8 @@ try {
         'analisi_categorie'    => action_analisi_categorie(),
         'categoria_dettaglio'  => action_categoria_dettaglio(),
         'regioni'              => action_regioni(),
+        'province'             => action_province(),
+        'classifica'           => action_classifica(),
         'files'                => action_files(),
         'download'             => action_download(),
         'inoptato'             => action_inoptato(),

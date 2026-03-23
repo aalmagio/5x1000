@@ -84,8 +84,25 @@
         </div>
       </div>
 
+      <!-- Tile Map + Bar chart: affiancati su desktop -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+
+      <!-- Tile cartogram -->
+      <div class="card">
+        <RegionTileMap
+          :data="regioneTileData"
+          title="Mappa importo per regione"
+          :subtitle="`Anno ${anno}`"
+          color-low="#dbeafe"
+          color-high="#1e40af"
+          label-low="minore"
+          label-high="maggiore"
+          :format-fn="formatEurShort"
+        />
+      </div>
+
       <!-- Bar chart per regione -->
-      <div class="card mb-8">
+      <div class="card">
         <h2 class="mb-5">Distribuzione per regione</h2>
         <div class="space-y-2.5">
           <div
@@ -120,6 +137,8 @@
           </div>
         </div>
       </div>
+
+      </div><!-- end grid -->
 
       <!-- Tabella enti paginata -->
       <div class="card p-0 overflow-hidden">
@@ -203,6 +222,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import { fetchCategoriaDettaglio } from '@/api/client'
+import RegionTileMap from '@/components/RegionTileMap.vue'
 
 const route    = useRoute()
 const categoria = route.params.categoria
@@ -217,6 +237,20 @@ const formatNum = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
 const formatEur = (n) => n != null
   ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
   : '–'
+function formatEurShort(v) {
+  if (v == null) return '–'
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + 'Mrd'
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M'
+  if (v >= 1e3) return (v / 1e3).toFixed(0) + 'k'
+  return v.toFixed(0) + '€'
+}
+
+const regioneTileData = computed(() =>
+  (data.value?.per_regione ?? []).map(r => ({
+    regione: r.regione,
+    value:   r.totale_importo ?? 0,
+  }))
+)
 
 const maxRegione = computed(() =>
   data.value?.per_regione?.length

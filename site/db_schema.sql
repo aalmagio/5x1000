@@ -117,8 +117,9 @@ CREATE TABLE IF NOT EXISTS `leads` (
   `fonte`      VARCHAR(100)          DEFAULT 'download' COMMENT 'contesto: download, newsletter, …',
   `file_tipo`  VARCHAR(50)           DEFAULT NULL COMMENT 'csv | xlsx | report',
   `file_anno`  SMALLINT              DEFAULT NULL COMMENT 'NULL = dataset completo',
-  `ip_hash`    CHAR(64)              DEFAULT NULL COMMENT 'SHA-256 IP anonimizzato (privacy)',
-  `creato_il`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `ip_hash`          CHAR(64)              DEFAULT NULL COMMENT 'SHA-256 IP anonimizzato (privacy)',
+  `vuole_newsletter` TINYINT(1)  NOT NULL DEFAULT 0   COMMENT '1 se l''utente ha accettato aggiornamenti via email',
+  `creato_il`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_email`   (`email`),
   KEY `idx_creato`  (`creato_il`)

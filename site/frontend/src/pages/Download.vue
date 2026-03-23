@@ -214,10 +214,18 @@
             <p v-if="modal.emailError" class="text-xs text-red-500 mt-1">{{ modal.emailError }}</p>
           </div>
 
-          <p class="text-xs text-gray-400">
-            Se lasci l'email, potrai ricevere aggiornamenti quando vengono pubblicati nuovi dati.
-            Niente spam, disiscrizione in un click.
-          </p>
+          <!-- Newsletter checkbox -->
+          <label class="flex items-start gap-3 cursor-pointer group">
+            <input
+              v-model="modal.vuole_newsletter"
+              type="checkbox"
+              class="mt-0.5 w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 flex-shrink-0"
+            />
+            <span class="text-xs text-gray-500 group-hover:text-gray-700 transition-colors leading-relaxed">
+              Voglio ricevere aggiornamenti via email quando vengono pubblicati nuovi dati 5×1000.
+              Niente spam, disiscrizione in un click.
+            </span>
+          </label>
 
           <div class="flex gap-3 pt-1">
             <button
@@ -257,12 +265,13 @@ const errorFiles   = ref(false)
 const STORAGE_KEY = '5x1000_lead_done'
 
 const modal = reactive({
-  open:       false,
-  email:      '',
-  nome:       '',
-  emailError: '',
-  saving:     false,
-  pending:    null,  // { tipo, anno, href } — download in attesa
+  open:             false,
+  email:            '',
+  nome:             '',
+  emailError:       '',
+  saving:           false,
+  vuole_newsletter: false,
+  pending:          null,  // { tipo, anno, href } — download in attesa
 })
 
 function requestDownload({ tipo, anno, href }) {
@@ -271,11 +280,12 @@ function requestDownload({ tipo, anno, href }) {
     triggerDownload(href)
     return
   }
-  modal.pending    = { tipo, anno, href }
-  modal.email      = ''
-  modal.nome       = ''
-  modal.emailError = ''
-  modal.open       = true
+  modal.pending          = { tipo, anno, href }
+  modal.email            = ''
+  modal.nome             = ''
+  modal.emailError       = ''
+  modal.vuole_newsletter = false
+  modal.open             = true
 }
 
 // Scarica senza lasciare l'email (click su backdrop o sul bottone "Senza email")
@@ -301,9 +311,10 @@ async function submitLead() {
     try {
       await salvaLead({
         email,
-        nome: modal.nome,
-        tipo: modal.pending?.tipo,
-        anno: modal.pending?.anno !== 'completo' ? modal.pending?.anno : undefined,
+        nome:             modal.nome,
+        tipo:             modal.pending?.tipo,
+        anno:             modal.pending?.anno !== 'completo' ? modal.pending?.anno : undefined,
+        vuole_newsletter: modal.vuole_newsletter,
       })
       localStorage.setItem(STORAGE_KEY, '1')
     } catch {

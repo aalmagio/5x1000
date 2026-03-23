@@ -7,7 +7,7 @@
 
     <!-- Filtri -->
     <div class="card mb-6">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
         <div>
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Anno</label>
           <select v-model="filters.anno" class="input-field">
@@ -24,9 +24,16 @@
         </div>
         <div>
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Regione</label>
-          <select v-model="filters.regione" class="input-field">
+          <select v-model="filters.regione" class="input-field" @change="onRegioneChange">
             <option value="">Tutte le regioni</option>
             <option v-for="r in regioni" :key="r" :value="r">{{ r }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Provincia</label>
+          <select v-model="filters.provincia" class="input-field" :disabled="!filters.regione">
+            <option value="">Tutte le province</option>
+            <option v-for="p in province" :key="p" :value="p">{{ p }}</option>
           </select>
         </div>
         <div>
@@ -212,11 +219,12 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { fetchEnti, fetchAnni, fetchCategorie, fetchRegioni } from '@/api/client'
+import { fetchEnti, fetchAnni, fetchCategorie, fetchRegioni, fetchProvince } from '@/api/client'
 
 const anni      = ref([])
 const categorie = ref([])
 const regioni   = ref([])
+const province  = ref([])
 const result    = ref(null)
 const loading   = ref(false)
 const error     = ref(false)
@@ -228,13 +236,23 @@ const filters = ref({
   anno:         null,
   categoria:    null,
   regione:      '',
+  provincia:    '',
   q:            '',
   runts_filter: 'all',  // 'all' | 'runts' | 'non_runts'
 })
 
 const hasActiveFilters = computed(() =>
-  filters.value.anno || filters.value.categoria || filters.value.regione || filters.value.q || filters.value.runts_filter !== 'all'
+  filters.value.anno || filters.value.categoria || filters.value.regione || filters.value.provincia || filters.value.q || filters.value.runts_filter !== 'all'
 )
+
+async function onRegioneChange() {
+  filters.value.provincia = ''
+  province.value = []
+  if (filters.value.regione) {
+    const res = await fetchProvince(filters.value.regione)
+    province.value = res.data
+  }
+}
 
 const sortedData = computed(() => {
   if (!result.value?.data) return []
@@ -286,6 +304,7 @@ async function search(p = 1) {
     if (filters.value.anno)       params.anno      = filters.value.anno
     if (filters.value.categoria)  params.categoria = filters.value.categoria
     if (filters.value.regione)    params.regione   = filters.value.regione
+    if (filters.value.provincia)  params.provincia = filters.value.provincia
     if (filters.value.q)          params.q         = filters.value.q
     if (filters.value.runts_filter === 'runts')     params.runts_only = 1
     if (filters.value.runts_filter === 'non_runts') params.non_runts  = 1
@@ -300,7 +319,8 @@ async function search(p = 1) {
 }
 
 function reset() {
-  filters.value = { anno: null, categoria: null, regione: '', q: '', runts_filter: 'all' }
+  filters.value = { anno: null, categoria: null, regione: '', provincia: '', q: '', runts_filter: 'all' }
+  province.value = []
   search()
 }
 
