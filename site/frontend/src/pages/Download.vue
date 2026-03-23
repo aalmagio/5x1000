@@ -171,13 +171,12 @@
     <div
       v-if="modal.open"
       class="fixed inset-0 z-50 flex items-center justify-center p-4"
-      @click.self="modal.open = false"
     >
-      <!-- Backdrop -->
-      <div class="absolute inset-0 bg-black/40 backdrop-blur-sm"></div>
+      <!-- Backdrop: click chiude il modal -->
+      <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="skipAndDownload"></div>
 
       <!-- Card -->
-      <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 z-10">
+      <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 z-10" @click.stop>
         <!-- Icona -->
         <div class="w-12 h-12 bg-brand-50 rounded-xl flex items-center justify-center mb-5 mx-auto">
           <svg class="w-6 h-6 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -188,7 +187,7 @@
 
         <h3 class="text-lg font-bold text-gray-900 text-center mb-1">Scarica il dataset</h3>
         <p class="text-sm text-gray-500 text-center mb-6">
-          Lascia la tua email per accedere al download. Niente spam — solo aggiornamenti sui dati 5×1000.
+          Lascia la tua email per ricevere aggiornamenti sui dati 5×1000. Il download è gratuito anche senza registrazione.
         </p>
 
         <form @submit.prevent="submitLead" class="space-y-4">
@@ -203,7 +202,7 @@
             />
           </div>
           <div>
-            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5 block">Email <span class="text-red-500">*</span></label>
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5 block">Email (opzionale)</label>
             <input
               v-model="modal.email"
               type="email"
@@ -211,18 +210,23 @@
               :class="modal.emailError ? 'border-red-400' : ''"
               placeholder="tuamail@esempio.it"
               autocomplete="email"
-              required
             />
             <p v-if="modal.emailError" class="text-xs text-red-500 mt-1">{{ modal.emailError }}</p>
           </div>
 
           <p class="text-xs text-gray-400">
-            Cliccando "Scarica" accetti il trattamento dei tuoi dati per comunicazioni sui dati 5×1000.
-            Potrai disiscriverti in qualsiasi momento.
+            Se lasci l'email, potrai ricevere aggiornamenti quando vengono pubblicati nuovi dati.
+            Niente spam, disiscrizione in un click.
           </p>
 
           <div class="flex gap-3 pt-1">
-            <button type="button" class="btn-secondary flex-1" @click="modal.open = false">Annulla</button>
+            <button
+              type="button"
+              class="btn-secondary flex-1 text-sm"
+              @click="skipAndDownload"
+            >
+              Scarica senza email
+            </button>
             <button
               type="submit"
               class="btn-primary flex-1 inline-flex items-center justify-center gap-2"
@@ -274,26 +278,41 @@ function requestDownload({ tipo, anno, href }) {
   modal.open       = true
 }
 
+// Scarica senza lasciare l'email (click su backdrop o sul bottone "Senza email")
+function skipAndDownload() {
+  const href = modal.pending?.href
+  modal.open = false
+  if (href) triggerDownload(href)
+}
+
 async function submitLead() {
   modal.emailError = ''
-  if (!modal.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(modal.email)) {
+  const email = modal.email.trim()
+
+  // Email fornita ma non valida → errore
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     modal.emailError = 'Inserisci un indirizzo email valido.'
     return
   }
-  modal.saving = true
-  try {
-    await salvaLead({
-      email: modal.email,
-      nome:  modal.nome,
-      tipo:  modal.pending?.tipo,
-      anno:  modal.pending?.anno !== 'completo' ? modal.pending?.anno : undefined,
-    })
-  } catch {
-    // Fallback: degrada silenziosamente e procede col download
-  } finally {
-    modal.saving = false
+
+  // Email fornita → salva il lead
+  if (email) {
+    modal.saving = true
+    try {
+      await salvaLead({
+        email,
+        nome: modal.nome,
+        tipo: modal.pending?.tipo,
+        anno: modal.pending?.anno !== 'completo' ? modal.pending?.anno : undefined,
+      })
+      localStorage.setItem(STORAGE_KEY, '1')
+    } catch {
+      // Degrada silenziosamente
+    } finally {
+      modal.saving = false
+    }
   }
-  localStorage.setItem(STORAGE_KEY, '1')
+
   modal.open = false
   if (modal.pending?.href) triggerDownload(modal.pending.href)
 }
