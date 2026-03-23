@@ -15,6 +15,7 @@ const get = (action, params = {}) => api.get('', { params: { action, ...params }
 export const fetchStatus      = ()      => get('status')
 export const fetchAnni        = ()      => get('anni')
 export const fetchCategorie   = ()      => get('categorie')
+export const fetchRegioni     = ()      => get('regioni')
 export const fetchStatistiche = (anno)  => get('statistiche', anno ? { anno } : {})
 
 // Ricerca enti
@@ -58,3 +59,13 @@ export const fetchInoptato = ({ categoria, regione, breakdown } = {}) =>
 
 // Proiezioni forecast (richiede forecast.py già eseguito)
 export const fetchForecast = () => get('forecast')
+
+// Lead generation: salva email prima del download
+export const salvaLead = ({ email, nome, tipo, anno } = {}) =>
+  api.post('', new URLSearchParams({
+    action: 'salva_lead',
+    email,
+    ...(nome ? { nome } : {}),
+    ...(tipo ? { tipo } : {}),
+    ...(anno ? { anno } : {}),
+  }), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })

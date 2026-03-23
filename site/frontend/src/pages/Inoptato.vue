@@ -25,8 +25,8 @@
     </div>
 
     <template v-else-if="dati">
-      <!-- KPI Cards -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <!-- KPI Cards — riga 1 -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
         <div class="card bg-gradient-to-br from-amber-50 to-white border-amber-100">
           <p class="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1">% Generica ({{ ultimoAnno }})</p>
           <p class="text-2xl font-bold text-amber-700">{{ ultimaPerc !== null ? ultimaPerc.toFixed(1) + '%' : '–' }}</p>
@@ -57,6 +57,20 @@
             <template v-else>–</template>
           </p>
           <p class="text-xs text-gray-400 mt-1">rispetto a {{ penultimoAnno }}</p>
+        </div>
+      </div>
+
+      <!-- KPI Cards — riga 2: nr scelte e valore medio -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+        <div class="card bg-gradient-to-br from-emerald-50 to-white border-emerald-100">
+          <p class="text-xs font-medium text-emerald-600 uppercase tracking-wide mb-1">Nr. scelte espresse ({{ ultimoAnno }})</p>
+          <p class="text-2xl font-bold text-emerald-700">{{ formatNum(ultimoScelte) }}</p>
+          <p class="text-xs text-gray-400 mt-1">designazioni esplicite ai beneficiari</p>
+        </div>
+        <div class="card bg-gradient-to-br from-violet-50 to-white border-violet-100">
+          <p class="text-xs font-medium text-violet-600 uppercase tracking-wide mb-1">Valore medio scelta espressa ({{ ultimoAnno }})</p>
+          <p class="text-2xl font-bold text-violet-700">{{ formatEur(ultimoValoreMedio) }}</p>
+          <p class="text-xs text-gray-400 mt-1">€ espresso / nr. scelte espresse</p>
         </div>
       </div>
 
@@ -150,6 +164,41 @@
         <div class="flex gap-4 mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
           <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-brand-400"></span>Espresso</span>
           <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-amber-300"></span>Generico</span>
+        </div>
+      </div>
+
+      <!-- Grafico nr scelte espresse e valore medio per anno -->
+      <div class="card mb-6">
+        <div class="mb-5">
+          <h2 class="text-gray-900">Nr. scelte espresse e valore medio</h2>
+          <p class="text-sm text-gray-400 mt-0.5">Numero di designazioni esplicite e valore medio per scelta, per anno</p>
+        </div>
+        <div class="space-y-2">
+          <div
+            v-for="r in dati.per_anno"
+            :key="r.anno"
+            class="flex items-center gap-3"
+          >
+            <div class="w-12 text-right flex-shrink-0">
+              <span class="text-sm font-medium text-gray-500">{{ r.anno }}</span>
+            </div>
+            <div class="flex-1 h-6 bg-gray-100 rounded overflow-hidden">
+              <div
+                class="h-full rounded transition-all duration-500 bg-emerald-400"
+                :style="{ width: maxScelte > 0 ? ((r.tot_scelte / maxScelte) * 100).toFixed(1) + '%' : '0%' }"
+              ></div>
+            </div>
+            <div class="w-28 flex-shrink-0 text-right text-xs tabular-nums text-gray-600">
+              {{ formatNum(r.tot_scelte) }} scelte
+            </div>
+            <div class="w-24 flex-shrink-0 text-right text-xs tabular-nums text-violet-600 font-medium">
+              {{ r.valore_medio_espressa != null ? formatEur(r.valore_medio_espressa) : '–' }}
+            </div>
+          </div>
+        </div>
+        <div class="flex gap-4 mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
+          <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-emerald-400"></span>Nr. scelte espresse</span>
+          <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-violet-300"></span>Valore medio (€/scelta)</span>
         </div>
       </div>
 
@@ -272,6 +321,21 @@ const ultimoGenerico = computed(() => {
   return dati.value.per_anno.at(-1).tot_generico
 })
 
+const ultimoScelte = computed(() => {
+  if (!dati.value?.per_anno?.length) return null
+  return dati.value.per_anno.at(-1).tot_scelte
+})
+
+const ultimoValoreMedio = computed(() => {
+  if (!dati.value?.per_anno?.length) return null
+  return dati.value.per_anno.at(-1).valore_medio_espressa ?? null
+})
+
+const maxScelte = computed(() => {
+  if (!dati.value?.per_anno?.length) return 1
+  return Math.max(...dati.value.per_anno.map(r => r.tot_scelte ?? 0), 1)
+})
+
 const variazionePerc = computed(() => {
   const rows = dati.value?.per_anno
   if (!rows || rows.length < 2) return null
@@ -316,6 +380,11 @@ function percGenerica(r) {
 }
 
 // ─── Formatters ──────────────────────────────────────────────────────────────
+
+function formatNum(v) {
+  if (v === null || v === undefined) return '–'
+  return Number(v).toLocaleString('it-IT')
+}
 
 function formatEur(v) {
   if (v === null || v === undefined) return '–'

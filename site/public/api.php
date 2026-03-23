@@ -22,7 +22,7 @@
 declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, OPTIONS');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -86,7 +86,8 @@ function int_param(string $key, int $default = 0): int {
 }
 
 function str_param(string $key, string $default = ''): string {
-    return isset($_GET[$key]) ? trim((string)$_GET[$key]) : $default;
+    $val = $_POST[$key] ?? $_GET[$key] ?? null;
+    return $val !== null ? trim((string)$val) : $default;
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -126,6 +127,13 @@ function action_categorie(): void {
          ORDER BY categoria_principale"
     )->fetchAll(PDO::FETCH_COLUMN);
     json_out($cats);
+}
+
+function action_regioni(): void {
+    $regioni = db()->query(
+        "SELECT DISTINCT regione FROM enti WHERE regione IS NOT NULL ORDER BY regione"
+    )->fetchAll(PDO::FETCH_COLUMN);
+    json_out($regioni);
 }
 
 function action_statistiche(): void {
@@ -534,32 +542,68 @@ function action_categoria_dettaglio(): void {
     $stmt = $pdo->prepare(
         "SELECT regione,
                 COUNT(*) AS n_enti,
-                SUM(n_scelte) AS totale_scelte,
-                SUM(importo_totale) AS totale_importo
+                SUM(n_scelte)          AS totale_scelte,
+                SUM(importo_espresso)  AS totale_espresso,
+                SUM(importo_generico)  AS totale_generico,
+                SUM(importo_totale)    AS totale_importo
          FROM enti
          WHERE anno = ? AND categoria_principale = ?
          GROUP BY regione
          ORDER BY totale_importo DESC"
     );
     $stmt->execute([$anno, $categoria]);
-    $per_regione = $stmt->fetchAll();
-    $totale_enti   = 0;
-    $totale_scelte = 0;
-    $totale_imp    = 0.0;
+    $per_regione    = $stmt->fetchAll();
+    $totale_enti    = 0;
+    $totale_scelte  = 0;
+    $totale_esp     = 0.0;
+    $totale_gen     = 0.0;
+    $totale_imp     = 0.0;
     foreach ($per_regione as &$r) {
-        $r['n_enti']         = (int)$r['n_enti'];
-        $r['totale_scelte']  = (int)$r['totale_scelte'];
-        $r['totale_importo'] = (float)$r['totale_importo'];
+        $r['n_enti']          = (int)$r['n_enti'];
+        $r['totale_scelte']   = (int)$r['totale_scelte'];
+        $r['totale_espresso'] = (float)$r['totale_espresso'];
+        $r['totale_generico'] = (float)$r['totale_generico'];
+        $r['totale_importo']  = (float)$r['totale_importo'];
         $totale_enti   += $r['n_enti'];
         $totale_scelte += $r['totale_scelte'];
+        $totale_esp    += $r['totale_espresso'];
+        $totale_gen    += $r['totale_generico'];
         $totale_imp    += $r['totale_importo'];
     }
+
+    // KPI aggiuntivi: enti con 0 scelte, 0 importo
+    $kpi = $pdo->prepare(
+        "SELECT
+            SUM(n_scelte = 0 OR n_scelte IS NULL)          AS nr_enti_0_scelte,
+            SUM(importo_totale = 0 OR importo_totale IS NULL) AS nr_enti_0_importo
+         FROM enti WHERE anno = ? AND categoria_principale = ?"
+    );
+    $kpi->execute([$anno, $categoria]);
+    $kpi_row = $kpi->fetch();
+
+    // Totale anno (tutte le categorie) per calcolare le %
+    $tot_anno = $pdo->prepare(
+        "SELECT SUM(n_scelte) AS tot_scelte_anno, SUM(importo_totale) AS tot_importo_anno
+         FROM enti WHERE anno = ?"
+    );
+    $tot_anno->execute([$anno]);
+    $tot_anno_row = $tot_anno->fetch();
+    $tot_s_anno = (float)($tot_anno_row['tot_scelte_anno']  ?? 1);
+    $tot_i_anno = (float)($tot_anno_row['tot_importo_anno'] ?? 1);
+
+    // Calcoli derivati
+    $valore_medio_espressa = ($totale_scelte > 0) ? round($totale_esp / $totale_scelte, 2) : null;
+    $valore_medio_redistribuito = ($totale_enti > 0) ? round($totale_gen / $totale_enti, 2) : null;
+    $perc_incidenza_generica = ($totale_imp > 0) ? round($totale_gen / $totale_imp * 100, 2) : null;
+    $perc_scelte_sul_totale  = ($tot_s_anno > 0) ? round($totale_scelte / $tot_s_anno * 100, 2) : null;
+    $perc_importo_sul_totale = ($tot_i_anno > 0) ? round($totale_imp / $tot_i_anno * 100, 2) : null;
 
     // Lista enti paginata
     $pagine = max(1, (int)ceil($totale_enti / $per_pagina));
     $offset = ($pagina - 1) * $per_pagina;
     $stmt2 = $pdo->prepare(
-        "SELECT cod_fiscale, denominazione, regione, n_scelte, importo_totale, runts_5x1000
+        "SELECT cod_fiscale, denominazione, regione, n_scelte,
+                importo_espresso, importo_generico, importo_totale, runts_5x1000
          FROM enti
          WHERE anno = ? AND categoria_principale = ?
          ORDER BY importo_totale DESC
@@ -568,18 +612,29 @@ function action_categoria_dettaglio(): void {
     $stmt2->execute([$anno, $categoria]);
     $enti = $stmt2->fetchAll();
     foreach ($enti as &$e) {
-        $e['n_scelte']       = $e['n_scelte'] !== null ? (int)$e['n_scelte'] : null;
-        $e['importo_totale'] = $e['importo_totale'] !== null ? (float)$e['importo_totale'] : null;
-        $e['runts_5x1000']   = (bool)$e['runts_5x1000'];
+        $e['n_scelte']         = $e['n_scelte'] !== null ? (int)$e['n_scelte'] : null;
+        $e['importo_espresso'] = $e['importo_espresso'] !== null ? (float)$e['importo_espresso'] : null;
+        $e['importo_generico'] = $e['importo_generico'] !== null ? (float)$e['importo_generico'] : null;
+        $e['importo_totale']   = $e['importo_totale'] !== null ? (float)$e['importo_totale'] : null;
+        $e['runts_5x1000']     = (bool)$e['runts_5x1000'];
     }
 
     json_out([
         'categoria'   => $categoria,
         'anno'        => $anno,
         'totali'      => [
-            'n_enti'         => $totale_enti,
-            'totale_scelte'  => $totale_scelte,
-            'totale_importo' => $totale_imp,
+            'n_enti'                   => $totale_enti,
+            'totale_scelte'            => $totale_scelte,
+            'totale_espresso'          => $totale_esp,
+            'totale_generico'          => $totale_gen,
+            'totale_importo'           => $totale_imp,
+            'nr_enti_0_scelte'         => (int)($kpi_row['nr_enti_0_scelte'] ?? 0),
+            'nr_enti_0_importo'        => (int)($kpi_row['nr_enti_0_importo'] ?? 0),
+            'valore_medio_espressa'    => $valore_medio_espressa,
+            'valore_medio_redistribuito' => $valore_medio_redistribuito,
+            'perc_incidenza_generica'  => $perc_incidenza_generica,
+            'perc_scelte_sul_totale'   => $perc_scelte_sul_totale,
+            'perc_importo_sul_totale'  => $perc_importo_sul_totale,
         ],
         'per_regione' => $per_regione,
         'pagina'      => $pagina,
@@ -708,15 +763,18 @@ function action_inoptato(): void {
     $stmt->execute($params);
     $per_anno = [];
     foreach ($stmt->fetchAll() as $r) {
-        $gen = (float)$r['tot_generico'];
-        $tot = (float)$r['tot_totale'];
+        $gen  = (float)$r['tot_generico'];
+        $esp  = (float)$r['tot_espresso'];
+        $tot  = (float)$r['tot_totale'];
+        $sc   = (int)$r['tot_scelte'];
         $per_anno[] = [
-            'anno'          => (int)$r['anno'],
-            'tot_espresso'  => (float)$r['tot_espresso'],
-            'tot_generico'  => $gen,
-            'tot_totale'    => $tot,
-            'tot_scelte'    => (int)$r['tot_scelte'],
-            'perc_generico' => $tot > 0 ? round($gen / $tot * 100, 2) : null,
+            'anno'                  => (int)$r['anno'],
+            'tot_espresso'          => $esp,
+            'tot_generico'          => $gen,
+            'tot_totale'            => $tot,
+            'tot_scelte'            => $sc,
+            'perc_generico'         => $tot > 0 ? round($gen / $tot * 100, 2) : null,
+            'valore_medio_espressa' => $sc > 0 ? round($esp / $sc, 2) : null,
         ];
     }
 
@@ -787,6 +845,41 @@ function action_inoptato(): void {
     json_out($out);
 }
 
+// ─── Lead generation ────────────────────────────────────────────────────────
+
+function action_salva_lead(): void {
+    $email = str_param('email');
+    $nome  = str_param('nome');
+    $tipo  = str_param('tipo');
+    $anno  = (int)str_param('anno');
+
+    if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        err('Email non valida', 400);
+    }
+
+    $ip_hash = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? '');
+    $pdo = db();
+
+    try {
+        $stmt = $pdo->prepare(
+            "INSERT INTO leads (email, nome, fonte, file_tipo, file_anno, ip_hash)
+             VALUES (?, ?, 'download', ?, ?, ?)"
+        );
+        $stmt->execute([
+            strtolower($email),
+            $nome ?: null,
+            $tipo ?: null,
+            $anno ?: null,
+            $ip_hash,
+        ]);
+    } catch (\Throwable $e) {
+        // Tabella non ancora creata sul server: degrada silenziosamente
+        error_log('[api.php] leads insert failed: ' . $e->getMessage());
+    }
+
+    json_out(['ok' => true]);
+}
+
 // ─── Forecast ───────────────────────────────────────────────────────────────
 
 function action_forecast(): void {
@@ -817,11 +910,13 @@ try {
         'cerca_cf'           => action_cerca_cf(),
         'analisi_categorie'    => action_analisi_categorie(),
         'categoria_dettaglio'  => action_categoria_dettaglio(),
+        'regioni'              => action_regioni(),
         'files'                => action_files(),
         'download'             => action_download(),
         'inoptato'             => action_inoptato(),
+        'salva_lead'           => action_salva_lead(),
         'forecast'             => action_forecast(),
-        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, forecast", 404),
+        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast", 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());
