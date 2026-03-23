@@ -262,7 +262,23 @@ const loadingFiles = ref(true)
 const errorFiles   = ref(false)
 
 // ── Lead modal ────────────────────────────────────────────────────────────────
-const STORAGE_KEY = '5x1000_lead_done'
+const STORAGE_KEY    = '5x1000_lead_v2'
+const EXPIRY_DAYS    = 90
+
+function leadDone() {
+  const raw = localStorage.getItem(STORAGE_KEY)
+  if (!raw) return false
+  try {
+    const { ts } = JSON.parse(raw)
+    return Date.now() - ts < EXPIRY_DAYS * 86_400_000
+  } catch {
+    return false
+  }
+}
+
+function markLeadDone() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ts: Date.now() }))
+}
 
 const modal = reactive({
   open:             false,
@@ -275,8 +291,8 @@ const modal = reactive({
 })
 
 function requestDownload({ tipo, anno, href }) {
-  // Se l'utente ha già fornito l'email, scarica direttamente
-  if (localStorage.getItem(STORAGE_KEY)) {
+  // Se l'utente ha già interagito con il modal di recente (< 90 giorni), scarica direttamente
+  if (leadDone()) {
     triggerDownload(href)
     return
   }
@@ -292,6 +308,7 @@ function requestDownload({ tipo, anno, href }) {
 function skipAndDownload() {
   const href = modal.pending?.href
   modal.open = false
+  markLeadDone()
   if (href) triggerDownload(href)
 }
 
@@ -316,7 +333,7 @@ async function submitLead() {
         anno:             modal.pending?.anno !== 'completo' ? modal.pending?.anno : undefined,
         vuole_newsletter: modal.vuole_newsletter,
       })
-      localStorage.setItem(STORAGE_KEY, '1')
+      markLeadDone()
     } catch {
       // Degrada silenziosamente
     } finally {

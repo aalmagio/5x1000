@@ -43,18 +43,22 @@
       <!-- KPI Cards — riga 1 -->
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
         <div class="card bg-gradient-to-br from-amber-50 to-white border-amber-100">
-          <p class="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1">% Generica ({{ ultimoAnno }})</p>
-          <p class="text-2xl font-bold text-amber-700">{{ ultimaPercDisplay }}</p>
-          <p class="text-xs text-gray-400 mt-1">{{ metrica === 'importo' ? 'del totale distribuito' : 'delle firme totali' }}</p>
+          <p class="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1">
+            {{ metrica === 'importo' ? '% Importo generico' : 'Firme espresse' }} ({{ ultimoAnno }})
+          </p>
+          <p class="text-2xl font-bold text-amber-700">
+            {{ metrica === 'importo' ? ultimaPercDisplay : formatNum(ultimoScelte) }}
+          </p>
+          <p class="text-xs text-gray-400 mt-1">{{ metrica === 'importo' ? 'del totale distribuito' : 'designazioni esplicite' }}</p>
         </div>
         <div class="card bg-gradient-to-br from-brand-50 to-white border-brand-100">
           <p class="text-xs font-medium text-brand-500 uppercase tracking-wide mb-1">
-            {{ metrica === 'importo' ? 'Importo generico' : 'Firme generiche' }} ({{ ultimoAnno }})
+            {{ metrica === 'importo' ? 'Importo generico' : 'Valore medio / firma' }} ({{ ultimoAnno }})
           </p>
           <p class="text-2xl font-bold text-brand-700">
-            {{ metrica === 'importo' ? formatEur(ultimoGenerico) : formatNum(ultimoSceltaGenerica) }}
+            {{ metrica === 'importo' ? formatEur(ultimoGenerico) : formatEur(ultimoValoreMedio) }}
           </p>
-          <p class="text-xs text-gray-400 mt-1">scelte generiche</p>
+          <p class="text-xs text-gray-400 mt-1">{{ metrica === 'importo' ? 'scelte generiche' : '€ espresso / nr. firme' }}</p>
         </div>
         <div
           class="card bg-gradient-to-br border"
@@ -71,7 +75,7 @@
             :class="variazioneDisplay !== null && variazioneDisplay < 0 ? 'text-green-700' : 'text-orange-700'"
           >
             <template v-if="variazioneDisplay !== null">
-              {{ variazioneDisplay > 0 ? '+' : '' }}{{ variazioneDisplay.toFixed(2) }} pp
+              {{ variazioneDisplay > 0 ? '+' : '' }}{{ variazioneDisplay.toFixed(2) }}{{ metrica === 'importo' ? ' pp' : '%' }}
             </template>
             <template v-else>–</template>
           </p>
@@ -98,10 +102,10 @@
         <div class="flex items-center justify-between mb-5">
           <div>
             <h2 class="text-gray-900">
-              {{ metrica === 'importo' ? 'Trend storico: % scelta generica' : 'Trend storico: firme generiche' }}
+              {{ metrica === 'importo' ? 'Trend storico: % scelta generica' : 'Trend storico: firme espresse' }}
             </h2>
             <p class="text-sm text-gray-400 mt-0.5">
-              {{ metrica === 'importo' ? 'Quota del totale distribuita come generica, per anno' : 'Numero di firme (scelte) generiche per anno' }}
+              {{ metrica === 'importo' ? 'Quota del totale distribuita come generica, per anno' : 'Numero di firme (designazioni esplicite) per anno' }}
             </p>
           </div>
           <span class="text-xs text-gray-400">{{ dati.per_anno.length }} anni</span>
@@ -135,7 +139,7 @@
           </div>
         </div>
 
-        <!-- Firme mode -->
+        <!-- Firme mode: mostra tot_scelte (firme espresse) per anno -->
         <div v-else class="space-y-2">
           <div
             v-for="r in dati.per_anno"
@@ -151,14 +155,14 @@
             <div class="flex-1 relative h-7 bg-gray-100 rounded overflow-hidden">
               <div
                 class="absolute inset-y-0 left-0 rounded transition-all duration-500 bg-emerald-400"
-                :style="{ width: maxSceltaGenerica > 0 ? ((r.scelte_generiche ?? 0) / maxSceltaGenerica * 100).toFixed(1) + '%' : '0%' }"
+                :style="{ width: maxScelte > 0 ? ((r.tot_scelte ?? 0) / maxScelte * 100).toFixed(1) + '%' : '0%' }"
               ></div>
             </div>
-            <div class="w-32 flex-shrink-0 text-right">
+            <div class="w-36 flex-shrink-0 text-right">
               <span class="text-sm font-semibold tabular-nums" :class="r.anno === ultimoAnno ? 'text-emerald-700' : 'text-gray-700'">
-                {{ r.perc_scelte_generiche !== null && r.perc_scelte_generiche !== undefined ? r.perc_scelte_generiche.toFixed(1) + '%' : '–' }}
+                {{ formatNum(r.tot_scelte) }}
               </span>
-              <span class="text-xs text-gray-400 ml-1">{{ formatNum(r.scelte_generiche) }}</span>
+              <span class="text-xs text-gray-400 ml-1">firme</span>
             </div>
           </div>
         </div>
@@ -393,39 +397,21 @@ const variazionePerc = computed(() => {
   return +(last - prev).toFixed(2)
 })
 
-// Scelte generiche (firme inoptate) nell'ultimo anno
-const ultimoSceltaGenerica = computed(() => {
-  if (!dati.value?.per_anno?.length) return null
-  return dati.value.per_anno.at(-1).scelte_generiche ?? null
-})
-
-// % scelte generiche sul totale scelte
-const ultimaPercScelte = computed(() => {
-  if (!dati.value?.per_anno?.length) return null
-  return dati.value.per_anno.at(-1).perc_scelte_generiche ?? null
-})
-
-const maxSceltaGenerica = computed(() => {
-  if (!dati.value?.per_anno?.length) return 1
-  return Math.max(...dati.value.per_anno.map(r => r.scelte_generiche ?? 0), 1)
-})
-
 // Computed adattivi al metrica corrente
-const ultimaPercDisplay = computed(() => {
-  if (metrica.value === 'scelte') {
-    return ultimaPercScelte.value !== null ? ultimaPercScelte.value.toFixed(1) + '%' : '–'
-  }
-  return ultimaPerc.value !== null ? ultimaPerc.value.toFixed(1) + '%' : '–'
-})
+const ultimaPercDisplay = computed(() =>
+  ultimaPerc.value !== null ? ultimaPerc.value.toFixed(1) + '%' : '–'
+)
 
+// Variazione YoY firme espresse (in punti percentuali rispetto al totale)
 const variazioneDisplay = computed(() => {
   if (metrica.value === 'scelte') {
+    // YoY assoluto del numero di firme espresse
     const rows = dati.value?.per_anno
     if (!rows || rows.length < 2) return null
-    const last = rows.at(-1).perc_scelte_generiche
-    const prev = rows.at(-2).perc_scelte_generiche
-    if (last == null || prev == null) return null
-    return +(last - prev).toFixed(2)
+    const last = rows.at(-1).tot_scelte
+    const prev = rows.at(-2).tot_scelte
+    if (!prev) return null
+    return +((last - prev) / prev * 100).toFixed(2)
   }
   return variazionePerc.value
 })
