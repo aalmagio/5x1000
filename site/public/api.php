@@ -130,8 +130,8 @@ function action_categorie(): void {
 }
 
 // ─── Normalizzazione nomi regione ────────────────────────────────────────────
-// Mappa i valori raw del DB (tipicamente maiuscoli da AdE) a un nome display
-// corretto. Trento e Bolzano restano province autonome separate.
+// Mappa i valori raw del DB alle 20 regioni ufficiali italiane.
+// Trento e Bolzano vengono entrambi raggruppati sotto "Trentino-Alto Adige".
 function normalize_regione(string $raw): string {
     static $map = [
         'ABRUZZO'                            => 'Abruzzo',
@@ -156,34 +156,47 @@ function normalize_regione(string $raw): string {
         "VALLE D'AOSTA"                      => "Valle d'Aosta",
         "VALLE D'AOSTA/VALLEE D'AOSTE"       => "Valle d'Aosta",
         'VENETO'                             => 'Veneto',
-        // Province autonome — manteniamo distinte come richiesto
-        'TRENTO'                             => 'P.A. Trento',
-        'BOLZANO'                            => 'P.A. Bolzano - Südtirol',
+        // Province autonome → raggruppate sotto la regione ufficiale
+        'TRENTO'                             => 'Trentino-Alto Adige',
+        'BOLZANO'                            => 'Trentino-Alto Adige',
         'TRENTINO-ALTO ADIGE'                => 'Trentino-Alto Adige',
         'TRENTINO ALTO ADIGE'                => 'Trentino-Alto Adige',
-        'PROVINCIA AUTONOMA DI TRENTO'       => 'P.A. Trento',
-        'PROVINCIA AUTONOMA DI BOLZANO'      => 'P.A. Bolzano - Südtirol',
-        'PROVINCIA AUTONOMA TRENTO'          => 'P.A. Trento',
-        'PROVINCIA AUTONOMA BOLZANO'         => 'P.A. Bolzano - Südtirol',
-        'ALTO ADIGE'                         => 'P.A. Bolzano - Südtirol',
-        'P.A. TRENTO'                        => 'P.A. Trento',
-        'P.A. BOLZANO'                       => 'P.A. Bolzano - Südtirol',
+        'PROVINCIA AUTONOMA DI TRENTO'       => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA DI BOLZANO'      => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA TRENTO'          => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA BOLZANO'         => 'Trentino-Alto Adige',
+        'ALTO ADIGE'                         => 'Trentino-Alto Adige',
+        'P.A. TRENTO'                        => 'Trentino-Alto Adige',
+        'P.A. BOLZANO'                       => 'Trentino-Alto Adige',
     ];
     $key = strtoupper(trim($raw));
     return $map[$key] ?? ucwords(strtolower($raw));
 }
 
+// Dato un nome display (es. "Trentino-Alto Adige"), restituisce tutti i valori
+// raw presenti nel DB che vi corrispondono (usato per il filtro WHERE ... IN).
+function regione_display_to_raws(PDO $pdo, string $display): array {
+    static $cache = [];
+    if (!array_key_exists($display, $cache)) {
+        $all_raws = $pdo->query(
+            "SELECT DISTINCT regione FROM enti WHERE regione IS NOT NULL"
+        )->fetchAll(PDO::FETCH_COLUMN);
+        $cache[$display] = array_values(
+            array_filter($all_raws, fn($r) => normalize_regione($r) === $display)
+        );
+    }
+    return $cache[$display] ?: [$display]; // fallback al valore stesso
+}
+
 function action_regioni(): void {
     $raws = db()->query(
-        "SELECT DISTINCT regione FROM enti WHERE regione IS NOT NULL ORDER BY regione"
+        "SELECT DISTINCT regione FROM enti WHERE regione IS NOT NULL"
     )->fetchAll(PDO::FETCH_COLUMN);
 
-    $result = array_map(
-        fn($raw) => ['raw' => $raw, 'display' => normalize_regione($raw)],
-        $raws
-    );
-    usort($result, fn($a, $b) => strcmp($a['display'], $b['display']));
-    json_out($result);
+    // Deduplica per nome display (es. TRENTO+BOLZANO → una sola voce "Trentino-Alto Adige")
+    $displays = array_values(array_unique(array_map('normalize_regione', $raws)));
+    sort($displays);
+    json_out($displays);
 }
 
 function action_statistiche(): void {
@@ -265,8 +278,16 @@ function action_enti(): void {
         }
     }
     if ($regione) {
-        $where[] = 'e.regione = ?';
-        $params[] = $regione;
+        // $regione è il nome display normalizzato → mappiamo ai raw values del DB
+        $raws = regione_display_to_raws($pdo, $regione);
+        if (count($raws) === 1) {
+            $where[]  = 'e.regione = ?';
+            $params[] = $raws[0];
+        } else {
+            $ph      = implode(',', array_fill(0, count($raws), '?'));
+            $where[] = "e.regione IN ($ph)";
+            foreach ($raws as $rv) $params[] = $rv;
+        }
     }
     if ($provincia) {
         $where[] = 'e.provincia = ?';
@@ -359,7 +380,7 @@ function action_ente(): void {
     // Denominazione canonica: RUNTS se disponibile, altrimenti anno più recente
     $denom_canonica = ($first['runts_denominazione'] ?: null) ?? $first['denominazione'];
 
-    // Categorie attive nell'anno più recente
+    // Mappa flag → nome categoria
     $cat_map = [
         'cat_volontariato' => 'Volontariato',
         'cat_asd'          => 'ASD',
@@ -370,39 +391,75 @@ function action_ente(): void {
         'cat_beni_cult'    => 'Beni Culturali',
         'cat_aree_prot'    => 'Aree Protette',
     ];
-    $categorie = [];
-    foreach ($cat_map as $col => $label) {
-        if ($first[$col]) $categorie[] = $label;
+
+    // Raccoglie TUTTE le categorie su TUTTE le righe (sia da categoria_principale
+    // sia da flag columns) — necessario per enti come AIRC che hanno una riga
+    // per categoria per anno.
+    $cat_set = [];
+    foreach ($rows as $r) {
+        if ($r['categoria_principale']) {
+            $cat_set[$r['categoria_principale']] = true;
+        }
+        foreach ($cat_map as $col => $label) {
+            if ($r[$col]) $cat_set[$label] = true;
+        }
     }
+    $categorie = array_keys($cat_set);
+
+    // Raggruppa le righe per anno (possono esserci più righe per anno se l'ente
+    // è presente in più categorie nello stesso anno — es. AIRC).
+    $per_anno = [];
+    foreach ($rows as $r) {
+        $per_anno[(int)$r['anno']][] = $r;
+    }
+    krsort($per_anno); // anno decrescente
 
     $storico = [];
-    foreach ($rows as $r) {
+    foreach ($per_anno as $anno => $anno_rows) {
+        $r0          = $anno_rows[0];
+        $tot_scelte  = array_sum(array_column($anno_rows, 'n_scelte'));
+        $tot_esp     = array_sum(array_column($anno_rows, 'importo_espresso'));
+        $tot_gen     = array_sum(array_column($anno_rows, 'importo_generico'));
+        $tot_tot     = array_sum(array_column($anno_rows, 'importo_totale'));
+
+        // Breakdown per categoria (solo se ci sono più righe nello stesso anno)
+        $cat_breakdown = null;
+        if (count($anno_rows) > 1) {
+            $cat_breakdown = array_map(fn($r) => [
+                'categoria'        => $r['categoria_principale'],
+                'n_scelte'         => (int)$r['n_scelte'],
+                'importo_espresso' => (float)$r['importo_espresso'],
+                'importo_totale'   => (float)$r['importo_totale'],
+            ], $anno_rows);
+        }
+
         $storico[] = [
-            'anno'             => (int)$r['anno'],
-            'denominazione'    => $r['denominazione'],
-            'categoria'        => $r['categoria_principale'],
-            'n_scelte'         => $r['n_scelte'] !== null ? (int)$r['n_scelte'] : null,
-            'importo_espresso' => $r['importo_espresso'] !== null ? (float)$r['importo_espresso'] : null,
-            'importo_generico' => $r['importo_generico'] !== null ? (float)$r['importo_generico'] : null,
-            'importo_totale'   => $r['importo_totale']   !== null ? (float)$r['importo_totale']   : null,
-            'runts_sezione'    => $r['runts_sezione'],
-            'runts_sede_comune' => $r['runts_sede_comune'],
-            'runts_sede_prov'  => $r['runts_sede_prov'],
-            'runts_data_iscrizione' => $r['runts_data_iscrizione'],
+            'anno'                  => $anno,
+            'denominazione'         => $r0['denominazione'],
+            'categoria'             => count($anno_rows) === 1 ? $r0['categoria_principale'] : null,
+            'cat_breakdown'         => $cat_breakdown,
+            'n_scelte'              => $tot_scelte,
+            'importo_espresso'      => $tot_esp > 0 ? round($tot_esp, 2) : null,
+            'importo_generico'      => $tot_gen > 0 ? round($tot_gen, 2) : null,
+            'importo_totale'        => $tot_tot > 0 ? round($tot_tot, 2) : null,
+            'runts_sezione'         => $r0['runts_sezione'],
+            'runts_sede_comune'     => $r0['runts_sede_comune'],
+            'runts_sede_prov'       => $r0['runts_sede_prov'],
+            'runts_data_iscrizione' => $r0['runts_data_iscrizione'],
         ];
     }
 
     json_out([
         'cod_fiscale'         => $first['cod_fiscale'],
         'denominazione'       => $denom_canonica,
-        'regione'             => $first['regione'],
+        'regione'             => normalize_regione($first['regione'] ?? ''),
         'provincia'           => $first['provincia'],
         'comune'              => $first['comune'],
         'categoria'           => $first['categoria_principale'],
         'categorie'           => $categorie,
         'runts_denominazione' => $first['runts_denominazione'] ?: null,
         'runts_5x1000'        => (bool)$first['runts_5x1000'],
-        'anni_presenti'       => array_column($storico, 'anno'),
+        'anni_presenti'       => array_keys($per_anno),
         'storico'             => $storico,
     ]);
 }

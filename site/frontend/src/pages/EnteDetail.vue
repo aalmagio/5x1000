@@ -174,20 +174,40 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="r in storicoOrdinato" :key="r.anno">
-                <td class="font-medium">
-                  {{ r.anno }}
-                  <span v-if="r.anno === annoUltimo" class="ml-1.5 text-xs text-brand-400 font-normal">ultimo</span>
-                </td>
-                <td v-if="categorieMultiple" class="hidden sm:table-cell">
-                  <span v-if="r.categoria" class="badge capitalize text-xs" :class="catColor(r.categoria)">{{ r.categoria }}</span>
-                  <span v-else class="text-gray-300">–</span>
-                </td>
-                <td class="text-right tabular-nums">{{ formatNum(r.n_scelte) }}</td>
-                <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(r.importo_espresso) }}</td>
-                <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(r.importo_generico) }}</td>
-                <td class="text-right font-semibold text-brand-700 tabular-nums">{{ formatEur(r.importo_totale) }}</td>
-              </tr>
+              <template v-for="r in storicoOrdinato" :key="r.anno">
+                <!-- Riga anno (totale) -->
+                <tr :class="r.cat_breakdown ? 'font-semibold bg-gray-50' : ''">
+                  <td class="font-medium">
+                    {{ r.anno }}
+                    <span v-if="r.anno === annoUltimo" class="ml-1.5 text-xs text-brand-400 font-normal">ultimo</span>
+                  </td>
+                  <td v-if="categorieMultiple" class="hidden sm:table-cell">
+                    <span v-if="r.categoria" class="badge capitalize text-xs" :class="catColor(r.categoria)">{{ r.categoria }}</span>
+                    <span v-else-if="r.cat_breakdown" class="text-xs text-gray-400">{{ r.cat_breakdown.length }} categorie</span>
+                    <span v-else class="text-gray-300">–</span>
+                  </td>
+                  <td class="text-right tabular-nums">{{ formatNum(r.n_scelte) }}</td>
+                  <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(r.importo_espresso) }}</td>
+                  <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(r.importo_generico) }}</td>
+                  <td class="text-right font-semibold text-brand-700 tabular-nums">{{ formatEur(r.importo_totale) }}</td>
+                </tr>
+                <!-- Sub-righe per categoria (solo anni con più categorie) -->
+                <tr
+                  v-if="r.cat_breakdown"
+                  v-for="cb in r.cat_breakdown"
+                  :key="r.anno + '-' + cb.categoria"
+                  class="text-xs text-gray-500 bg-white"
+                >
+                  <td class="pl-6 text-gray-400">↳</td>
+                  <td v-if="categorieMultiple" class="hidden sm:table-cell">
+                    <span class="badge capitalize" :class="catColor(cb.categoria)">{{ cb.categoria }}</span>
+                  </td>
+                  <td class="text-right tabular-nums">{{ formatNum(cb.n_scelte) }}</td>
+                  <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(cb.importo_espresso) }}</td>
+                  <td class="text-right tabular-nums hidden sm:table-cell text-gray-300">—</td>
+                  <td class="text-right tabular-nums text-gray-700">{{ formatEur(cb.importo_totale) }}</td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
@@ -313,11 +333,11 @@ const redditoStimato = computed(() => {
   return irpefMedio.value / 0.20
 })
 
-// True se la categoria è cambiata tra gli anni presenti
-const categorieMultiple = computed(() => {
-  const cats = new Set(storicoOrdinato.value.map(r => r.categoria).filter(Boolean))
-  return cats.size > 1
-})
+// True se l'ente ha più di una categoria (in qualsiasi anno)
+const categorieMultiple = computed(() =>
+  (ente.value?.categorie?.length ?? 0) > 1 ||
+  storicoOrdinato.value.some(r => r.cat_breakdown)
+)
 
 onMounted(async () => {
   try {
