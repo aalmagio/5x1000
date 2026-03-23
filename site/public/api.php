@@ -50,6 +50,48 @@ function load_env(string $dir): void {
 
 load_env(__DIR__);
 
+// ─── Manutenzione ───────────────────────────────────────────────────────────
+// Se la pipeline è in corso, risponde 503 per tutte le azioni tranne 'status'.
+// Il percorso del lock file è configurabile tramite PIPELINE_LOCK_PATH in .env;
+// default: due livelli sopra site/public/ (cioè la root del progetto).
+
+function _maintenance_lock_path(): string {
+    $from_env = getenv('PIPELINE_LOCK_PATH') ?: '';
+    if ($from_env !== '') return $from_env;
+    // __DIR__ = .../site/public → root = ../../
+    return dirname(dirname(__DIR__)) . '/pipeline.lock';
+}
+
+function _check_manutenzione(): void {
+    $action = $_GET['action'] ?? '';
+    // status è sempre raggiungibile (permette al monitoraggio di sapere lo stato)
+    if ($action === 'status') return;
+
+    $path = _maintenance_lock_path();
+    if (!is_file($path)) return;
+
+    // Ignora lock più vecchi di 12 ore (safeguard per crash della pipeline)
+    $age_hours = (time() - filemtime($path)) / 3600;
+    if ($age_hours > 12) return;
+
+    // Leggi il payload del lock
+    $payload = @json_decode(file_get_contents($path), true) ?? [];
+
+    http_response_code(503);
+    header('Retry-After: 300');
+    echo json_encode([
+        'errore'       => 'Sito in manutenzione',
+        'manutenzione' => true,
+        'avviato_il'   => $payload['avviato_il'] ?? null,
+        'anni'         => $payload['anni']        ?? [],
+        'steps'        => $payload['steps']       ?? [],
+        'messaggio'    => 'La pipeline di aggiornamento dati è in corso. Riprova tra qualche minuto.',
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+_check_manutenzione();
+
 function db(): PDO {
     static $pdo = null;
     if ($pdo) return $pdo;
@@ -105,10 +147,21 @@ function action_status(): void {
         "SELECT MAX(run_at) FROM pipeline_runs WHERE status='ok'"
     )->fetchColumn();
 
+    // Stato manutenzione
+    $lock_path    = _maintenance_lock_path();
+    $manutenzione = false;
+    $lock_info    = null;
+    if (is_file($lock_path) && (time() - filemtime($lock_path)) / 3600 <= 12) {
+        $manutenzione = true;
+        $lock_info    = @json_decode(file_get_contents($lock_path), true) ?? [];
+    }
+
     json_out([
-        'anni_disponibili'   => array_map('intval', $anni),
-        'righe_totali'       => $totale,
+        'anni_disponibili'     => array_map('intval', $anni),
+        'righe_totali'         => $totale,
         'ultimo_aggiornamento' => $ultimo,
+        'manutenzione'         => $manutenzione,
+        'pipeline_attiva'      => $lock_info,
     ]);
 }
 

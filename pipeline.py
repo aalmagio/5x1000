@@ -19,7 +19,9 @@ Uso:
     python pipeline.py --help
 """
 
+import json
 import os
+import signal
 import sys
 import time
 import argparse
@@ -61,6 +63,11 @@ _load_dotenv(os.path.dirname(os.path.abspath(__file__)))
 STEPS_ALL = ["download", "categorie", "etl", "report", "gsheets"]
 
 DEFAULT_INPUT = "categorie.xlsx"
+
+# Percorso file lock manutenzione — creato all'avvio della pipeline,
+# rimosso al termine (anche in caso di eccezione).
+# Il path può essere sovrascritto da PIPELINE_LOCK_PATH in .env
+_DEFAULT_LOCK_FILENAME = "pipeline.lock"
 
 # Python eseguibile: stesso interprete che sta eseguendo questo script.
 # sys.executable può essere '' in ambienti embedded/CGI/PHP; fallback robusto.
@@ -307,6 +314,22 @@ Step disponibili: download, categorie, etl, report, gsheets
             "Utile per rigenerare il report Excel senza riscaricare o rielaborare i dati."
         ),
     )
+    parser.add_argument(
+        "--per-anno", action="store_true",
+        help=(
+            "Esegui la pipeline un anno alla volta, dal più recente al più vecchio. "
+            "Per ogni anno: download → ETL → aggiornamento DB, poi passa all'anno successivo. "
+            "Report e GSheets vengono eseguiti una sola volta alla fine."
+        ),
+    )
+    parser.add_argument(
+        "--max-retry", type=int, default=3, metavar="N",
+        help=(
+            "Numero massimo di tentativi totali (default: 3). "
+            "Se dopo un run restano anni non elaborati, la pipeline riparte "
+            "automaticamente in smart-mode per completare i pendenti."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -398,6 +421,135 @@ def reset_tutto(root_dir: str, solo_db: bool = False, force: bool = False) -> bo
     reset_logger.info("Reset completato.")
     print(f"\n✓ Reset completato. Log: {log_path}\n")
     return True
+
+
+# ============================================================================
+# MANUTENZIONE — file lock
+# ============================================================================
+
+def _lock_path(root_dir: str) -> str:
+    """Restituisce il percorso del file lock (da env o default)."""
+    return os.environ.get(
+        "PIPELINE_LOCK_PATH",
+        os.path.join(root_dir, _DEFAULT_LOCK_FILENAME),
+    )
+
+
+def manutenzione_attiva(root_dir: str, anni=None, steps=None) -> None:
+    """
+    Crea il file lock della manutenzione.
+    Se il file esiste già (pipeline già in corso), avverte ma non blocca
+    (due run paralleli sono scoraggiati ma non impossibili).
+    """
+    path = _lock_path(root_dir)
+    payload = {
+        "avviato_il": datetime.datetime.now().isoformat(),
+        "pid":        os.getpid(),
+        "anni":       anni or [],
+        "steps":      steps or [],
+    }
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        logging.info(f"[MANUTENZIONE] Attivata — lock: {path}")
+    except OSError as e:
+        logging.warning(f"[MANUTENZIONE] Impossibile creare lock: {e}")
+
+
+def manutenzione_disattiva(root_dir: str) -> None:
+    """Rimuove il file lock, concludendo la manutenzione."""
+    path = _lock_path(root_dir)
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+            logging.info("[MANUTENZIONE] Disattivata.")
+    except OSError as e:
+        logging.warning(f"[MANUTENZIONE] Impossibile rimuovere lock: {e}")
+
+
+# ============================================================================
+# ESECUZIONE STEP (helper estraibile per retry e per-anno)
+# ============================================================================
+
+def _build_step_cmds(
+    steps, anni, args, root_dir,
+    skip_download_completo, skip_download_categorie,
+    smart_anni_download, smart_anni_categorie,
+    report_anni, sheet_id, input_path, source,
+    _timeout_fn,
+):
+    """
+    Ritorna un dict ordinato {step_name: (label, cmd, timeout)} per gli step
+    richiesti. Tutti i parametri sono già risolti da main().
+    """
+    cmds = {}
+
+    if "download" in steps:
+        cmd = [PYTHON, "cinque_per_mille.py", "--source", source]
+        _anni_dl = smart_anni_download if smart_anni_download is not None else anni
+        if _anni_dl:
+            cmd += ["--anni", _anni_dl]
+        if skip_download_completo:
+            cmd.append("--no-download")
+        label = (
+            "Estrazione (elenco complessivo)"
+            if skip_download_completo
+            else "Download + Estrazione (elenco complessivo)"
+        )
+        cmds["download"] = (label, cmd, _timeout_fn("download"))
+
+    if "categorie" in steps:
+        cmd = [PYTHON, "scarica_categorie.py", "--input", input_path, "--source", source]
+        _anni_cat = smart_anni_categorie if smart_anni_categorie is not None else anni
+        if _anni_cat:
+            cmd += ["--anni", _anni_cat]
+        if skip_download_categorie:
+            cmd.append("--no-download")
+        label = (
+            "Estrazione (per categoria)"
+            if skip_download_categorie
+            else "Download + Estrazione (per categoria)"
+        )
+        cmds["categorie"] = (label, cmd, _timeout_fn("categorie"))
+
+    if "etl" in steps:
+        cmd = [PYTHON, "etl.py"]
+        if anni:
+            cmd += ["--anni", anni]
+        if getattr(args, "no_runts", False):
+            cmd.append("--no-runts")
+        if getattr(args, "no_excel_etl", False):
+            cmd.append("--no-excel")
+        cmd.append("--aggiorna-db")
+        cmds["etl"] = ("ETL (normalizzazione + export + DB per-anno)", cmd, _timeout_fn("etl"))
+
+    if "report" in steps and report_anni:
+        cmd = [PYTHON, "report.py", "--anno", report_anni]
+        if getattr(args, "no_confronto", False):
+            cmd.append("--no-confronto")
+        cmds["report"] = ("Report Excel (stile ASSIF)", cmd, _timeout_fn("report"))
+
+    if "gsheets" in steps:
+        cmd = [PYTHON, "gsheets.py"]
+        if sheet_id:
+            cmd += ["--sheet-id", sheet_id]
+        if anni:
+            cmd += ["--anni", anni]
+        cmds["gsheets"] = ("Upload Google Sheets", cmd, _timeout_fn("gsheets"))
+
+    return cmds
+
+
+def _esegui_steps(cmds: dict, root_dir: str) -> dict:
+    """
+    Esegue la lista di step (da _build_step_cmds) e restituisce
+    results = {step_name: (ok, durata_secs)}.
+    """
+    results = {}
+    for step_name, (label, cmd, timeout) in cmds.items():
+        ok, dur = run_step(label, cmd, root_dir, timeout=timeout)
+        results[step_name] = (ok, dur)
+    return results
 
 
 # ============================================================================
@@ -624,119 +776,223 @@ def main():
     if "gsheets" in steps:
         logging.info(f"  Sheet ID:   {sheet_id or '(nuovo)'}")
 
-    # ---- Esecuzione step ----
-    results = {}
+    # ================================================================
+    # MANUTENZIONE: attiva prima di qualsiasi step
+    # ================================================================
+    anni_list_maint = [a.strip() for a in anni.split(",") if a.strip()] if anni else []
+    manutenzione_attiva(root_dir, anni=anni_list_maint, steps=steps)
+
     total_start = time.time()
+    results     = {}
+    all_ok      = False
+    failed: list = []
 
-    # STEP 1: Download elenco complessivo + estrazione
-    if "download" in steps:
-        cmd = [PYTHON, "cinque_per_mille.py", "--source", source]
-        _anni_dl = smart_anni_download if smart_anni_download is not None else anni
-        if _anni_dl:
-            cmd += ["--anni", _anni_dl]
-        if skip_download_completo:
-            cmd.append("--no-download")
-        step_label = "Estrazione (elenco complessivo)" if skip_download_completo else "Download + Estrazione (elenco complessivo)"
-        ok, dur = run_step(step_label, cmd, root_dir, timeout=_timeout("download"))
-        results["download"] = (ok, dur)
-
-    # STEP 2: Download categorie + estrazione
-    if "categorie" in steps:
-        cmd = [PYTHON, "scarica_categorie.py", "--input", input_path, "--source", source]
-        _anni_cat = smart_anni_categorie if smart_anni_categorie is not None else anni
-        if _anni_cat:
-            cmd += ["--anni", _anni_cat]
-        if skip_download_categorie:
-            cmd.append("--no-download")
-        step_label = "Estrazione (per categoria)" if skip_download_categorie else "Download + Estrazione (per categoria)"
-        ok, dur = run_step(step_label, cmd, root_dir, timeout=_timeout("categorie"))
-        results["categorie"] = (ok, dur)
-
-    # STEP 3: ETL
-    if "etl" in steps:
-        cmd = [PYTHON, "etl.py"]
-        if anni:
-            cmd += ["--anni", anni]
-        if args.no_runts:
-            cmd.append("--no-runts")
-        if args.no_excel_etl:
-            cmd.append("--no-excel")
-        cmd.append("--aggiorna-db")   # aggiorna il DB al termine di ogni anno
-        ok, dur = run_step("ETL (normalizzazione + export + DB per-anno)", cmd, root_dir, timeout=_timeout("etl"))
-        results["etl"] = (ok, dur)
-
-    # STEP 4: Report Excel
-    if "report" in steps:
-        if report_anni:
-            cmd = [PYTHON, "report.py", "--anno", report_anni]
-            if args.no_confronto:
-                cmd.append("--no-confronto")
-            ok, dur = run_step("Report Excel (stile ASSIF)", cmd, root_dir, timeout=_timeout("report"))
-            results["report"] = (ok, dur)
-        else:
-            logging.warning("Report saltato: nessun anno specificato")
-
-    # STEP 5: Google Sheets
-    if "gsheets" in steps:
-        cmd = [PYTHON, "gsheets.py"]
-        if sheet_id:
-            cmd += ["--sheet-id", sheet_id]
-        if anni:
-            cmd += ["--anni", anni]
-        ok, dur = run_step("Upload Google Sheets", cmd, root_dir, timeout=_timeout("gsheets"))
-        results["gsheets"] = (ok, dur)
-
-    # ---- Riepilogo finale ----
-    total_elapsed = time.time() - total_start
-
-    print()
-    logging.info("=" * 60)
-    logging.info("RIEPILOGO PIPELINE")
-    logging.info("=" * 60)
-
-    all_ok = True
-    for step_name, (ok, dur) in results.items():
-        status = "OK" if ok else "ERRORE"
-        logging.info(f"  {step_name:<40} [{status}] ({dur:.0f}s)")
-        if not ok:
-            all_ok = False
-
-    logging.info(f"\nTempo totale: {total_elapsed:.0f}s")
-
-    if all_ok:
-        logging.info("Pipeline completata con successo!")
-    else:
-        failed = [s for s, (ok, _) in results.items() if not ok]
-        logging.warning(f"Pipeline completata con errori in: {failed}")
-
-    logging.info(f"Log completo: {log_file}")
-    logging.info("=" * 60)
-
-    # ---- Aggiornamento DB sito ----
     try:
-        from db_updater import aggiorna_db_sito
-        import pathlib
-        _cfg = _load_pipeline_config(root_dir)
-        _dati_dir = pathlib.Path(_cfg.get("dati_dir", os.path.join(root_dir, "Dati")))
-        _csv_path = _dati_dir / "enti_5x1000_norm.csv"
-        _anni_list = [int(a) for a in anni.split(",") if a.strip()] if anni else []
-        _db_status = "ok" if all_ok else "parziale"
-        _note = f"Errori in: {failed}" if not all_ok else ""
-        ok_db = aggiorna_db_sito(
-            anni_processati=_anni_list,
-            steps_eseguiti=list(steps),
-            csv_path=_csv_path,
-            dati_dir=_dati_dir,
-            status=_db_status,
-            note=_note,
-            t_inizio=total_start,
-        )
-        if ok_db:
-            logging.info("DB sito aggiornato con successo (run registrato, file catalogo aggiornato).")
+        # ============================================================
+        # MODALITÀ PER-ANNO
+        # ============================================================
+        if args.per_anno:
+            # Step per-anno (download + categorie + etl)
+            steps_per_anno = [s for s in steps if s in ("download", "categorie", "etl")]
+            # Step una-tantum dopo il loop (report + gsheets)
+            steps_finali   = [s for s in steps if s in ("report", "gsheets")]
+
+            # Determina lista anni da elaborare (ordine: recente → antico)
+            if anni:
+                anni_iter = sorted(
+                    [int(a.strip()) for a in anni.split(",") if a.strip()],
+                    reverse=True,
+                )
+            else:
+                # Anni già scaricati in Dati/
+                import pathlib as _pl
+                _dati = _pl.Path(pcfg.get("dati_dir", os.path.join(root_dir, "Dati")))
+                anni_iter = sorted(
+                    [int(f.stem.split("_")[1]) for f in _dati.glob("dati_[0-9]*.xlsx")],
+                    reverse=True,
+                )
+                if not anni_iter:
+                    logging.warning("[PER-ANNO] Nessun dati_YYYY.xlsx trovato; uso anni 2006-2025")
+                    anni_iter = sorted(range(2006, datetime.datetime.now().year + 1), reverse=True)
+
+            logging.info(f"\n[PER-ANNO] Anni da elaborare ({len(anni_iter)}): {anni_iter}")
+
+            for anno_i in anni_iter:
+                anno_s = str(anno_i)
+                logging.info(f"\n{'─'*60}")
+                logging.info(f"[PER-ANNO] Anno {anno_i}")
+                logging.info(f"{'─'*60}")
+
+                cmds_anno = _build_step_cmds(
+                    steps       = steps_per_anno,
+                    anni        = anno_s,
+                    args        = args,
+                    root_dir    = root_dir,
+                    skip_download_completo  = skip_download_completo,
+                    skip_download_categorie = skip_download_categorie,
+                    smart_anni_download     = smart_anni_download,
+                    smart_anni_categorie    = smart_anni_categorie,
+                    report_anni = None,        # report gestito dopo
+                    sheet_id    = sheet_id,
+                    input_path  = input_path,
+                    source      = source,
+                    _timeout_fn = _timeout,
+                )
+                res_anno = _esegui_steps(cmds_anno, root_dir)
+                for k, v in res_anno.items():
+                    results[f"{k}_{anno_i}"] = v
+
+            # Step finali (report + gsheets) — una sola volta
+            if steps_finali:
+                cmds_fin = _build_step_cmds(
+                    steps       = steps_finali,
+                    anni        = anni,
+                    args        = args,
+                    root_dir    = root_dir,
+                    skip_download_completo  = skip_download_completo,
+                    skip_download_categorie = skip_download_categorie,
+                    smart_anni_download     = smart_anni_download,
+                    smart_anni_categorie    = smart_anni_categorie,
+                    report_anni = report_anni,
+                    sheet_id    = sheet_id,
+                    input_path  = input_path,
+                    source      = source,
+                    _timeout_fn = _timeout,
+                )
+                res_fin = _esegui_steps(cmds_fin, root_dir)
+                results.update(res_fin)
+
         else:
-            logging.info("Aggiornamento DB sito saltato (non configurato o errore).")
-    except Exception as _e:
-        logging.warning(f"Aggiornamento DB sito non riuscito: {_e}")
+            # ============================================================
+            # MODALITÀ NORMALE CON RETRY AUTOMATICO
+            # ============================================================
+            max_retry   = max(1, args.max_retry)
+            tentativi   = 0
+
+            # Parametri correnti (possono cambiare tra un retry e l'altro)
+            _steps               = list(steps)
+            _smart_dl            = smart_anni_download
+            _smart_cat           = smart_anni_categorie
+
+            while tentativi < max_retry:
+                tentativi += 1
+                if tentativi > 1:
+                    logging.info(f"\n{'='*60}")
+                    logging.info(f"[RETRY {tentativi}/{max_retry}] Riprovo gli step pendenti...")
+                    logging.info(f"{'='*60}")
+
+                cmds = _build_step_cmds(
+                    steps       = _steps,
+                    anni        = anni,
+                    args        = args,
+                    root_dir    = root_dir,
+                    skip_download_completo  = skip_download_completo,
+                    skip_download_categorie = skip_download_categorie,
+                    smart_anni_download     = _smart_dl,
+                    smart_anni_categorie    = _smart_cat,
+                    report_anni = report_anni,
+                    sheet_id    = sheet_id,
+                    input_path  = input_path,
+                    source      = source,
+                    _timeout_fn = _timeout,
+                )
+                res_tento = _esegui_steps(cmds, root_dir)
+                # Aggiorna results (l'ultimo tentativo vince per step già visti)
+                results.update(res_tento)
+
+                # ---- Verifica se ci sono ancora pendenze ----
+                if tentativi >= max_retry:
+                    break  # ultimo tentativo: non controllare
+
+                try:
+                    from pipeline_checker import full_analysis
+                    anni_chk = [int(a.strip()) for a in anni.split(",") if a.strip()] if anni else None
+                    chk = full_analysis(root_dir, anni_chk)
+                    mancanti_dl  = chk.get("anni_mancanti_download", [])
+                    mancanti_cat = chk.get("anni_mancanti_categorie", [])
+                    etl_ok       = chk.get("etl", {}).get("status") == "ok"
+
+                    if not mancanti_dl and not mancanti_cat and etl_ok:
+                        logging.info("[RETRY] Pipeline completa: nessuna pendenza rilevata.")
+                        break
+
+                    logging.warning(
+                        f"[RETRY] Pendenze: download={mancanti_dl}, "
+                        f"categorie={mancanti_cat}, etl={'ok' if etl_ok else 'NON OK'}"
+                    )
+                    # Prossimo tentativo: solo step mancanti (smart)
+                    _steps = []
+                    if mancanti_dl:
+                        _steps.append("download")
+                        _smart_dl = ",".join(str(a) for a in mancanti_dl)
+                    if mancanti_cat:
+                        _steps.append("categorie")
+                        _smart_cat = ",".join(str(a) for a in mancanti_cat)
+                    if not etl_ok:
+                        _steps.append("etl")
+                    # report e gsheets solo se erano presenti originalmente
+                    if not _steps:
+                        break   # nessuno step da ripetere
+
+                except Exception as _chk_e:
+                    logging.warning(f"[RETRY] Analisi pendenze non riuscita ({_chk_e}), stop retry.")
+                    break
+
+        # ================================================================
+        # RIEPILOGO FINALE
+        # ================================================================
+        total_elapsed = time.time() - total_start
+        all_ok = all(ok for ok, _ in results.values()) if results else True
+        failed = [s for s, (ok, _) in results.items() if not ok]
+
+        print()
+        logging.info("=" * 60)
+        logging.info("RIEPILOGO PIPELINE")
+        logging.info("=" * 60)
+        for step_name, (ok, dur) in results.items():
+            status = "OK" if ok else "ERRORE"
+            logging.info(f"  {step_name:<45} [{status}] ({dur:.0f}s)")
+        logging.info(f"\nTempo totale: {total_elapsed:.0f}s")
+        if all_ok:
+            logging.info("Pipeline completata con successo!")
+        else:
+            logging.warning(f"Pipeline completata con errori in: {failed}")
+        logging.info(f"Log completo: {log_file}")
+        logging.info("=" * 60)
+
+        # ----------------------------------------------------------------
+        # Aggiornamento DB sito
+        # ----------------------------------------------------------------
+        try:
+            from db_updater import aggiorna_db_sito
+            import pathlib
+            _cfg      = _load_pipeline_config(root_dir)
+            _dati_dir = pathlib.Path(_cfg.get("dati_dir", os.path.join(root_dir, "Dati")))
+            _csv_path = _dati_dir / "enti_5x1000_norm.csv"
+            _anni_list = [int(a) for a in anni.split(",") if a.strip()] if anni else []
+            _db_status = "ok" if all_ok else "parziale"
+            _note      = f"Errori in: {failed}" if not all_ok else ""
+            ok_db = aggiorna_db_sito(
+                anni_processati = _anni_list,
+                steps_eseguiti  = list(steps),
+                csv_path        = _csv_path,
+                dati_dir        = _dati_dir,
+                status          = _db_status,
+                note            = _note,
+                t_inizio        = total_start,
+            )
+            if ok_db:
+                logging.info("DB sito aggiornato (run registrato, file catalogo aggiornato).")
+            else:
+                logging.info("Aggiornamento DB sito saltato (non configurato o errore).")
+        except Exception as _e:
+            logging.warning(f"Aggiornamento DB sito non riuscito: {_e}")
+
+    finally:
+        # ================================================================
+        # MANUTENZIONE: disattiva SEMPRE (anche in caso di crash/SIGTERM)
+        # ================================================================
+        manutenzione_disattiva(root_dir)
 
     sys.exit(0 if all_ok else 1)
 
