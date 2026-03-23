@@ -26,7 +26,7 @@
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Regione</label>
           <select v-model="filters.regione" class="input-field" @change="onRegioneChange">
             <option value="">Tutte le regioni</option>
-            <option v-for="r in regioni" :key="r" :value="r">{{ r }}</option>
+            <option v-for="r in regioni" :key="r.raw" :value="r.raw">{{ r.display }}</option>
           </select>
         </div>
         <div>

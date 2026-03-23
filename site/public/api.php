@@ -129,11 +129,61 @@ function action_categorie(): void {
     json_out($cats);
 }
 
+// ─── Normalizzazione nomi regione ────────────────────────────────────────────
+// Mappa i valori raw del DB (tipicamente maiuscoli da AdE) a un nome display
+// corretto. Trento e Bolzano restano province autonome separate.
+function normalize_regione(string $raw): string {
+    static $map = [
+        'ABRUZZO'                            => 'Abruzzo',
+        'BASILICATA'                         => 'Basilicata',
+        'CALABRIA'                           => 'Calabria',
+        'CAMPANIA'                           => 'Campania',
+        'EMILIA-ROMAGNA'                     => 'Emilia-Romagna',
+        'EMILIA ROMAGNA'                     => 'Emilia-Romagna',
+        'FRIULI-VENEZIA GIULIA'              => 'Friuli-Venezia Giulia',
+        'FRIULI VENEZIA GIULIA'              => 'Friuli-Venezia Giulia',
+        'LAZIO'                              => 'Lazio',
+        'LIGURIA'                            => 'Liguria',
+        'LOMBARDIA'                          => 'Lombardia',
+        'MARCHE'                             => 'Marche',
+        'MOLISE'                             => 'Molise',
+        'PIEMONTE'                           => 'Piemonte',
+        'PUGLIA'                             => 'Puglia',
+        'SARDEGNA'                           => 'Sardegna',
+        'SICILIA'                            => 'Sicilia',
+        'TOSCANA'                            => 'Toscana',
+        'UMBRIA'                             => 'Umbria',
+        "VALLE D'AOSTA"                      => "Valle d'Aosta",
+        "VALLE D'AOSTA/VALLEE D'AOSTE"       => "Valle d'Aosta",
+        'VENETO'                             => 'Veneto',
+        // Province autonome — manteniamo distinte come richiesto
+        'TRENTO'                             => 'P.A. Trento',
+        'BOLZANO'                            => 'P.A. Bolzano - Südtirol',
+        'TRENTINO-ALTO ADIGE'                => 'Trentino-Alto Adige',
+        'TRENTINO ALTO ADIGE'                => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA DI TRENTO'       => 'P.A. Trento',
+        'PROVINCIA AUTONOMA DI BOLZANO'      => 'P.A. Bolzano - Südtirol',
+        'PROVINCIA AUTONOMA TRENTO'          => 'P.A. Trento',
+        'PROVINCIA AUTONOMA BOLZANO'         => 'P.A. Bolzano - Südtirol',
+        'ALTO ADIGE'                         => 'P.A. Bolzano - Südtirol',
+        'P.A. TRENTO'                        => 'P.A. Trento',
+        'P.A. BOLZANO'                       => 'P.A. Bolzano - Südtirol',
+    ];
+    $key = strtoupper(trim($raw));
+    return $map[$key] ?? ucwords(strtolower($raw));
+}
+
 function action_regioni(): void {
-    $regioni = db()->query(
+    $raws = db()->query(
         "SELECT DISTINCT regione FROM enti WHERE regione IS NOT NULL ORDER BY regione"
     )->fetchAll(PDO::FETCH_COLUMN);
-    json_out($regioni);
+
+    $result = array_map(
+        fn($raw) => ['raw' => $raw, 'display' => normalize_regione($raw)],
+        $raws
+    );
+    usort($result, fn($a, $b) => strcmp($a['display'], $b['display']));
+    json_out($result);
 }
 
 function action_statistiche(): void {
@@ -196,8 +246,23 @@ function action_enti(): void {
         $params[] = $anno;
     }
     if ($categoria) {
-        $where[] = 'e.categoria_principale = ?';
-        $params[] = $categoria;
+        // Usa le colonne flag per coprire enti in più categorie (es. ASD + Volontariato)
+        $cat_col_map = [
+            'Volontariato'        => 'e.cat_volontariato',
+            'ASD'                 => 'e.cat_asd',
+            'ETS/ONLUS'           => 'e.cat_ets_onlus',
+            'Ricerca Scientifica' => 'e.cat_ricerca_sci',
+            'Ricerca Sanitaria'   => 'e.cat_ricerca_san',
+            'Comuni'              => 'e.cat_comuni',
+            'Beni Culturali'      => 'e.cat_beni_cult',
+            'Aree Protette'       => 'e.cat_aree_prot',
+        ];
+        if (isset($cat_col_map[$categoria])) {
+            $where[] = $cat_col_map[$categoria] . ' = 1';
+        } else {
+            $where[] = 'e.categoria_principale = ?';
+            $params[] = $categoria;
+        }
     }
     if ($regione) {
         $where[] = 'e.regione = ?';
@@ -208,7 +273,9 @@ function action_enti(): void {
         $params[] = $provincia;
     }
     if ($q) {
-        $where[] = '(e.denominazione LIKE ? OR e.cod_fiscale LIKE ?)';
+        // Cerca anche nel nome canonico RUNTS (già unito via LEFT JOIN)
+        $where[] = '(e.denominazione LIKE ? OR e.cod_fiscale LIKE ? OR r.denominazione LIKE ?)';
+        $params[] = '%' . $q . '%';
         $params[] = '%' . $q . '%';
         $params[] = '%' . $q . '%';
     }
@@ -313,6 +380,7 @@ function action_ente(): void {
         $storico[] = [
             'anno'             => (int)$r['anno'],
             'denominazione'    => $r['denominazione'],
+            'categoria'        => $r['categoria_principale'],
             'n_scelte'         => $r['n_scelte'] !== null ? (int)$r['n_scelte'] : null,
             'importo_espresso' => $r['importo_espresso'] !== null ? (float)$r['importo_espresso'] : null,
             'importo_generico' => $r['importo_generico'] !== null ? (float)$r['importo_generico'] : null,
@@ -521,15 +589,20 @@ function action_cerca_cf(): void {
     $q = str_param('q');
     if (strlen($q) < 2) err('Parametro q troppo corto (min. 2 caratteri)');
 
+    $like = '%' . $q . '%';
     $pdo  = db();
     $stmt = $pdo->prepare(
-        "SELECT DISTINCT cod_fiscale, denominazione, regione, categoria_principale
-         FROM enti
-         WHERE denominazione LIKE ? OR cod_fiscale LIKE ?
+        "SELECT e.cod_fiscale,
+                COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
+                e.regione, e.categoria_principale
+         FROM enti e
+         LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
+         WHERE e.denominazione LIKE ? OR e.cod_fiscale LIKE ? OR r.denominazione LIKE ?
+         GROUP BY e.cod_fiscale
          ORDER BY denominazione
          LIMIT 20"
     );
-    $stmt->execute(['%' . $q . '%', '%' . $q . '%']);
+    $stmt->execute([$like, $like, $like]);
     json_out($stmt->fetchAll());
 }
 

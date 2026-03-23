@@ -443,7 +443,10 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { fetchConfronta, fetchCercaCf } from '@/api/client'
+
+const router = useRouter()
 
 const COLORS = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6']
 
@@ -635,6 +638,12 @@ function reset() {
 async function compare() {
   const cfs = cfList.value.map(s => s.trim().toUpperCase()).filter(Boolean)
   if (!cfs.length) return
+
+  // Un solo CF → scheda ente diretta
+  if (cfs.length === 1) {
+    router.push({ name: 'ente', params: { cf: cfs[0] } })
+    return
+  }
 
   loading.value  = true
   error.value    = ''
