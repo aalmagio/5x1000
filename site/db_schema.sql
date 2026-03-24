@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS `enti` (
   PRIMARY KEY (`id`),
   KEY `idx_anno`           (`anno`),
   KEY `idx_cf`             (`cod_fiscale`),
+  UNIQUE KEY `uq_ente_anno` (`anno`, `cod_fiscale`),
   KEY `idx_anno_cat`       (`anno`, `categoria_principale`),
   KEY `idx_regione`        (`anno`, `regione`),
   KEY `idx_denominazione`  (`denominazione`(100)),

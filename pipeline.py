@@ -323,6 +323,16 @@ Step disponibili: download, categorie, etl, report, gsheets
         ),
     )
     parser.add_argument(
+        "--ciclo", action="store_true",
+        help=(
+            "Modalità ciclo incrementale (sito sempre attivo, nessuna manutenzione). "
+            "FASE 1: scarica tutti gli anni mancanti (elenco complessivo + categorie). "
+            "FASE 2: elabora anno per anno (ETL + DB via UPSERT). "
+            "Usa file .done per tracciare step già completati e non ripeterli. "
+            "GSheets saltato; report eseguito una sola volta alla fine se richiesto."
+        ),
+    )
+    parser.add_argument(
         "--max-retry", type=int, default=3, metavar="N",
         help=(
             "Numero massimo di tentativi totali (default: 3). "
@@ -468,6 +478,37 @@ def manutenzione_disattiva(root_dir: str) -> None:
 
 
 # ============================================================================
+# FILE SENTINELLA .done  (modalità --ciclo)
+# ============================================================================
+
+def _stato_dir(root_dir: str) -> str:
+    """Cartella dove vengono scritti i file .done."""
+    d = os.path.join(root_dir, "Dati", ".stato")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _done_path(root_dir: str, anno: int, step: str) -> str:
+    return os.path.join(_stato_dir(root_dir), f"{anno}_{step}.done")
+
+
+def _is_done(root_dir: str, anno: int, step: str) -> bool:
+    return os.path.isfile(_done_path(root_dir, anno, step))
+
+
+def _mark_done(root_dir: str, anno: int, step: str) -> None:
+    with open(_done_path(root_dir, anno, step), "w") as f:
+        f.write(datetime.datetime.now().isoformat())
+    logging.debug(f"[CICLO] {anno}/{step} → .done")
+
+
+def _clear_done(root_dir: str, anno: int, step: str) -> None:
+    p = _done_path(root_dir, anno, step)
+    if os.path.isfile(p):
+        os.remove(p)
+
+
+# ============================================================================
 # ESECUZIONE STEP (helper estraibile per retry e per-anno)
 # ============================================================================
 
@@ -550,6 +591,191 @@ def _esegui_steps(cmds: dict, root_dir: str) -> dict:
         ok, dur = run_step(label, cmd, root_dir, timeout=timeout)
         results[step_name] = (ok, dur)
     return results
+
+
+# ============================================================================
+# MODALITÀ CICLO
+# ============================================================================
+
+def _anni_ciclo(root_dir: str, anni_arg: str | None) -> list[int]:
+    """Restituisce la lista anni da processare (recente → antico)."""
+    if anni_arg:
+        return sorted(
+            [int(a.strip()) for a in anni_arg.split(",") if a.strip()],
+            reverse=True,
+        )
+    from pipeline_checker import ANNI_DISPONIBILI
+    return sorted(ANNI_DISPONIBILI, reverse=True)
+
+
+def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
+                  input_path: str, _timeout_fn, log_file: str) -> None:
+    """
+    Modalità ciclo incrementale:
+
+    FASE 1 — Download (tutti gli anni, solo se mancanti)
+      Per ogni anno (recente → antico):
+        1a. Scarica elenco complessivo  → se non .done
+        1b. Scarica categorie           → se non .done
+
+    FASE 2 — Elaborazione (anno per anno)
+      Per ogni anno (recente → antico):
+        2a. ETL                         → se non .done
+        2b. Aggiorna DB (UPSERT)        → se ETL appena fatto
+
+    FASE 3 — Finalizzazione (una sola volta)
+        3a. Ricalcola ripartizioni + runts + registra pipeline_run
+        3b. Report (se richiesto)
+
+    Nessuna manutenzione attivata: UPSERT garantisce sempre dati coerenti.
+    """
+    import pathlib
+
+    pcfg      = _load_pipeline_config(root_dir)
+    dati_dir  = pathlib.Path(pcfg.get("dati_dir", os.path.join(root_dir, "Dati")))
+    csv_path  = dati_dir / "enti_5x1000_norm.csv"
+    anni_iter = _anni_ciclo(root_dir, anni)
+
+    total_start = time.time()
+    results: dict = {}
+
+    logging.info(f"\n{'='*60}")
+    logging.info(f"MODALITÀ CICLO — {len(anni_iter)} anni ({anni_iter[-1]}–{anni_iter[0]})")
+    logging.info(f"Sito rimane attivo durante l'elaborazione (UPSERT)")
+    logging.info(f"{'='*60}")
+
+    # ------------------------------------------------------------------
+    # FASE 1: Download
+    # ------------------------------------------------------------------
+    logging.info("\n[CICLO] ── FASE 1: Download ──")
+
+    for anno in anni_iter:
+        # 1a. Elenco complessivo
+        if _is_done(root_dir, anno, "download"):
+            logging.info(f"[CICLO] {anno}/download → già fatto, skip")
+        else:
+            cmd = [PYTHON, "cinque_per_mille.py", "--source", source, "--anni", str(anno)]
+            ok, dur = run_step(f"Download elenco {anno}", cmd, root_dir,
+                               timeout=_timeout_fn("download"))
+            results[f"download_{anno}"] = (ok, dur)
+            if ok:
+                _mark_done(root_dir, anno, "download")
+            else:
+                logging.warning(f"[CICLO] {anno}/download fallito — continuo con gli altri anni")
+
+        # 1b. Categorie
+        if _is_done(root_dir, anno, "categorie"):
+            logging.info(f"[CICLO] {anno}/categorie → già fatto, skip")
+        elif not os.path.isfile(input_path):
+            logging.warning(f"[CICLO] {anno}/categorie → file input non trovato, skip")
+        else:
+            cmd = [PYTHON, "scarica_categorie.py",
+                   "--input", input_path, "--source", source, "--anni", str(anno)]
+            ok, dur = run_step(f"Categorie {anno}", cmd, root_dir,
+                               timeout=_timeout_fn("categorie"))
+            results[f"categorie_{anno}"] = (ok, dur)
+            if ok:
+                _mark_done(root_dir, anno, "categorie")
+            else:
+                logging.warning(f"[CICLO] {anno}/categorie fallito — continuo")
+
+    # ------------------------------------------------------------------
+    # FASE 2: Elaborazione anno per anno
+    # ------------------------------------------------------------------
+    logging.info("\n[CICLO] ── FASE 2: Elaborazione ──")
+
+    anni_db: list[int] = []
+
+    for anno in anni_iter:
+        if _is_done(root_dir, anno, "etl"):
+            logging.info(f"[CICLO] {anno}/etl → già fatto, skip")
+            anni_db.append(anno)
+            continue
+
+        # ETL per questo anno (--aggiorna-db NON usato qui: usiamo UPSERT custom)
+        cmd = [PYTHON, "etl.py", "--anni", str(anno)]
+        if getattr(args, "no_runts", False):
+            cmd.append("--no-runts")
+        if getattr(args, "no_excel_etl", False):
+            cmd.append("--no-excel")
+
+        ok, dur = run_step(f"ETL {anno}", cmd, root_dir, timeout=_timeout_fn("etl"))
+        results[f"etl_{anno}"] = (ok, dur)
+
+        if not ok:
+            logging.warning(f"[CICLO] {anno}/etl fallito — DB non aggiornato per questo anno")
+            continue
+
+        # Aggiorna DB via UPSERT (sito sempre attivo)
+        logging.info(f"[CICLO] {anno} → aggiornamento DB (UPSERT)...")
+        try:
+            from db_updater import aggiorna_anno_ciclo
+            ok_db = aggiorna_anno_ciclo(anno=anno, csv_path=csv_path, dati_dir=dati_dir)
+            if ok_db:
+                _mark_done(root_dir, anno, "etl")
+                anni_db.append(anno)
+                logging.info(f"[CICLO] {anno} → DB aggiornato")
+            else:
+                logging.warning(f"[CICLO] {anno} → DB non aggiornato (configurazione mancante?)")
+        except Exception as _e:
+            logging.warning(f"[CICLO] {anno} → DB update fallito: {_e}")
+
+    # ------------------------------------------------------------------
+    # FASE 3: Finalizzazione
+    # ------------------------------------------------------------------
+    logging.info("\n[CICLO] ── FASE 3: Finalizzazione ──")
+
+    if anni_db:
+        try:
+            from db_updater import finalizza_ciclo
+            ok_fin = finalizza_ciclo(
+                anni_processati=anni_db,
+                csv_path=csv_path,
+                dati_dir=dati_dir,
+                t_inizio=total_start,
+            )
+            results["finalizzazione"] = (ok_fin, 0)
+            if ok_fin:
+                logging.info("[CICLO] Finalizzazione completata (ripartizioni, runts, pipeline_run)")
+        except Exception as _e:
+            logging.warning(f"[CICLO] Finalizzazione fallita: {_e}")
+            results["finalizzazione"] = (False, 0)
+
+    # Report (opzionale, una sola volta)
+    report_anni_ciclo = anni and anni.split(",")[0].strip()   # anno più recente
+    if report_anni_ciclo and "report" not in (getattr(args, "only", "") or "").split(","):
+        if sys.stdin.isatty():
+            if ask_yes_no(f"\nGenerare il report Excel per l'anno {report_anni_ciclo}?", default="n"):
+                cmd = [PYTHON, "report.py", "--anno", report_anni_ciclo]
+                if getattr(args, "no_confronto", False):
+                    cmd.append("--no-confronto")
+                ok, dur = run_step(f"Report {report_anni_ciclo}", cmd, root_dir,
+                                   timeout=_timeout_fn("report"))
+                results[f"report_{report_anni_ciclo}"] = (ok, dur)
+
+    # ------------------------------------------------------------------
+    # Riepilogo
+    # ------------------------------------------------------------------
+    total_elapsed = time.time() - total_start
+    all_ok = all(ok for ok, _ in results.values()) if results else True
+    failed = [s for s, (ok, _) in results.items() if not ok]
+
+    print()
+    logging.info("=" * 60)
+    logging.info("RIEPILOGO CICLO")
+    logging.info("=" * 60)
+    for step_name, (ok, dur) in results.items():
+        logging.info(f"  {step_name:<45} [{'OK' if ok else 'ERRORE'}] ({dur:.0f}s)")
+    logging.info(f"\nAnni DB aggiornati: {anni_db}")
+    logging.info(f"Tempo totale: {total_elapsed:.0f}s")
+    if all_ok:
+        logging.info("Ciclo completato con successo!")
+    else:
+        logging.warning(f"Ciclo completato con errori in: {failed}")
+    logging.info(f"Log completo: {log_file}")
+    logging.info("=" * 60)
+
+    sys.exit(0 if all_ok else 1)
 
 
 # ============================================================================
@@ -777,7 +1003,14 @@ def main():
         logging.info(f"  Sheet ID:   {sheet_id or '(nuovo)'}")
 
     # ================================================================
-    # MANUTENZIONE: attiva prima di qualsiasi step
+    # MODALITÀ CICLO — gestita separatamente, senza manutenzione
+    # ================================================================
+    if args.ciclo:
+        _esegui_ciclo(args, root_dir, anni, source, input_path, _timeout, log_file)
+        return  # _esegui_ciclo chiama sys.exit internamente
+
+    # ================================================================
+    # MANUTENZIONE: attiva prima di qualsiasi step (solo modalità normale)
     # ================================================================
     anni_list_maint = [a.strip() for a in anni.split(",") if a.strip()] if anni else []
     manutenzione_attiva(root_dir, anni=anni_list_maint, steps=steps)

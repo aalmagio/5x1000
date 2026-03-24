@@ -247,6 +247,173 @@ def aggiorna_db_sito(
         return False
 
 
+def aggiorna_anno_ciclo(
+    anno: int,
+    csv_path: Path | str,
+    dati_dir: Path | str,
+    db_config: dict | None = None,
+) -> bool:
+    """
+    Aggiorna il DB per un singolo anno in modalità ciclo (sito sempre attivo).
+
+    Differenze rispetto a aggiorna_db_sito():
+    - Usa UPSERT (INSERT … ON DUPLICATE KEY UPDATE) invece di DELETE+INSERT
+      → nessuna finestra di "buco" nella disponibilità dei dati.
+    - Aggiorna solo la tabella `enti` per l'anno indicato.
+    - Aggiorna `categoria_ammissioni` solo per i file dell'anno indicato.
+    - NON registra pipeline_run, NON aggiorna ripartizioni/runts
+      (quelle vengono ricalcolate alla fine del ciclo completo).
+
+    Ritorna True se completato senza errori.
+    """
+    try:
+        import pymysql
+        import pandas as pd
+    except ImportError as e:
+        logger.warning(f"db_updater: dipendenza mancante ({e}) – aggiorna_anno_ciclo saltato")
+        return False
+
+    cfg      = _db_config(db_config)
+    if not cfg["user"] or not cfg["database"]:
+        logger.warning("db_updater: SITE_DB_* non configurati – saltato")
+        return False
+
+    csv_path  = Path(csv_path) if csv_path else None
+    dati_dir  = Path(dati_dir) if dati_dir else None
+    t0        = time.time()
+
+    try:
+        conn = pymysql.connect(**cfg)
+        with conn:
+            cur = conn.cursor()
+
+            # Enti: UPSERT per l'anno
+            if csv_path and csv_path.exists():
+                _aggiorna_enti(cur, csv_path, pd, [anno], upsert=True)
+                logger.info(f"db_updater: enti anno {anno} aggiornati (upsert)")
+
+            # categoria_ammissioni: solo file di questo anno
+            if dati_dir and dati_dir.exists():
+                totale_cat = 0
+                for cat_dir in sorted(dati_dir.iterdir()):
+                    if not cat_dir.is_dir():
+                        continue
+                    cat_slug = _CAT_SLUG.get(cat_dir.name.upper(), cat_dir.name.lower())
+                    for stato in ("ammesso", "escluso"):
+                        pattern = f"{anno}_*_{'ammessi' if stato == 'ammesso' else 'esclusi'}.xlsx"
+                        for xlsx in sorted(cat_dir.glob(pattern)):
+                            righe = _leggi_xlsx_ammissioni(xlsx)
+                            if not righe:
+                                continue
+                            batch = [(anno, cat_slug, cf, denom, stato) for cf, denom in righe]
+                            cur.executemany(
+                                """
+                                INSERT INTO categoria_ammissioni
+                                  (anno, categoria, cod_fiscale, denominazione, stato)
+                                VALUES (%s, %s, %s, %s, %s)
+                                ON DUPLICATE KEY UPDATE
+                                  denominazione = COALESCE(VALUES(denominazione), denominazione),
+                                  stato         = VALUES(stato),
+                                  aggiornato_il = NOW()
+                                """,
+                                batch,
+                            )
+                            totale_cat += len(batch)
+                if totale_cat:
+                    logger.info(f"db_updater: categoria_ammissioni anno {anno}: {totale_cat} righe")
+
+        logger.info(f"db_updater: aggiorna_anno_ciclo({anno}) completato in {time.time()-t0:.1f}s")
+        return True
+
+    except Exception as exc:
+        logger.error(f"db_updater: aggiorna_anno_ciclo({anno}) errore – {exc}", exc_info=True)
+        return False
+
+
+def finalizza_ciclo(
+    anni_processati: list[int],
+    csv_path: Path | str,
+    dati_dir: Path | str,
+    t_inizio: float | None = None,
+    db_config: dict | None = None,
+) -> bool:
+    """
+    Operazioni finali da eseguire una sola volta al termine del ciclo completo:
+    - Ricalcola ripartizioni aggregate
+    - Aggiorna tabella runts
+    - Registra pipeline_run con status='ok'
+
+    Ritorna True se completato senza errori.
+    """
+    try:
+        import pymysql
+        import pandas as pd
+    except ImportError as e:
+        logger.warning(f"db_updater: dipendenza mancante ({e}) – finalizza_ciclo saltato")
+        return False
+
+    cfg = _db_config(db_config)
+    if not cfg["user"] or not cfg["database"]:
+        return False
+
+    csv_path = Path(csv_path) if csv_path else None
+    dati_dir = Path(dati_dir) if dati_dir else None
+    t0       = time.time()
+
+    try:
+        conn = pymysql.connect(**cfg)
+        with conn:
+            cur = conn.cursor()
+
+            # Runts
+            if csv_path and csv_path.exists():
+                try:
+                    _aggiorna_runts(cur, csv_path, pd)
+                    logger.info("db_updater: finalizza_ciclo – runts aggiornati")
+                except Exception as e:
+                    logger.warning(f"db_updater: finalizza_ciclo – runts saltato: {e}")
+
+            # Ripartizioni
+            try:
+                _aggiorna_ripartizioni(cur, anni_processati)
+                logger.info("db_updater: finalizza_ciclo – ripartizioni aggiornate")
+            except Exception as e:
+                logger.warning(f"db_updater: finalizza_ciclo – ripartizioni saltato: {e}")
+
+            # File catalogo
+            if dati_dir and dati_dir.exists():
+                try:
+                    _aggiorna_files(cur, dati_dir)
+                except Exception as e:
+                    logger.warning(f"db_updater: finalizza_ciclo – files saltato: {e}")
+
+            # pipeline_run
+            righe = 0
+            if csv_path and csv_path.exists():
+                with open(csv_path, "r", encoding="utf-8", errors="replace") as fh:
+                    righe = sum(1 for _ in fh) - 1
+            durata = int(time.time() - t_inizio) if t_inizio else None
+            cur.execute(
+                """INSERT INTO pipeline_runs
+                   (run_at, anni_processati, steps_eseguiti, righe_totali, status, durata_secondi)
+                   VALUES (%s, %s, %s, %s, 'ok', %s)""",
+                (
+                    datetime.now(),
+                    json.dumps([int(a) for a in anni_processati]),
+                    json.dumps(["ciclo"]),
+                    righe,
+                    durata,
+                ),
+            )
+
+        logger.info(f"db_updater: finalizza_ciclo completato in {time.time()-t0:.1f}s")
+        return True
+
+    except Exception as exc:
+        logger.error(f"db_updater: finalizza_ciclo errore – {exc}", exc_info=True)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Aggiornamento catalogo file
 # ---------------------------------------------------------------------------
@@ -614,27 +781,45 @@ def _bool_to_int(v) -> int:
     return 1 if s in ("true", "1", "yes", "sì", "si") else 0
 
 
-def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int]) -> None:
+def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int], upsert: bool = False) -> None:
     """
-    Cancella e reinserisce le righe della tabella `enti` per gli anni indicati.
-    Se `anni` è vuota, reimporta TUTTI gli anni presenti nel CSV.
-    Usa bulk INSERT a chunks per limitare il consumo di memoria.
+    Aggiorna la tabella `enti` per gli anni indicati.
+
+    upsert=False (default, modalità reset):
+      DELETE righe degli anni → INSERT. Garantisce coerenza ma crea una
+      breve finestra in cui le righe dell'anno sono assenti.
+
+    upsert=True (modalità ciclo, sito sempre attivo):
+      INSERT ... ON DUPLICATE KEY UPDATE — nessuna cancellazione, ogni riga
+      viene aggiornata sul posto. Richiede UNIQUE KEY (anno, cod_fiscale).
+
+    Se `anni` è vuota reimporta TUTTI gli anni presenti nel CSV.
     """
     anni_int = [int(a) for a in anni]
-    tutti    = len(anni_int) == 0          # lista vuota → tutti gli anni
+    tutti    = len(anni_int) == 0
     cols_db  = list(_COL_MAP.values())
     ph_row   = "(" + ",".join(["%s"] * len(cols_db)) + ")"
-    insert_sql = (
-        f"INSERT INTO enti ({','.join(cols_db)}) VALUES {ph_row}"
-    )
 
-    if tutti:
-        cur.execute("DELETE FROM enti")
-        logger.info("db_updater: cancellate TUTTE le righe da tabella enti (reimport completo)")
+    if upsert:
+        update_cols = [c for c in cols_db if c not in ("anno", "cod_fiscale")]
+        update_clause = ", ".join(f"{c} = VALUES({c})" for c in update_cols)
+        insert_sql = (
+            f"INSERT INTO enti ({','.join(cols_db)}) VALUES {ph_row} "
+            f"ON DUPLICATE KEY UPDATE {update_clause}"
+        )
+        logger.info(
+            f"db_updater: UPSERT enti anni "
+            f"{'tutti' if tutti else anni_int} (sito attivo, nessun DELETE)"
+        )
     else:
-        placeholders = ",".join(["%s"] * len(anni_int))
-        cur.execute(f"DELETE FROM enti WHERE anno IN ({placeholders})", anni_int)
-        logger.info(f"db_updater: cancellate righe anni {anni_int} da tabella enti")
+        insert_sql = f"INSERT INTO enti ({','.join(cols_db)}) VALUES {ph_row}"
+        if tutti:
+            cur.execute("DELETE FROM enti")
+            logger.info("db_updater: cancellate TUTTE le righe da tabella enti (reimport completo)")
+        else:
+            placeholders = ",".join(["%s"] * len(anni_int))
+            cur.execute(f"DELETE FROM enti WHERE anno IN ({placeholders})", anni_int)
+            logger.info(f"db_updater: cancellate righe anni {anni_int} da tabella enti")
 
     anni_set  = set(anni_int)
     total_ins = 0
