@@ -15,7 +15,7 @@ USE `cinque_per_mille`;
 CREATE TABLE IF NOT EXISTS `pipeline_runs` (
   `id`                INT          NOT NULL AUTO_INCREMENT,
   `run_at`            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `anni_processati`   JSON                  DEFAULT NULL COMMENT 'es. [2024, 2025]',
+  `anni_processati`   JSON                  DEFAULT NULL COMMENT 'es. [2023, 2024]',
   `steps_eseguiti`    JSON                  DEFAULT NULL COMMENT 'es. ["download","etl","report"]',
   `righe_totali`      INT          NOT NULL DEFAULT 0    COMMENT 'righe nel CSV normalizzato',
   `status`            ENUM('ok','error','parziale') NOT NULL DEFAULT 'ok',

@@ -21,8 +21,8 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
-# Anni per i quali esiste un URL sull'AdE (2006–2025)
-ANNI_DISPONIBILI = list(range(2006, 2026))
+# Anni per i quali esiste un URL sull'AdE (2006–2024)
+ANNI_DISPONIBILI = list(range(2006, 2025))
 
 # Slug canonici delle categorie (valori di SLUG_NORMALIZE in scarica_categorie.py)
 CANONICAL_SLUGS = [
@@ -75,7 +75,7 @@ def scan_download(dati_dir: pathlib.Path, anni: Optional[list[int]] = None) -> d
     """
     Scansiona i file dati_ANNO.xlsx in dati_dir.
 
-    Se anni è None controlla tutti gli anni per cui esiste un URL (2006-2025).
+    Se anni è None controlla tutti gli anni per cui esiste un URL (2006-2024).
     Restituisce: { anno: { "status": "ok"|"mancante", ... } }
     """
     anni_da_verificare = sorted(anni) if anni else ANNI_DISPONIBILI

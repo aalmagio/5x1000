@@ -13,7 +13,7 @@ Configurazione tramite variabili d'ambiente (o file .env):
 Uso dalla pipeline:
     from db_updater import aggiorna_db_sito
     aggiorna_db_sito(
-        anni_processati=[2024, 2025],
+        anni_processati=[2023, 2024],
         steps_eseguiti=["download", "etl", "report"],
         csv_path=Path("Dati/enti_5x1000_norm.csv"),
         dati_dir=Path("Dati"),
@@ -127,7 +127,7 @@ def aggiorna_db_sito(
 
     Parametri
     ---------
-    anni_processati : lista anni elaborati, es. [2024, 2025]
+    anni_processati : lista anni elaborati, es. [2023, 2024]
     steps_eseguiti  : lista step eseguiti, es. ["download","etl","report"]
     csv_path        : Path al CSV normalizzato principale
     dati_dir        : Path alla cartella Dati/

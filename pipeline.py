@@ -812,8 +812,8 @@ def main():
                     reverse=True,
                 )
                 if not anni_iter:
-                    logging.warning("[PER-ANNO] Nessun dati_YYYY.xlsx trovato; uso anni 2006-2025")
-                    anni_iter = sorted(range(2006, datetime.datetime.now().year + 1), reverse=True)
+                    logging.warning("[PER-ANNO] Nessun dati_YYYY.xlsx trovato; uso anni 2006-2024")
+                    anni_iter = sorted(range(2006, 2025), reverse=True)
 
             logging.info(f"\n[PER-ANNO] Anni da elaborare ({len(anni_iter)}): {anni_iter}")
 
