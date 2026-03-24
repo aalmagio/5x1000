@@ -230,8 +230,8 @@ Step disponibili: download, categorie, etl, report, gsheets
         help="Anni da elaborare, separati da virgola (es. 2023,2024)",
     )
     parser.add_argument(
-        "--source", choices=["csv", "pdf"], default="csv",
-        help="Fonte dati per estrazione: 'csv' (default) o 'pdf'",
+        "--source", choices=["csv", "pdf"], default="pdf",
+        help="Fonte dati per estrazione: 'pdf' (default) o 'csv'",
     )
     parser.add_argument(
         "--input", type=str, default=None,
