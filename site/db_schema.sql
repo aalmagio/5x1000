@@ -153,6 +153,67 @@ CREATE TABLE IF NOT EXISTS `leads` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
+-- 7. Ammissioni per categoria (dati dai file per-categoria)
+--    Una riga per (anno, categoria, cod_fiscale).
+--    stato='ammesso' → ente nel file *_ammessi.xlsx
+--    stato='escluso' → ente nel file *_esclusi.xlsx
+--    Permette di rilevare: enti in più categorie, enti
+--    ammessi da una categoria ma esclusi da un'altra.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `categoria_ammissioni` (
+  `id`            INT           NOT NULL AUTO_INCREMENT,
+  `anno`          SMALLINT      NOT NULL,
+  `categoria`     VARCHAR(50)   NOT NULL  COMMENT 'slug: asd, ets_onlus, ricerca_scientifica, …',
+  `cod_fiscale`   VARCHAR(20)   NOT NULL,
+  `denominazione` VARCHAR(500)           DEFAULT NULL,
+  `stato`         ENUM('ammesso','escluso') NOT NULL,
+  `aggiornato_il` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_cat_amm`       (`anno`, `categoria`, `cod_fiscale`),
+  KEY `idx_ca_cf`               (`cod_fiscale`),
+  KEY `idx_ca_anno_cat_stato`   (`anno`, `categoria`, `stato`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Vista: enti in più categorie per anno
+-- ------------------------------------------------------------
+CREATE OR REPLACE VIEW `v_multi_categoria` AS
+SELECT
+  anno,
+  cod_fiscale,
+  MAX(denominazione)                      AS denominazione,
+  COUNT(DISTINCT categoria)               AS n_categorie,
+  GROUP_CONCAT(DISTINCT categoria
+               ORDER BY categoria
+               SEPARATOR ', ')            AS categorie
+FROM `categoria_ammissioni`
+WHERE stato = 'ammesso'
+GROUP BY anno, cod_fiscale
+HAVING COUNT(DISTINCT categoria) >= 2
+ORDER BY anno DESC, n_categorie DESC;
+
+-- ------------------------------------------------------------
+-- Vista: enti ammessi in almeno una cat ed esclusi in un'altra
+-- ------------------------------------------------------------
+CREATE OR REPLACE VIEW `v_conflitti_categoria` AS
+SELECT
+  a.anno,
+  a.cod_fiscale,
+  MAX(a.denominazione)                         AS denominazione,
+  GROUP_CONCAT(DISTINCT a.categoria
+               ORDER BY a.categoria SEPARATOR ', ') AS categorie_ammesse,
+  GROUP_CONCAT(DISTINCT e.categoria
+               ORDER BY e.categoria SEPARATOR ', ') AS categorie_escluse
+FROM `categoria_ammissioni` a
+JOIN `categoria_ammissioni` e
+  ON  e.cod_fiscale = a.cod_fiscale
+  AND e.anno        = a.anno
+  AND e.stato       = 'escluso'
+WHERE a.stato = 'ammesso'
+GROUP BY a.anno, a.cod_fiscale
+ORDER BY a.anno DESC, a.cod_fiscale;
+
+-- ------------------------------------------------------------
 -- Vista: ultimo aggiornamento per anno
 -- ------------------------------------------------------------
 CREATE OR REPLACE VIEW `v_ultimo_aggiornamento` AS

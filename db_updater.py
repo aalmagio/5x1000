@@ -231,6 +231,14 @@ def aggiorna_db_sito(
                     except Exception as exc_rip:
                         logger.warning(f"db_updater: aggiornamento ripartizioni saltato – {exc_rip}")
 
+            # 4d. Popola categoria_ammissioni dai file per-categoria
+            if dati_dir and dati_dir.exists():
+                try:
+                    n_cat = _aggiorna_categoria_ammissioni(cur, dati_dir)
+                    logger.info(f"db_updater: categoria_ammissioni: {n_cat} righe aggiornate")
+                except Exception as exc_cat:
+                    logger.warning(f"db_updater: categoria_ammissioni saltato – {exc_cat}")
+
         logger.info(f"db_updater: completato in {time.time() - t0:.1f}s")
         return True
 
@@ -318,6 +326,141 @@ def _aggiorna_files(cur, dati_dir: Path) -> None:
             except (IndexError, ValueError):
                 continue
             _upsert_file(cur, anno, "categoria", cat_slug, "xlsx", f)
+
+
+# ---------------------------------------------------------------------------
+# Aggiornamento tabella categoria_ammissioni
+# Legge i file *_ammessi.xlsx e *_esclusi.xlsx da ogni sottocartella di
+# dati_dir e popola la tabella con (anno, categoria, cod_fiscale, stato).
+# ---------------------------------------------------------------------------
+
+# Alias colonna codice fiscale (case-insensitive)
+_CF_ALIASES    = {"codice fiscale", "cf", "codice_fiscale", "cod. fiscale", "c.f."}
+# Alias colonna denominazione
+_DENOM_ALIASES = {"denominazione", "beneficiario", "ente", "nome"}
+
+
+def _detect_cf_denom_cols(header: list[str]) -> tuple[int | None, int | None]:
+    """
+    Ritorna (indice_cf, indice_denom) nella lista header.
+    Confronto case-insensitive e strip spazi.
+    """
+    cf_idx    = None
+    denom_idx = None
+    for i, col in enumerate(header):
+        c = col.strip().lower()
+        if cf_idx    is None and c in _CF_ALIASES:
+            cf_idx    = i
+        if denom_idx is None and c in _DENOM_ALIASES:
+            denom_idx = i
+    # Fallback parziale: cerca "fiscal" o "codice" per cf
+    if cf_idx is None:
+        for i, col in enumerate(header):
+            c = col.strip().lower()
+            if "fiscal" in c or ("codice" in c and cf_idx is None):
+                cf_idx = i
+                break
+    return cf_idx, denom_idx
+
+
+def _leggi_xlsx_ammissioni(path: Path) -> list[tuple[str, str | None]]:
+    """
+    Legge un file xlsx e restituisce lista di (cod_fiscale, denominazione).
+    Richiede openpyxl (già dipendenza della pipeline).
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        logger.warning("db_updater: openpyxl non disponibile – categoria_ammissioni saltata")
+        return []
+
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+
+    rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+    if not rows:
+        return []
+
+    # Prima riga = header
+    raw_header = [str(c) if c is not None else "" for c in rows[0]]
+    cf_idx, denom_idx = _detect_cf_denom_cols(raw_header)
+
+    if cf_idx is None:
+        logger.warning(f"db_updater: colonna CF non trovata in {path.name} (header={raw_header[:5]})")
+        return []
+
+    result = []
+    for row in rows[1:]:
+        if not row or cf_idx >= len(row):
+            continue
+        cf_raw = row[cf_idx]
+        if cf_raw is None:
+            continue
+        cf = str(cf_raw).strip().upper()
+        if not cf:
+            continue
+        denom = None
+        if denom_idx is not None and denom_idx < len(row) and row[denom_idx] is not None:
+            denom = str(row[denom_idx]).strip() or None
+        result.append((cf, denom))
+    return result
+
+
+def _aggiorna_categoria_ammissioni(cur, dati_dir: Path) -> int:
+    """
+    Popola la tabella `categoria_ammissioni` dai file *_ammessi.xlsx e
+    *_esclusi.xlsx in ogni sottocartella di dati_dir.
+
+    Strategia: UPSERT — aggiorna denominazione e stato se la coppia
+    (anno, categoria, cod_fiscale) esiste già.
+
+    Ritorna il numero totale di righe inserite/aggiornate.
+    """
+    totale = 0
+    for cat_dir in sorted(dati_dir.iterdir()):
+        if not cat_dir.is_dir():
+            continue
+        cat_slug = _CAT_SLUG.get(cat_dir.name.upper(), cat_dir.name.lower())
+
+        for stato in ("ammesso", "escluso"):
+            pattern = f"*_{'ammessi' if stato == 'ammesso' else 'esclusi'}.xlsx"
+            for xlsx in sorted(cat_dir.glob(pattern)):
+                # Estrai anno dal nome file (es. "2024_ASD_ammessi.xlsx")
+                try:
+                    anno = int(xlsx.stem.split("_")[0])
+                except (IndexError, ValueError):
+                    logger.warning(f"db_updater: impossibile estrarre anno da {xlsx.name}")
+                    continue
+
+                righe = _leggi_xlsx_ammissioni(xlsx)
+                if not righe:
+                    continue
+
+                batch = [
+                    (anno, cat_slug, cf, denom, stato)
+                    for cf, denom in righe
+                ]
+
+                cur.executemany(
+                    """
+                    INSERT INTO categoria_ammissioni
+                      (anno, categoria, cod_fiscale, denominazione, stato)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                      denominazione = COALESCE(VALUES(denominazione), denominazione),
+                      stato         = VALUES(stato),
+                      aggiornato_il = NOW()
+                    """,
+                    batch,
+                )
+                totale += len(batch)
+                logger.info(
+                    f"db_updater: categoria_ammissioni – {cat_slug}/{anno} "
+                    f"{stato}: {len(batch)} righe"
+                )
+
+    return totale
 
 
 # ---------------------------------------------------------------------------

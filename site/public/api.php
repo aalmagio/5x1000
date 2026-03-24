@@ -1336,6 +1336,242 @@ function _cast_ripartizioni(array &$rows): void {
     }
 }
 
+// ─── Endpoint: enti ammessi in più categorie ─────────────────────────────────
+/**
+ * ?action=multi_categoria[&anno=YYYY][&min_categorie=2][&pagina=1][&per_pagina=50]
+ *
+ * Restituisce enti presenti (come ammessi) in almeno min_categorie categorie distinte,
+ * usando la tabella categoria_ammissioni.
+ */
+function action_multi_categoria(): void {
+    $pdo           = db();
+    $anno          = int_param('anno');
+    $min_cat       = max(2, int_param('min_categorie', 2));
+    $pagina        = max(1, int_param('pagina', 1));
+    $per_pagina    = min(200, max(1, int_param('per_pagina', 50)));
+    $offset        = ($pagina - 1) * $per_pagina;
+
+    $where  = $anno ? 'AND ca.anno = ?' : '';
+    $params = $anno ? [$anno] : [];
+
+    // Totale righe
+    $sql_count = "
+        SELECT COUNT(*) FROM (
+            SELECT ca.cod_fiscale
+            FROM categoria_ammissioni ca
+            WHERE ca.stato = 'ammesso' $where
+            GROUP BY ca.anno, ca.cod_fiscale
+            HAVING COUNT(DISTINCT ca.categoria) >= $min_cat
+        ) sub";
+    $totale = (int)$pdo->prepare($sql_count) ? 0 : 0;
+    $stmt_c = $pdo->prepare($sql_count);
+    $stmt_c->execute($params);
+    $totale = (int)$stmt_c->fetchColumn();
+
+    // Dati paginati — arricchiti con importo da enti se disponibile
+    $params_pag = array_merge($params, [$per_pagina, $offset]);
+    $stmt = $pdo->prepare("
+        SELECT
+            ca.anno,
+            ca.cod_fiscale,
+            MAX(ca.denominazione)                      AS denominazione,
+            COUNT(DISTINCT ca.categoria)               AS n_categorie,
+            GROUP_CONCAT(DISTINCT ca.categoria
+                         ORDER BY ca.categoria
+                         SEPARATOR ', ')               AS categorie,
+            e.importo_totale,
+            e.n_scelte,
+            e.regione
+        FROM categoria_ammissioni ca
+        LEFT JOIN enti e
+          ON e.cod_fiscale = ca.cod_fiscale
+         AND e.anno        = ca.anno
+        WHERE ca.stato = 'ammesso' $where
+        GROUP BY ca.anno, ca.cod_fiscale, e.importo_totale, e.n_scelte, e.regione
+        HAVING COUNT(DISTINCT ca.categoria) >= $min_cat
+        ORDER BY ca.anno DESC, n_categorie DESC, e.importo_totale DESC
+        LIMIT ? OFFSET ?
+    ");
+    $stmt->execute($params_pag);
+    $rows = $stmt->fetchAll();
+
+    foreach ($rows as &$r) {
+        $r['anno']           = (int)$r['anno'];
+        $r['n_categorie']    = (int)$r['n_categorie'];
+        $r['importo_totale'] = $r['importo_totale'] !== null ? (float)$r['importo_totale'] : null;
+        $r['n_scelte']       = $r['n_scelte'] !== null ? (int)$r['n_scelte'] : null;
+    }
+    unset($r);
+
+    json_out([
+        'totale'      => $totale,
+        'pagina'      => $pagina,
+        'per_pagina'  => $per_pagina,
+        'min_categorie' => $min_cat,
+        'risultati'   => $rows,
+    ]);
+}
+
+
+// ─── Endpoint: composizione importo per categoria ────────────────────────────
+/**
+ * ?action=composizione_categorie[&anno=YYYY]
+ *
+ * Restituisce il breakdown dell'importo totale per categoria (dati dalla
+ * tabella ripartizioni, regione=NULL = totale nazionale).
+ * Se non ci sono dati in ripartizioni, deriva da categoria_ammissioni + enti.
+ */
+function action_composizione_categorie(): void {
+    $pdo  = db();
+    $anno = int_param('anno');
+
+    // Prima tenta dalla tabella ripartizioni (dati precalcolati)
+    if ($anno) {
+        $stmt = $pdo->prepare("
+            SELECT categoria, n_enti, n_contribuenti,
+                   importo_espresso, importo_generico, importo_totale
+            FROM ripartizioni
+            WHERE anno = ? AND regione IS NULL
+            ORDER BY importo_totale DESC
+        ");
+        $stmt->execute([$anno]);
+    } else {
+        $stmt = $pdo->query("
+            SELECT anno, categoria, n_enti, n_contribuenti,
+                   importo_espresso, importo_generico, importo_totale
+            FROM ripartizioni
+            WHERE regione IS NULL
+            ORDER BY anno DESC, importo_totale DESC
+        ");
+    }
+    $rows = $stmt->fetchAll();
+
+    // Se ripartizioni è vuota, usa categoria_ammissioni + enti come fallback
+    if (empty($rows)) {
+        $where  = $anno ? 'WHERE ca.anno = ?' : '';
+        $params = $anno ? [$anno] : [];
+        $stmt2  = $pdo->prepare("
+            SELECT
+                ca.anno,
+                ca.categoria,
+                COUNT(DISTINCT ca.cod_fiscale)     AS n_enti,
+                COALESCE(SUM(e.n_scelte),0)        AS n_contribuenti,
+                COALESCE(SUM(e.importo_espresso),0) AS importo_espresso,
+                COALESCE(SUM(e.importo_generico),0) AS importo_generico,
+                COALESCE(SUM(e.importo_totale),0)   AS importo_totale
+            FROM categoria_ammissioni ca
+            LEFT JOIN enti e
+              ON e.cod_fiscale = ca.cod_fiscale AND e.anno = ca.anno
+            WHERE ca.stato = 'ammesso' $where
+            GROUP BY ca.anno, ca.categoria
+            ORDER BY ca.anno DESC, importo_totale DESC
+        ");
+        $stmt2->execute($params);
+        $rows = $stmt2->fetchAll();
+    }
+
+    foreach ($rows as &$r) {
+        if (isset($r['anno'])) $r['anno'] = (int)$r['anno'];
+        $r['n_enti']           = (int)$r['n_enti'];
+        $r['n_contribuenti']   = (int)$r['n_contribuenti'];
+        $r['importo_espresso'] = (float)$r['importo_espresso'];
+        $r['importo_generico'] = (float)$r['importo_generico'];
+        $r['importo_totale']   = (float)$r['importo_totale'];
+    }
+    unset($r);
+
+    // Se anno specificato, calcola anche la percentuale sul totale
+    if ($anno && !empty($rows)) {
+        $tot = array_sum(array_column($rows, 'importo_totale'));
+        foreach ($rows as &$r) {
+            $r['perc_importo'] = $tot > 0 ? round($r['importo_totale'] / $tot * 100, 2) : 0;
+        }
+        unset($r);
+    }
+
+    json_out([
+        'anno'        => $anno ?: null,
+        'categorie'   => $rows,
+    ]);
+}
+
+
+// ─── Endpoint: conflitti (ammesso in una cat, escluso in un'altra) ────────────
+/**
+ * ?action=conflitti_categoria[&anno=YYYY][&pagina=1][&per_pagina=50]
+ *
+ * Restituisce enti ammessi in almeno una categoria ma esclusi in almeno
+ * un'altra nello stesso anno (es. AIRC ammessa ricerca_sanitaria ma esclusa
+ * da ets_onlus).
+ */
+function action_conflitti_categoria(): void {
+    $pdo        = db();
+    $anno       = int_param('anno');
+    $pagina     = max(1, int_param('pagina', 1));
+    $per_pagina = min(200, max(1, int_param('per_pagina', 50)));
+    $offset     = ($pagina - 1) * $per_pagina;
+
+    $where  = $anno ? 'AND a.anno = ?' : '';
+    $params = $anno ? [$anno] : [];
+
+    $sql_count = "
+        SELECT COUNT(*) FROM (
+            SELECT a.cod_fiscale, a.anno
+            FROM categoria_ammissioni a
+            JOIN categoria_ammissioni e
+              ON  e.cod_fiscale = a.cod_fiscale
+              AND e.anno        = a.anno
+              AND e.stato       = 'escluso'
+            WHERE a.stato = 'ammesso' $where
+            GROUP BY a.anno, a.cod_fiscale
+        ) sub";
+    $stmt_c = $pdo->prepare($sql_count);
+    $stmt_c->execute($params);
+    $totale = (int)$stmt_c->fetchColumn();
+
+    $params_pag = array_merge($params, [$per_pagina, $offset]);
+    $stmt = $pdo->prepare("
+        SELECT
+            a.anno,
+            a.cod_fiscale,
+            MAX(a.denominazione)                           AS denominazione,
+            GROUP_CONCAT(DISTINCT a.categoria
+                         ORDER BY a.categoria SEPARATOR ', ') AS categorie_ammesse,
+            GROUP_CONCAT(DISTINCT e.categoria
+                         ORDER BY e.categoria SEPARATOR ', ') AS categorie_escluse,
+            ent.importo_totale,
+            ent.regione
+        FROM categoria_ammissioni a
+        JOIN categoria_ammissioni e
+          ON  e.cod_fiscale = a.cod_fiscale
+          AND e.anno        = a.anno
+          AND e.stato       = 'escluso'
+        LEFT JOIN enti ent
+          ON  ent.cod_fiscale = a.cod_fiscale
+          AND ent.anno        = a.anno
+        WHERE a.stato = 'ammesso' $where
+        GROUP BY a.anno, a.cod_fiscale, ent.importo_totale, ent.regione
+        ORDER BY a.anno DESC, a.cod_fiscale
+        LIMIT ? OFFSET ?
+    ");
+    $stmt->execute($params_pag);
+    $rows = $stmt->fetchAll();
+
+    foreach ($rows as &$r) {
+        $r['anno']           = (int)$r['anno'];
+        $r['importo_totale'] = $r['importo_totale'] !== null ? (float)$r['importo_totale'] : null;
+    }
+    unset($r);
+
+    json_out([
+        'totale'     => $totale,
+        'pagina'     => $pagina,
+        'per_pagina' => $per_pagina,
+        'risultati'  => $rows,
+    ]);
+}
+
+
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 try {
@@ -1360,7 +1596,10 @@ try {
         'salva_lead'           => action_salva_lead(),
         'forecast'             => action_forecast(),
         'ripartizioni'         => action_ripartizioni(),
-        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni", 404),
+        'multi_categoria'      => action_multi_categoria(),
+        'composizione_categorie' => action_composizione_categorie(),
+        'conflitti_categoria'  => action_conflitti_categoria(),
+        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria", 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());
