@@ -184,18 +184,20 @@ _REGIONE_NORM_MAP: dict[str, str] = {
 }
 
 
-def normalize_regione(val: str) -> str:
+def normalize_regione(val) -> str:
     """Normalizza il nome regione al formato display standard.
 
     Restituisce la stringa mappata (es. 'CAMPANIA' → 'Campania',
     'TRENTO' → 'Trentino-Alto Adige') o il valore in title-case se sconosciuto.
+    Gestisce in ingresso None, float NaN e stringhe.
     """
-    if not val:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
         return ""
-    key = val.strip().upper()
-    if key in ("NAN", "NONE", ""):
+    s = str(val).strip()
+    key = s.upper()
+    if key in ("", "NAN", "NONE"):
         return ""
-    return _REGIONE_NORM_MAP.get(key, val.strip().title())
+    return _REGIONE_NORM_MAP.get(key, s.title())
 
 
 # ============================================================================

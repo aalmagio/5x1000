@@ -848,8 +848,8 @@ def main():
     input_file = args.input or pcfg.get("input_categorie", DEFAULT_INPUT)
     sheet_id = args.sheet_id or pcfg.get("sheet_id")
 
-    # Se non ci sono anni da CLI, chiedi interattivamente
-    if not anni and sys.stdin.isatty():
+    # Se non ci sono anni da CLI, chiedi interattivamente (non in --ciclo: gestisce da solo)
+    if not anni and sys.stdin.isatty() and not args.ciclo:
         resp = input("\nAnni da elaborare (es. 2023,2024 o 'tutti'): ").strip()
         if resp and resp.lower() != "tutti":
             anni = resp
@@ -858,7 +858,7 @@ def main():
     skip_download_completo = args.skip_download
     skip_download_categorie = args.skip_download
 
-    if sys.stdin.isatty() and not args.skip_download:
+    if sys.stdin.isatty() and not args.skip_download and not args.ciclo:
         if "download" in steps:
             if not ask_yes_no("\nScaricare le LISTE COMPLETE dall'AdE? (cinque_per_mille.py)"):
                 skip_download_completo = True
@@ -867,7 +867,7 @@ def main():
                 skip_download_categorie = True
 
     # Se gsheets e' negli step, chiedi se eseguirlo e l'eventuale sheet_id
-    if "gsheets" in steps and sys.stdin.isatty():
+    if "gsheets" in steps and sys.stdin.isatty() and not args.ciclo:
         if not ask_yes_no("\nEseguire l'upload su Google Sheets? (gsheets.py)", default="n"):
             steps = [s for s in steps if s != "gsheets"]
         elif not sheet_id:
@@ -893,7 +893,7 @@ def main():
             elif len(anni_list) == 1:
                 # Un solo anno: confronto con anno-1 (default di report.py)
                 report_anni = ultimo
-            elif sys.stdin.isatty():
+            elif sys.stdin.isatty() and not args.ciclo:
                 # Piu' anni e modalita' interattiva: chiedi quale anno per il report
                 penultimo = anni_list[-2]
                 default_choice = f"{ultimo},{penultimo}"
@@ -909,9 +909,9 @@ def main():
                 else:
                     report_anni = default_choice
             else:
-                # Non interattivo con piu' anni: usa il piu' recente
+                # Non interattivo (o --ciclo) con piu' anni: usa il piu' recente
                 report_anni = ultimo
-        elif sys.stdin.isatty():
+        elif sys.stdin.isatty() and not args.ciclo:
             # Nessun --anni specificato, chiedi tutto da zero
             print("\nAnni per il report:")
             print("  2024,2023  → report 2024, confronto con 2023")
