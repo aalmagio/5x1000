@@ -597,6 +597,86 @@ def _esegui_steps(cmds: dict, root_dir: str) -> dict:
 # MODALITÀ CICLO
 # ============================================================================
 
+_CICLO_DEFAULTS_FILE = "ciclo_defaults.yaml"
+
+
+def _ciclo_defaults_path(root_dir: str) -> str:
+    return os.path.join(root_dir, _CICLO_DEFAULTS_FILE)
+
+
+def _carica_ciclo_defaults(root_dir: str) -> dict | None:
+    """
+    Legge ciclo_defaults.yaml.
+    Ritorna il dict di configurazione, o None se il file non esiste.
+    """
+    path = _ciclo_defaults_path(root_dir)
+    if not os.path.isfile(path):
+        return None
+    try:
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        logging.warning(f"[CICLO] Impossibile leggere {path}: {e}")
+        return None
+
+
+def _salva_ciclo_defaults(root_dir: str, cfg: dict) -> None:
+    path = _ciclo_defaults_path(root_dir)
+    try:
+        import yaml
+        header = (
+            "# Configurazione automatica della modalità --ciclo.\n"
+            "# Generato al primo lancio interattivo; modificabile a mano.\n"
+            "# Cancella questo file per rifare la configurazione guidata.\n\n"
+        )
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(header)
+            yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        logging.info(f"[CICLO] Configurazione salvata in {path}")
+        print(f"\n  ✓ Salvato in {path}")
+        print("  Per riconfigurare: cancella il file e rilancia oppure editalo direttamente.\n")
+    except Exception as e:
+        logging.warning(f"[CICLO] Impossibile salvare {path}: {e}")
+
+
+def _chiedi_e_salva_ciclo_defaults(root_dir: str, source_cli: str) -> dict:
+    """
+    Configurazione interattiva del ciclo (solo al primo lancio).
+    Chiede all'utente tutti i parametri, li salva e li ritorna.
+    """
+    print("\n" + "─" * 60)
+    print("  PRIMA CONFIGURAZIONE CICLO")
+    print("  Le risposte saranno salvate per i lanci successivi (cron, script…).")
+    print("─" * 60)
+
+    # Anni
+    print("\nAnni da elaborare (es. 2024  oppure  2022,2023,2024)")
+    resp = input("Invio = TUTTI gli anni disponibili: ").strip()
+    anni_def = resp if resp and resp.lower() != "tutti" else None
+
+    # Fonte dati
+    sorgenti = ("pdf", "web")
+    print(f"\nFonte dati: pdf  web")
+    resp = input(f"Scelta [{source_cli}]: ").strip().lower()
+    source_def = resp if resp in sorgenti else source_cli
+
+    # Report finale
+    do_report = ask_yes_no("\nGenerare report Excel al termine del ciclo?", default="n")
+    no_confront = False
+    if do_report:
+        no_confront = not ask_yes_no("Includere confronto con anno precedente?", default="s")
+
+    cfg = {
+        "anni":         anni_def,
+        "source":       source_def,
+        "report":       do_report,
+        "no_confronto": no_confront,
+    }
+    _salva_ciclo_defaults(root_dir, cfg)
+    return cfg
+
+
 def _anni_ciclo(root_dir: str, anni_arg: str | None) -> list[int]:
     """Restituisce la lista anni da processare (recente → antico)."""
     if anni_arg:
@@ -631,11 +711,40 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
     """
     import pathlib
 
-    pcfg      = _load_pipeline_config(root_dir)
-    dati_dir  = pathlib.Path(pcfg.get("dati_dir", os.path.join(root_dir, "Dati")))
-    csv_path  = dati_dir / "enti_5x1000_norm.csv"
-    anni_iter = _anni_ciclo(root_dir, anni)
+    pcfg     = _load_pipeline_config(root_dir)
+    dati_dir = pathlib.Path(pcfg.get("dati_dir", os.path.join(root_dir, "Dati")))
+    csv_path = dati_dir / "enti_5x1000_norm.csv"
 
+    # ------------------------------------------------------------------
+    # Carica (o crea) la configurazione del ciclo
+    # ------------------------------------------------------------------
+    defaults = _carica_ciclo_defaults(root_dir)
+
+    if defaults is None:
+        if sys.stdin.isatty():
+            # Prima esecuzione interattiva: chiedi e salva
+            defaults = _chiedi_e_salva_ciclo_defaults(root_dir, source)
+        else:
+            # Stdin non disponibile (cron/script) e nessun file → usa built-in
+            logging.warning(
+                f"[CICLO] {_CICLO_DEFAULTS_FILE} non trovato e stdin non interattivo. "
+                "Uso default built-in (tutti gli anni, source=pdf, no report). "
+                f"Per configurare: lancia 'python pipeline.py --ciclo' in modo interattivo."
+            )
+            defaults = {"anni": None, "source": "pdf", "report": False, "no_confronto": False}
+
+    # CLI args espliciti hanno sempre la precedenza sui defaults salvati
+    anni_eff   = anni   if anni   is not None else defaults.get("anni")
+    source_eff = source if source != "pdf"    else defaults.get("source", "pdf")
+    do_report  = bool(defaults.get("report", False))
+    no_confront = bool(defaults.get("no_confronto", False))
+
+    logging.info(
+        f"[CICLO] Config: anni={anni_eff or 'tutti'}  source={source_eff}  "
+        f"report={do_report}  no_confronto={no_confront}"
+    )
+
+    anni_iter   = _anni_ciclo(root_dir, anni_eff)
     total_start = time.time()
     results: dict = {}
 
@@ -654,7 +763,7 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
         if _is_done(root_dir, anno, "download"):
             logging.info(f"[CICLO] {anno}/download → già fatto, skip")
         else:
-            cmd = [PYTHON, "cinque_per_mille.py", "--source", source, "--anni", str(anno)]
+            cmd = [PYTHON, "cinque_per_mille.py", "--source", source_eff, "--anni", str(anno)]
             ok, dur = run_step(f"Download elenco {anno}", cmd, root_dir,
                                timeout=_timeout_fn("download"))
             results[f"download_{anno}"] = (ok, dur)
@@ -670,7 +779,7 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
             logging.warning(f"[CICLO] {anno}/categorie → file input non trovato, skip")
         else:
             cmd = [PYTHON, "scarica_categorie.py",
-                   "--input", input_path, "--source", source, "--anni", str(anno)]
+                   "--input", input_path, "--source", source_eff, "--anni", str(anno)]
             ok, dur = run_step(f"Categorie {anno}", cmd, root_dir,
                                timeout=_timeout_fn("categorie"))
             results[f"categorie_{anno}"] = (ok, dur)
@@ -759,17 +868,15 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
             logging.warning(f"[CICLO] Finalizzazione fallita: {_e}")
             results["finalizzazione"] = (False, 0)
 
-    # Report (opzionale, una sola volta)
-    report_anni_ciclo = anni and anni.split(",")[0].strip()   # anno più recente
-    if report_anni_ciclo and "report" not in (getattr(args, "only", "") or "").split(","):
-        if sys.stdin.isatty():
-            if ask_yes_no(f"\nGenerare il report Excel per l'anno {report_anni_ciclo}?", default="n"):
-                cmd = [PYTHON, "report.py", "--anno", report_anni_ciclo]
-                if getattr(args, "no_confronto", False):
-                    cmd.append("--no-confronto")
-                ok, dur = run_step(f"Report {report_anni_ciclo}", cmd, root_dir,
-                                   timeout=_timeout_fn("report"))
-                results[f"report_{report_anni_ciclo}"] = (ok, dur)
+    # Report (opzionale, una sola volta — guidato dal defaults salvato)
+    if do_report and anni_db:
+        report_anno_str = str(max(anni_db))
+        cmd = [PYTHON, "report.py", "--anno", report_anno_str]
+        if no_confront:
+            cmd.append("--no-confronto")
+        ok, dur = run_step(f"Report {report_anno_str}", cmd, root_dir,
+                           timeout=_timeout_fn("report"))
+        results[f"report_{report_anno_str}"] = (ok, dur)
 
     # ------------------------------------------------------------------
     # Riepilogo
