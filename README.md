@@ -347,3 +347,33 @@ I dati sono pubblici e di proprietà dell'Amministrazione pubblica italiana.
 [MIT](LICENSE) — vedi file LICENSE.
 
 I **dati** scaricati dall'Agenzia delle Entrate e dal RUNTS sono soggetti alle rispettive condizioni di utilizzo delle fonti originali.
+
+---
+
+## Roadmap
+
+### Analisi e metriche
+
+- [ ] **Inoptato**: estendere l'analisi anche al numero di scelte (non solo agli importi)
+- [ ] **Valore medio scelta espressa**: aggiungere la metrica per ente e per comparto, con possibile correlazione al reddito medio dei dichiaranti
+- [ ] **KPI di comparto** (da aggiungere alle pagine per categoria):
+  - Nr. totale scelte generiche
+  - Valore medio scelta generica ed espressa
+  - Valore medio redistribuito con le generiche
+  - Nr. enti con 0 scelte / Nr. enti con 0 importo
+  - % ONP del comparto sul totale ONP iscritte
+  - % scelte al comparto sul totale scelte 5×mille
+  - % incidenza generiche sul totale erogato
+
+### Filtri e navigazione
+
+- [ ] **Filtro stato ente**: tendina Iscritti / Ammessi / Esclusi
+- [ ] **Filtro regione**: selezione a tendina (in aggiunta o in sostituzione del filtro testo libero)
+
+### Visualizzazioni
+
+- [ ] **Mappa geografica**: grafico coropleto regionale o provinciale per scelte e importi
+
+### Lead generation
+
+- [ ] **Email gate prima del download**: form leggero (nome + email) da completare prima di scaricare CSV/Excel; i dati vengono salvati per attività di lead nurturing

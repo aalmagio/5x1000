@@ -22,7 +22,7 @@
 declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, OPTIONS');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -49,6 +49,48 @@ function load_env(string $dir): void {
 }
 
 load_env(__DIR__);
+
+// ─── Manutenzione ───────────────────────────────────────────────────────────
+// Se la pipeline è in corso, risponde 503 per tutte le azioni tranne 'status'.
+// Il percorso del lock file è configurabile tramite PIPELINE_LOCK_PATH in .env;
+// default: due livelli sopra site/public/ (cioè la root del progetto).
+
+function _maintenance_lock_path(): string {
+    $from_env = getenv('PIPELINE_LOCK_PATH') ?: '';
+    if ($from_env !== '') return $from_env;
+    // __DIR__ = .../site/public → root = ../../
+    return dirname(dirname(__DIR__)) . '/pipeline.lock';
+}
+
+function _check_manutenzione(): void {
+    $action = $_GET['action'] ?? '';
+    // status è sempre raggiungibile (permette al monitoraggio di sapere lo stato)
+    if ($action === 'status') return;
+
+    $path = _maintenance_lock_path();
+    if (!is_file($path)) return;
+
+    // Ignora lock più vecchi di 12 ore (safeguard per crash della pipeline)
+    $age_hours = (time() - filemtime($path)) / 3600;
+    if ($age_hours > 12) return;
+
+    // Leggi il payload del lock
+    $payload = @json_decode(file_get_contents($path), true) ?? [];
+
+    http_response_code(503);
+    header('Retry-After: 300');
+    echo json_encode([
+        'errore'       => 'Sito in manutenzione',
+        'manutenzione' => true,
+        'avviato_il'   => $payload['avviato_il'] ?? null,
+        'anni'         => $payload['anni']        ?? [],
+        'steps'        => $payload['steps']       ?? [],
+        'messaggio'    => 'La pipeline di aggiornamento dati è in corso. Riprova tra qualche minuto.',
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+_check_manutenzione();
 
 function db(): PDO {
     static $pdo = null;
@@ -86,7 +128,8 @@ function int_param(string $key, int $default = 0): int {
 }
 
 function str_param(string $key, string $default = ''): string {
-    return isset($_GET[$key]) ? trim((string)$_GET[$key]) : $default;
+    $val = $_POST[$key] ?? $_GET[$key] ?? null;
+    return $val !== null ? trim((string)$val) : $default;
 }
 
 // ─── Actions ────────────────────────────────────────────────────────────────
@@ -104,10 +147,21 @@ function action_status(): void {
         "SELECT MAX(run_at) FROM pipeline_runs WHERE status='ok'"
     )->fetchColumn();
 
+    // Stato manutenzione
+    $lock_path    = _maintenance_lock_path();
+    $manutenzione = false;
+    $lock_info    = null;
+    if (is_file($lock_path) && (time() - filemtime($lock_path)) / 3600 <= 12) {
+        $manutenzione = true;
+        $lock_info    = @json_decode(file_get_contents($lock_path), true) ?? [];
+    }
+
     json_out([
-        'anni_disponibili'   => array_map('intval', $anni),
-        'righe_totali'       => $totale,
+        'anni_disponibili'     => array_map('intval', $anni),
+        'righe_totali'         => $totale,
         'ultimo_aggiornamento' => $ultimo,
+        'manutenzione'         => $manutenzione,
+        'pipeline_attiva'      => $lock_info,
     ]);
 }
 
@@ -126,6 +180,76 @@ function action_categorie(): void {
          ORDER BY categoria_principale"
     )->fetchAll(PDO::FETCH_COLUMN);
     json_out($cats);
+}
+
+// ─── Normalizzazione nomi regione ────────────────────────────────────────────
+// Mappa i valori raw del DB alle 20 regioni ufficiali italiane.
+// Trento e Bolzano vengono entrambi raggruppati sotto "Trentino-Alto Adige".
+function normalize_regione(string $raw): string {
+    static $map = [
+        'ABRUZZO'                            => 'Abruzzo',
+        'BASILICATA'                         => 'Basilicata',
+        'CALABRIA'                           => 'Calabria',
+        'CAMPANIA'                           => 'Campania',
+        'EMILIA-ROMAGNA'                     => 'Emilia-Romagna',
+        'EMILIA ROMAGNA'                     => 'Emilia-Romagna',
+        'FRIULI-VENEZIA GIULIA'              => 'Friuli-Venezia Giulia',
+        'FRIULI VENEZIA GIULIA'              => 'Friuli-Venezia Giulia',
+        'LAZIO'                              => 'Lazio',
+        'LIGURIA'                            => 'Liguria',
+        'LOMBARDIA'                          => 'Lombardia',
+        'MARCHE'                             => 'Marche',
+        'MOLISE'                             => 'Molise',
+        'PIEMONTE'                           => 'Piemonte',
+        'PUGLIA'                             => 'Puglia',
+        'SARDEGNA'                           => 'Sardegna',
+        'SICILIA'                            => 'Sicilia',
+        'TOSCANA'                            => 'Toscana',
+        'UMBRIA'                             => 'Umbria',
+        "VALLE D'AOSTA"                      => "Valle d'Aosta",
+        "VALLE D'AOSTA/VALLEE D'AOSTE"       => "Valle d'Aosta",
+        'VENETO'                             => 'Veneto',
+        // Province autonome → raggruppate sotto la regione ufficiale
+        'TRENTO'                             => 'Trentino-Alto Adige',
+        'BOLZANO'                            => 'Trentino-Alto Adige',
+        'TRENTINO-ALTO ADIGE'                => 'Trentino-Alto Adige',
+        'TRENTINO ALTO ADIGE'                => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA DI TRENTO'       => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA DI BOLZANO'      => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA TRENTO'          => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA BOLZANO'         => 'Trentino-Alto Adige',
+        'ALTO ADIGE'                         => 'Trentino-Alto Adige',
+        'P.A. TRENTO'                        => 'Trentino-Alto Adige',
+        'P.A. BOLZANO'                       => 'Trentino-Alto Adige',
+    ];
+    $key = strtoupper(trim($raw));
+    return $map[$key] ?? ucwords(strtolower($raw));
+}
+
+// Dato un nome display (es. "Trentino-Alto Adige"), restituisce tutti i valori
+// raw presenti nel DB che vi corrispondono (usato per il filtro WHERE ... IN).
+function regione_display_to_raws(PDO $pdo, string $display): array {
+    static $cache = [];
+    if (!array_key_exists($display, $cache)) {
+        $all_raws = $pdo->query(
+            "SELECT DISTINCT regione FROM enti WHERE regione IS NOT NULL"
+        )->fetchAll(PDO::FETCH_COLUMN);
+        $cache[$display] = array_values(
+            array_filter($all_raws, fn($r) => normalize_regione($r) === $display)
+        );
+    }
+    return $cache[$display] ?: [$display]; // fallback al valore stesso
+}
+
+function action_regioni(): void {
+    $raws = db()->query(
+        "SELECT DISTINCT regione FROM enti WHERE regione IS NOT NULL"
+    )->fetchAll(PDO::FETCH_COLUMN);
+
+    // Deduplica per nome display (es. TRENTO+BOLZANO → una sola voce "Trentino-Alto Adige")
+    $displays = array_values(array_unique(array_map('normalize_regione', $raws)));
+    sort($displays);
+    json_out($displays);
 }
 
 function action_statistiche(): void {
@@ -168,6 +292,7 @@ function action_enti(): void {
     $anno       = int_param('anno');
     $categoria  = str_param('categoria');
     $regione    = str_param('regione');
+    $provincia  = str_param('provincia');
     $runts_only = int_param('runts_only');
     $non_runts  = int_param('non_runts');
     $pagina     = max(1, int_param('pagina', 1));
@@ -187,15 +312,44 @@ function action_enti(): void {
         $params[] = $anno;
     }
     if ($categoria) {
-        $where[] = 'e.categoria_principale = ?';
-        $params[] = $categoria;
+        // Usa le colonne flag per coprire enti in più categorie (es. ASD + Volontariato)
+        $cat_col_map = [
+            'Volontariato'        => 'e.cat_volontariato',
+            'ASD'                 => 'e.cat_asd',
+            'ETS/ONLUS'           => 'e.cat_ets_onlus',
+            'Ricerca Scientifica' => 'e.cat_ricerca_sci',
+            'Ricerca Sanitaria'   => 'e.cat_ricerca_san',
+            'Comuni'              => 'e.cat_comuni',
+            'Beni Culturali'      => 'e.cat_beni_cult',
+            'Aree Protette'       => 'e.cat_aree_prot',
+        ];
+        if (isset($cat_col_map[$categoria])) {
+            $where[] = $cat_col_map[$categoria] . ' = 1';
+        } else {
+            $where[] = 'e.categoria_principale = ?';
+            $params[] = $categoria;
+        }
     }
     if ($regione) {
-        $where[] = 'e.regione LIKE ?';
-        $params[] = '%' . $regione . '%';
+        // $regione è il nome display normalizzato → mappiamo ai raw values del DB
+        $raws = regione_display_to_raws($pdo, $regione);
+        if (count($raws) === 1) {
+            $where[]  = 'e.regione = ?';
+            $params[] = $raws[0];
+        } else {
+            $ph      = implode(',', array_fill(0, count($raws), '?'));
+            $where[] = "e.regione IN ($ph)";
+            foreach ($raws as $rv) $params[] = $rv;
+        }
+    }
+    if ($provincia) {
+        $where[] = 'e.provincia = ?';
+        $params[] = $provincia;
     }
     if ($q) {
-        $where[] = '(e.denominazione LIKE ? OR e.cod_fiscale LIKE ?)';
+        // Cerca anche nel nome canonico RUNTS (già unito via LEFT JOIN)
+        $where[] = '(e.denominazione LIKE ? OR e.cod_fiscale LIKE ? OR r.denominazione LIKE ?)';
+        $params[] = '%' . $q . '%';
         $params[] = '%' . $q . '%';
         $params[] = '%' . $q . '%';
     }
@@ -279,7 +433,7 @@ function action_ente(): void {
     // Denominazione canonica: RUNTS se disponibile, altrimenti anno più recente
     $denom_canonica = ($first['runts_denominazione'] ?: null) ?? $first['denominazione'];
 
-    // Categorie attive nell'anno più recente
+    // Mappa flag → nome categoria
     $cat_map = [
         'cat_volontariato' => 'Volontariato',
         'cat_asd'          => 'ASD',
@@ -290,38 +444,75 @@ function action_ente(): void {
         'cat_beni_cult'    => 'Beni Culturali',
         'cat_aree_prot'    => 'Aree Protette',
     ];
-    $categorie = [];
-    foreach ($cat_map as $col => $label) {
-        if ($first[$col]) $categorie[] = $label;
+
+    // Raccoglie TUTTE le categorie su TUTTE le righe (sia da categoria_principale
+    // sia da flag columns) — necessario per enti come AIRC che hanno una riga
+    // per categoria per anno.
+    $cat_set = [];
+    foreach ($rows as $r) {
+        if ($r['categoria_principale']) {
+            $cat_set[$r['categoria_principale']] = true;
+        }
+        foreach ($cat_map as $col => $label) {
+            if ($r[$col]) $cat_set[$label] = true;
+        }
     }
+    $categorie = array_keys($cat_set);
+
+    // Raggruppa le righe per anno (possono esserci più righe per anno se l'ente
+    // è presente in più categorie nello stesso anno — es. AIRC).
+    $per_anno = [];
+    foreach ($rows as $r) {
+        $per_anno[(int)$r['anno']][] = $r;
+    }
+    krsort($per_anno); // anno decrescente
 
     $storico = [];
-    foreach ($rows as $r) {
+    foreach ($per_anno as $anno => $anno_rows) {
+        $r0          = $anno_rows[0];
+        $tot_scelte  = array_sum(array_column($anno_rows, 'n_scelte'));
+        $tot_esp     = array_sum(array_column($anno_rows, 'importo_espresso'));
+        $tot_gen     = array_sum(array_column($anno_rows, 'importo_generico'));
+        $tot_tot     = array_sum(array_column($anno_rows, 'importo_totale'));
+
+        // Breakdown per categoria (solo se ci sono più righe nello stesso anno)
+        $cat_breakdown = null;
+        if (count($anno_rows) > 1) {
+            $cat_breakdown = array_map(fn($r) => [
+                'categoria'        => $r['categoria_principale'],
+                'n_scelte'         => (int)$r['n_scelte'],
+                'importo_espresso' => (float)$r['importo_espresso'],
+                'importo_totale'   => (float)$r['importo_totale'],
+            ], $anno_rows);
+        }
+
         $storico[] = [
-            'anno'             => (int)$r['anno'],
-            'denominazione'    => $r['denominazione'],
-            'n_scelte'         => $r['n_scelte'] !== null ? (int)$r['n_scelte'] : null,
-            'importo_espresso' => $r['importo_espresso'] !== null ? (float)$r['importo_espresso'] : null,
-            'importo_generico' => $r['importo_generico'] !== null ? (float)$r['importo_generico'] : null,
-            'importo_totale'   => $r['importo_totale']   !== null ? (float)$r['importo_totale']   : null,
-            'runts_sezione'    => $r['runts_sezione'],
-            'runts_sede_comune' => $r['runts_sede_comune'],
-            'runts_sede_prov'  => $r['runts_sede_prov'],
-            'runts_data_iscrizione' => $r['runts_data_iscrizione'],
+            'anno'                  => $anno,
+            'denominazione'         => $r0['denominazione'],
+            'categoria'             => count($anno_rows) === 1 ? $r0['categoria_principale'] : null,
+            'cat_breakdown'         => $cat_breakdown,
+            'n_scelte'              => $tot_scelte,
+            'importo_espresso'      => $tot_esp > 0 ? round($tot_esp, 2) : null,
+            'importo_generico'      => $tot_gen > 0 ? round($tot_gen, 2) : null,
+            'importo_totale'        => $tot_tot > 0 ? round($tot_tot, 2) : null,
+            'runts_sezione'         => $r0['runts_sezione'],
+            'runts_sede_comune'     => $r0['runts_sede_comune'],
+            'runts_sede_prov'       => $r0['runts_sede_prov'],
+            'runts_data_iscrizione' => $r0['runts_data_iscrizione'],
         ];
     }
 
     json_out([
         'cod_fiscale'         => $first['cod_fiscale'],
         'denominazione'       => $denom_canonica,
-        'regione'             => $first['regione'],
+        'regione'             => normalize_regione($first['regione'] ?? ''),
         'provincia'           => $first['provincia'],
         'comune'              => $first['comune'],
         'categoria'           => $first['categoria_principale'],
         'categorie'           => $categorie,
         'runts_denominazione' => $first['runts_denominazione'] ?: null,
         'runts_5x1000'        => (bool)$first['runts_5x1000'],
-        'anni_presenti'       => array_column($storico, 'anno'),
+        'anni_presenti'       => array_keys($per_anno),
         'storico'             => $storico,
     ]);
 }
@@ -508,15 +699,20 @@ function action_cerca_cf(): void {
     $q = str_param('q');
     if (strlen($q) < 2) err('Parametro q troppo corto (min. 2 caratteri)');
 
+    $like = '%' . $q . '%';
     $pdo  = db();
     $stmt = $pdo->prepare(
-        "SELECT DISTINCT cod_fiscale, denominazione, regione, categoria_principale
-         FROM enti
-         WHERE denominazione LIKE ? OR cod_fiscale LIKE ?
+        "SELECT e.cod_fiscale,
+                COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
+                e.regione, e.categoria_principale
+         FROM enti e
+         LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
+         WHERE e.denominazione LIKE ? OR e.cod_fiscale LIKE ? OR r.denominazione LIKE ?
+         GROUP BY e.cod_fiscale
          ORDER BY denominazione
          LIMIT 20"
     );
-    $stmt->execute(['%' . $q . '%', '%' . $q . '%']);
+    $stmt->execute([$like, $like, $like]);
     json_out($stmt->fetchAll());
 }
 
@@ -534,32 +730,68 @@ function action_categoria_dettaglio(): void {
     $stmt = $pdo->prepare(
         "SELECT regione,
                 COUNT(*) AS n_enti,
-                SUM(n_scelte) AS totale_scelte,
-                SUM(importo_totale) AS totale_importo
+                SUM(n_scelte)          AS totale_scelte,
+                SUM(importo_espresso)  AS totale_espresso,
+                SUM(importo_generico)  AS totale_generico,
+                SUM(importo_totale)    AS totale_importo
          FROM enti
          WHERE anno = ? AND categoria_principale = ?
          GROUP BY regione
          ORDER BY totale_importo DESC"
     );
     $stmt->execute([$anno, $categoria]);
-    $per_regione = $stmt->fetchAll();
-    $totale_enti   = 0;
-    $totale_scelte = 0;
-    $totale_imp    = 0.0;
+    $per_regione    = $stmt->fetchAll();
+    $totale_enti    = 0;
+    $totale_scelte  = 0;
+    $totale_esp     = 0.0;
+    $totale_gen     = 0.0;
+    $totale_imp     = 0.0;
     foreach ($per_regione as &$r) {
-        $r['n_enti']         = (int)$r['n_enti'];
-        $r['totale_scelte']  = (int)$r['totale_scelte'];
-        $r['totale_importo'] = (float)$r['totale_importo'];
+        $r['n_enti']          = (int)$r['n_enti'];
+        $r['totale_scelte']   = (int)$r['totale_scelte'];
+        $r['totale_espresso'] = (float)$r['totale_espresso'];
+        $r['totale_generico'] = (float)$r['totale_generico'];
+        $r['totale_importo']  = (float)$r['totale_importo'];
         $totale_enti   += $r['n_enti'];
         $totale_scelte += $r['totale_scelte'];
+        $totale_esp    += $r['totale_espresso'];
+        $totale_gen    += $r['totale_generico'];
         $totale_imp    += $r['totale_importo'];
     }
+
+    // KPI aggiuntivi: enti con 0 scelte, 0 importo
+    $kpi = $pdo->prepare(
+        "SELECT
+            SUM(n_scelte = 0 OR n_scelte IS NULL)          AS nr_enti_0_scelte,
+            SUM(importo_totale = 0 OR importo_totale IS NULL) AS nr_enti_0_importo
+         FROM enti WHERE anno = ? AND categoria_principale = ?"
+    );
+    $kpi->execute([$anno, $categoria]);
+    $kpi_row = $kpi->fetch();
+
+    // Totale anno (tutte le categorie) per calcolare le %
+    $tot_anno = $pdo->prepare(
+        "SELECT SUM(n_scelte) AS tot_scelte_anno, SUM(importo_totale) AS tot_importo_anno
+         FROM enti WHERE anno = ?"
+    );
+    $tot_anno->execute([$anno]);
+    $tot_anno_row = $tot_anno->fetch();
+    $tot_s_anno = (float)($tot_anno_row['tot_scelte_anno']  ?? 1);
+    $tot_i_anno = (float)($tot_anno_row['tot_importo_anno'] ?? 1);
+
+    // Calcoli derivati
+    $valore_medio_espressa = ($totale_scelte > 0) ? round($totale_esp / $totale_scelte, 2) : null;
+    $valore_medio_redistribuito = ($totale_enti > 0) ? round($totale_gen / $totale_enti, 2) : null;
+    $perc_incidenza_generica = ($totale_imp > 0) ? round($totale_gen / $totale_imp * 100, 2) : null;
+    $perc_scelte_sul_totale  = ($tot_s_anno > 0) ? round($totale_scelte / $tot_s_anno * 100, 2) : null;
+    $perc_importo_sul_totale = ($tot_i_anno > 0) ? round($totale_imp / $tot_i_anno * 100, 2) : null;
 
     // Lista enti paginata
     $pagine = max(1, (int)ceil($totale_enti / $per_pagina));
     $offset = ($pagina - 1) * $per_pagina;
     $stmt2 = $pdo->prepare(
-        "SELECT cod_fiscale, denominazione, regione, n_scelte, importo_totale, runts_5x1000
+        "SELECT cod_fiscale, denominazione, regione, n_scelte,
+                importo_espresso, importo_generico, importo_totale, runts_5x1000
          FROM enti
          WHERE anno = ? AND categoria_principale = ?
          ORDER BY importo_totale DESC
@@ -568,18 +800,29 @@ function action_categoria_dettaglio(): void {
     $stmt2->execute([$anno, $categoria]);
     $enti = $stmt2->fetchAll();
     foreach ($enti as &$e) {
-        $e['n_scelte']       = $e['n_scelte'] !== null ? (int)$e['n_scelte'] : null;
-        $e['importo_totale'] = $e['importo_totale'] !== null ? (float)$e['importo_totale'] : null;
-        $e['runts_5x1000']   = (bool)$e['runts_5x1000'];
+        $e['n_scelte']         = $e['n_scelte'] !== null ? (int)$e['n_scelte'] : null;
+        $e['importo_espresso'] = $e['importo_espresso'] !== null ? (float)$e['importo_espresso'] : null;
+        $e['importo_generico'] = $e['importo_generico'] !== null ? (float)$e['importo_generico'] : null;
+        $e['importo_totale']   = $e['importo_totale'] !== null ? (float)$e['importo_totale'] : null;
+        $e['runts_5x1000']     = (bool)$e['runts_5x1000'];
     }
 
     json_out([
         'categoria'   => $categoria,
         'anno'        => $anno,
         'totali'      => [
-            'n_enti'         => $totale_enti,
-            'totale_scelte'  => $totale_scelte,
-            'totale_importo' => $totale_imp,
+            'n_enti'                   => $totale_enti,
+            'totale_scelte'            => $totale_scelte,
+            'totale_espresso'          => $totale_esp,
+            'totale_generico'          => $totale_gen,
+            'totale_importo'           => $totale_imp,
+            'nr_enti_0_scelte'         => (int)($kpi_row['nr_enti_0_scelte'] ?? 0),
+            'nr_enti_0_importo'        => (int)($kpi_row['nr_enti_0_importo'] ?? 0),
+            'valore_medio_espressa'    => $valore_medio_espressa,
+            'valore_medio_redistribuito' => $valore_medio_redistribuito,
+            'perc_incidenza_generica'  => $perc_incidenza_generica,
+            'perc_scelte_sul_totale'   => $perc_scelte_sul_totale,
+            'perc_importo_sul_totale'  => $perc_importo_sul_totale,
         ],
         'per_regione' => $per_regione,
         'pagina'      => $pagina,
@@ -708,15 +951,18 @@ function action_inoptato(): void {
     $stmt->execute($params);
     $per_anno = [];
     foreach ($stmt->fetchAll() as $r) {
-        $gen = (float)$r['tot_generico'];
-        $tot = (float)$r['tot_totale'];
+        $gen  = (float)$r['tot_generico'];
+        $esp  = (float)$r['tot_espresso'];
+        $tot  = (float)$r['tot_totale'];
+        $sc   = (int)$r['tot_scelte'];
         $per_anno[] = [
-            'anno'          => (int)$r['anno'],
-            'tot_espresso'  => (float)$r['tot_espresso'],
-            'tot_generico'  => $gen,
-            'tot_totale'    => $tot,
-            'tot_scelte'    => (int)$r['tot_scelte'],
-            'perc_generico' => $tot > 0 ? round($gen / $tot * 100, 2) : null,
+            'anno'                  => (int)$r['anno'],
+            'tot_espresso'          => $esp,
+            'tot_generico'          => $gen,
+            'tot_totale'            => $tot,
+            'tot_scelte'            => $sc,
+            'perc_generico'         => $tot > 0 ? round($gen / $tot * 100, 2) : null,
+            'valore_medio_espressa' => $sc > 0 ? round($esp / $sc, 2) : null,
         ];
     }
 
@@ -787,6 +1033,158 @@ function action_inoptato(): void {
     json_out($out);
 }
 
+// ─── Lead generation ────────────────────────────────────────────────────────
+
+function action_salva_lead(): void {
+    $email            = str_param('email');
+    $nome             = str_param('nome');
+    $tipo             = str_param('tipo');
+    $anno             = (int)str_param('anno');
+    $vuole_newsletter = (int)(bool)str_param('vuole_newsletter');
+
+    if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        err('Email non valida', 400);
+    }
+
+    $ip_hash = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? '');
+    $pdo = db();
+
+    try {
+        $stmt = $pdo->prepare(
+            "INSERT INTO leads (email, nome, fonte, file_tipo, file_anno, ip_hash, vuole_newsletter)
+             VALUES (?, ?, 'download', ?, ?, ?, ?)"
+        );
+        $stmt->execute([
+            strtolower($email),
+            $nome ?: null,
+            $tipo ?: null,
+            $anno ?: null,
+            $ip_hash,
+            $vuole_newsletter,
+        ]);
+    } catch (\Throwable $e) {
+        // Tabella non ancora creata sul server: degrada silenziosamente
+        error_log('[api.php] leads insert failed: ' . $e->getMessage());
+    }
+
+    json_out(['ok' => true]);
+}
+
+// ─── Classifica ─────────────────────────────────────────────────────────────
+
+function action_classifica(): void {
+    $pdo        = db();
+    $anno       = int_param('anno');
+    $metrica    = str_param('metrica', 'importo'); // importo | scelte
+    $tipo       = str_param('tipo',    'top');      // top | crescita | calo | newcomer
+    $categoria  = str_param('categoria');
+    $regione    = str_param('regione');
+    $per_pagina = min(100, max(1, int_param('per_pagina', 25)));
+
+    if (!$anno) {
+        $anno = (int)$pdo->query("SELECT MAX(anno) FROM enti")->fetchColumn();
+    }
+    $anno_prec = $anno - 1;
+    $col = $metrica === 'scelte' ? 'n_scelte' : 'importo_totale';
+
+    // Filtri opzionali (oltre anno)
+    $cond    = [];
+    $cparams = [];
+    if ($categoria) { $cond[] = 'e.categoria_principale = ?'; $cparams[] = $categoria; }
+    if ($regione)   { $cond[] = 'e.regione = ?';              $cparams[] = $regione; }
+    $extra = $cond ? 'AND ' . implode(' AND ', $cond) : '';
+
+    if ($tipo === 'top') {
+        $params = array_merge([$anno], $cparams);
+        $stmt   = $pdo->prepare("
+            SELECT e.cod_fiscale,
+                   COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
+                   e.regione, e.categoria_principale, e.n_scelte, e.importo_totale
+            FROM enti e LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
+            WHERE e.anno = ? $extra AND e.$col > 0
+            ORDER BY e.$col DESC LIMIT $per_pagina");
+        $stmt->execute($params);
+
+    } elseif ($tipo === 'crescita' || $tipo === 'calo') {
+        $order  = $tipo === 'crescita' ? 'DESC' : 'ASC';
+        $extra_p = str_replace('e.', 'p.', $extra);
+        $params  = array_merge([$anno_prec, $anno], $cparams);
+        $stmt    = $pdo->prepare("
+            SELECT e.cod_fiscale,
+                   COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
+                   e.regione, e.categoria_principale,
+                   e.n_scelte AS scelte_cur,   e.importo_totale AS importo_cur,
+                   p.n_scelte AS scelte_prec,  p.importo_totale AS importo_prec,
+                   ROUND((e.$col - p.$col) / NULLIF(p.$col, 0) * 100, 1) AS perc_var,
+                   (e.$col - p.$col) AS var_assoluta
+            FROM enti e
+            JOIN enti p ON p.cod_fiscale = e.cod_fiscale AND p.anno = ?
+            LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
+            WHERE e.anno = ? $extra AND e.$col > 0 AND p.$col > 0
+            ORDER BY perc_var $order LIMIT $per_pagina");
+        $stmt->execute($params);
+
+    } elseif ($tipo === 'newcomer') {
+        $params = array_merge([$anno], $cparams, [$anno_prec]);
+        $stmt   = $pdo->prepare("
+            SELECT e.cod_fiscale,
+                   COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
+                   e.regione, e.categoria_principale, e.n_scelte, e.importo_totale
+            FROM enti e LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
+            WHERE e.anno = ? $extra AND e.n_scelte > 0
+              AND NOT EXISTS (
+                SELECT 1 FROM enti p WHERE p.cod_fiscale = e.cod_fiscale AND p.anno = ?
+              )
+            ORDER BY e.$col DESC LIMIT $per_pagina");
+        $stmt->execute($params);
+
+    } else {
+        err('tipo non valido: top | crescita | calo | newcomer');
+    }
+
+    $rows = $stmt->fetchAll();
+    foreach ($rows as $i => &$row) {
+        $row['rank'] = $i + 1;
+        // Normalizza tipi
+        foreach (['n_scelte','scelte_cur','scelte_prec'] as $k) {
+            if (array_key_exists($k, $row))
+                $row[$k] = $row[$k] !== null ? (int)$row[$k] : null;
+        }
+        foreach (['importo_totale','importo_cur','importo_prec','perc_var','var_assoluta'] as $k) {
+            if (array_key_exists($k, $row))
+                $row[$k] = $row[$k] !== null ? (float)$row[$k] : null;
+        }
+    }
+
+    json_out([
+        'anno'      => $anno,
+        'anno_prec' => $anno_prec,
+        'tipo'      => $tipo,
+        'metrica'   => $metrica,
+        'enti'      => $rows,
+    ]);
+}
+
+function action_province(): void {
+    $regione = str_param('regione');
+    $pdo     = db();
+    if ($regione) {
+        $stmt = $pdo->prepare(
+            "SELECT DISTINCT provincia FROM enti
+             WHERE regione = ? AND provincia IS NOT NULL AND provincia != ''
+             ORDER BY provincia"
+        );
+        $stmt->execute([$regione]);
+    } else {
+        $stmt = $pdo->query(
+            "SELECT DISTINCT provincia FROM enti
+             WHERE provincia IS NOT NULL AND provincia != ''
+             ORDER BY provincia"
+        );
+    }
+    json_out($stmt->fetchAll(PDO::FETCH_COLUMN));
+}
+
 // ─── Forecast ───────────────────────────────────────────────────────────────
 
 function action_forecast(): void {
@@ -801,6 +1199,378 @@ function action_forecast(): void {
     echo $json;
     exit;
 }
+
+// ─── Ripartizioni ────────────────────────────────────────────────────────────
+// Restituisce i dati pre-aggregati dalla tabella ripartizioni.
+//
+// ?action=ripartizioni
+//   &anno=YYYY           filtra per anno (opzionale; default: anno più recente)
+//   &categoria=NomeCAT   filtra per categoria (opzionale)
+//   &regione=NomeREG     filtra per regione display (opzionale; NULL = nazionale)
+//   &breakdown=regione   aggiunge dettaglio per regione
+//   &breakdown=anno      serie storica (tutti gli anni)
+//   &breakdown=categoria distribuzione tra categorie per l'anno scelto
+
+function action_ripartizioni(): void {
+    $pdo       = db();
+    $anno      = int_param('anno');
+    $categoria = str_param('categoria');
+    $regione   = str_param('regione');    // nome display normalizzato
+    $breakdown = str_param('breakdown');  // 'regione' | 'anno' | 'categoria' | ''
+
+    // Anno default: il più recente disponibile
+    if (!$anno && $breakdown !== 'anno') {
+        $anno = (int)$pdo->query("SELECT MAX(anno) FROM ripartizioni")->fetchColumn();
+        if (!$anno) {
+            // Tabella vuota: fallback su enti
+            $anno = (int)$pdo->query("SELECT MAX(anno) FROM enti")->fetchColumn();
+        }
+    }
+
+    $where  = [];
+    $params = [];
+
+    if ($anno && $breakdown !== 'anno') {
+        $where[]  = 'anno = ?';
+        $params[] = $anno;
+    }
+    if ($categoria) {
+        $where[]  = 'categoria = ?';
+        $params[] = $categoria;
+    }
+    if ($regione !== '') {
+        // '' = tutti; NULL esplicito = solo nazionali
+        if ($regione === 'nazionale' || $regione === 'null') {
+            $where[] = 'regione IS NULL';
+        } else {
+            $where[]  = 'regione = ?';
+            $params[] = $regione;
+        }
+    }
+    $sql_where = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+
+    // ── Breakdown per regione ────────────────────────────────────────────────
+    if ($breakdown === 'regione') {
+        $sql = "SELECT regione, categoria, anno,
+                       n_enti, n_contribuenti,
+                       importo_espresso, importo_generico, importo_totale
+                FROM ripartizioni
+                $sql_where AND regione IS NOT NULL
+                ORDER BY importo_totale DESC";
+        // aggiunge AND manualmente se sql_where è vuoto
+        if (!$where) {
+            $sql = str_replace('$sql_where AND', 'WHERE', $sql);
+            $sql = "SELECT regione, categoria, anno,
+                           n_enti, n_contribuenti,
+                           importo_espresso, importo_generico, importo_totale
+                    FROM ripartizioni
+                    WHERE regione IS NOT NULL
+                    ORDER BY importo_totale DESC";
+        } else {
+            $sql = "SELECT regione, categoria, anno,
+                           n_enti, n_contribuenti,
+                           importo_espresso, importo_generico, importo_totale
+                    FROM ripartizioni
+                    $sql_where AND regione IS NOT NULL
+                    ORDER BY importo_totale DESC";
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        _cast_ripartizioni($rows);
+        json_out(['anno' => $anno, 'per_regione' => $rows]);
+        return;
+    }
+
+    // ── Serie storica (breakdown=anno) ───────────────────────────────────────
+    if ($breakdown === 'anno') {
+        $where2  = ['regione IS NULL'];  // totali nazionali
+        $params2 = [];
+        if ($categoria) { $where2[] = 'categoria = ?'; $params2[] = $categoria; }
+        $sql2 = "SELECT anno, categoria,
+                        n_enti, n_contribuenti,
+                        importo_espresso, importo_generico, importo_totale
+                 FROM ripartizioni
+                 WHERE " . implode(' AND ', $where2) . "
+                 ORDER BY anno ASC, importo_totale DESC";
+        $stmt2 = $pdo->prepare($sql2);
+        $stmt2->execute($params2);
+        $rows2 = $stmt2->fetchAll();
+        _cast_ripartizioni($rows2);
+        json_out(['serie_storica' => $rows2]);
+        return;
+    }
+
+    // ── Default: distribuzione per categoria (nazionali, anno scelto) ────────
+    $w_naz  = array_merge($where, ['regione IS NULL']);
+    $sql_d  = "SELECT categoria, anno,
+                      n_enti, n_contribuenti,
+                      importo_espresso, importo_generico, importo_totale
+               FROM ripartizioni
+               WHERE " . implode(' AND ', $w_naz) . "
+               ORDER BY importo_totale DESC";
+    $stmt_d = $pdo->prepare($sql_d);
+    $stmt_d->execute($params);
+    $rows_d = $stmt_d->fetchAll();
+    _cast_ripartizioni($rows_d);
+
+    // Totale dell'anno per calcolo percentuali
+    $totale_anno = array_sum(array_column($rows_d, 'importo_totale'));
+    foreach ($rows_d as &$r) {
+        $r['perc_importo'] = $totale_anno > 0
+            ? round($r['importo_totale'] / $totale_anno * 100, 2)
+            : null;
+    }
+
+    json_out(['anno' => $anno, 'per_categoria' => $rows_d, 'totale' => $totale_anno]);
+}
+
+function _cast_ripartizioni(array &$rows): void {
+    foreach ($rows as &$r) {
+        $r['anno']             = (int)$r['anno'];
+        $r['n_enti']           = (int)$r['n_enti'];
+        $r['n_contribuenti']   = (int)$r['n_contribuenti'];
+        $r['importo_espresso'] = $r['importo_espresso'] !== null ? (float)$r['importo_espresso'] : null;
+        $r['importo_generico'] = $r['importo_generico'] !== null ? (float)$r['importo_generico'] : null;
+        $r['importo_totale']   = $r['importo_totale']   !== null ? (float)$r['importo_totale']   : null;
+    }
+}
+
+// ─── Endpoint: enti ammessi in più categorie ─────────────────────────────────
+/**
+ * ?action=multi_categoria[&anno=YYYY][&min_categorie=2][&pagina=1][&per_pagina=50]
+ *
+ * Restituisce enti presenti (come ammessi) in almeno min_categorie categorie distinte,
+ * usando la tabella categoria_ammissioni.
+ */
+function action_multi_categoria(): void {
+    $pdo           = db();
+    $anno          = int_param('anno');
+    $min_cat       = max(2, int_param('min_categorie', 2));
+    $pagina        = max(1, int_param('pagina', 1));
+    $per_pagina    = min(200, max(1, int_param('per_pagina', 50)));
+    $offset        = ($pagina - 1) * $per_pagina;
+
+    $where  = $anno ? 'AND ca.anno = ?' : '';
+    $params = $anno ? [$anno] : [];
+
+    // Totale righe
+    $sql_count = "
+        SELECT COUNT(*) FROM (
+            SELECT ca.cod_fiscale
+            FROM categoria_ammissioni ca
+            WHERE ca.stato = 'ammesso' $where
+            GROUP BY ca.anno, ca.cod_fiscale
+            HAVING COUNT(DISTINCT ca.categoria) >= $min_cat
+        ) sub";
+    $totale = (int)$pdo->prepare($sql_count) ? 0 : 0;
+    $stmt_c = $pdo->prepare($sql_count);
+    $stmt_c->execute($params);
+    $totale = (int)$stmt_c->fetchColumn();
+
+    // Dati paginati — arricchiti con importo da enti se disponibile
+    $params_pag = array_merge($params, [$per_pagina, $offset]);
+    $stmt = $pdo->prepare("
+        SELECT
+            ca.anno,
+            ca.cod_fiscale,
+            MAX(ca.denominazione)                      AS denominazione,
+            COUNT(DISTINCT ca.categoria)               AS n_categorie,
+            GROUP_CONCAT(DISTINCT ca.categoria
+                         ORDER BY ca.categoria
+                         SEPARATOR ', ')               AS categorie,
+            e.importo_totale,
+            e.n_scelte,
+            e.regione
+        FROM categoria_ammissioni ca
+        LEFT JOIN enti e
+          ON e.cod_fiscale = ca.cod_fiscale
+         AND e.anno        = ca.anno
+        WHERE ca.stato = 'ammesso' $where
+        GROUP BY ca.anno, ca.cod_fiscale, e.importo_totale, e.n_scelte, e.regione
+        HAVING COUNT(DISTINCT ca.categoria) >= $min_cat
+        ORDER BY ca.anno DESC, n_categorie DESC, e.importo_totale DESC
+        LIMIT ? OFFSET ?
+    ");
+    $stmt->execute($params_pag);
+    $rows = $stmt->fetchAll();
+
+    foreach ($rows as &$r) {
+        $r['anno']           = (int)$r['anno'];
+        $r['n_categorie']    = (int)$r['n_categorie'];
+        $r['importo_totale'] = $r['importo_totale'] !== null ? (float)$r['importo_totale'] : null;
+        $r['n_scelte']       = $r['n_scelte'] !== null ? (int)$r['n_scelte'] : null;
+    }
+    unset($r);
+
+    json_out([
+        'totale'      => $totale,
+        'pagina'      => $pagina,
+        'per_pagina'  => $per_pagina,
+        'min_categorie' => $min_cat,
+        'risultati'   => $rows,
+    ]);
+}
+
+
+// ─── Endpoint: composizione importo per categoria ────────────────────────────
+/**
+ * ?action=composizione_categorie[&anno=YYYY]
+ *
+ * Restituisce il breakdown dell'importo totale per categoria (dati dalla
+ * tabella ripartizioni, regione=NULL = totale nazionale).
+ * Se non ci sono dati in ripartizioni, deriva da categoria_ammissioni + enti.
+ */
+function action_composizione_categorie(): void {
+    $pdo  = db();
+    $anno = int_param('anno');
+
+    // Prima tenta dalla tabella ripartizioni (dati precalcolati)
+    if ($anno) {
+        $stmt = $pdo->prepare("
+            SELECT categoria, n_enti, n_contribuenti,
+                   importo_espresso, importo_generico, importo_totale
+            FROM ripartizioni
+            WHERE anno = ? AND regione IS NULL
+            ORDER BY importo_totale DESC
+        ");
+        $stmt->execute([$anno]);
+    } else {
+        $stmt = $pdo->query("
+            SELECT anno, categoria, n_enti, n_contribuenti,
+                   importo_espresso, importo_generico, importo_totale
+            FROM ripartizioni
+            WHERE regione IS NULL
+            ORDER BY anno DESC, importo_totale DESC
+        ");
+    }
+    $rows = $stmt->fetchAll();
+
+    // Se ripartizioni è vuota, usa categoria_ammissioni + enti come fallback
+    if (empty($rows)) {
+        $where  = $anno ? 'WHERE ca.anno = ?' : '';
+        $params = $anno ? [$anno] : [];
+        $stmt2  = $pdo->prepare("
+            SELECT
+                ca.anno,
+                ca.categoria,
+                COUNT(DISTINCT ca.cod_fiscale)     AS n_enti,
+                COALESCE(SUM(e.n_scelte),0)        AS n_contribuenti,
+                COALESCE(SUM(e.importo_espresso),0) AS importo_espresso,
+                COALESCE(SUM(e.importo_generico),0) AS importo_generico,
+                COALESCE(SUM(e.importo_totale),0)   AS importo_totale
+            FROM categoria_ammissioni ca
+            LEFT JOIN enti e
+              ON e.cod_fiscale = ca.cod_fiscale AND e.anno = ca.anno
+            WHERE ca.stato = 'ammesso' $where
+            GROUP BY ca.anno, ca.categoria
+            ORDER BY ca.anno DESC, importo_totale DESC
+        ");
+        $stmt2->execute($params);
+        $rows = $stmt2->fetchAll();
+    }
+
+    foreach ($rows as &$r) {
+        if (isset($r['anno'])) $r['anno'] = (int)$r['anno'];
+        $r['n_enti']           = (int)$r['n_enti'];
+        $r['n_contribuenti']   = (int)$r['n_contribuenti'];
+        $r['importo_espresso'] = (float)$r['importo_espresso'];
+        $r['importo_generico'] = (float)$r['importo_generico'];
+        $r['importo_totale']   = (float)$r['importo_totale'];
+    }
+    unset($r);
+
+    // Se anno specificato, calcola anche la percentuale sul totale
+    if ($anno && !empty($rows)) {
+        $tot = array_sum(array_column($rows, 'importo_totale'));
+        foreach ($rows as &$r) {
+            $r['perc_importo'] = $tot > 0 ? round($r['importo_totale'] / $tot * 100, 2) : 0;
+        }
+        unset($r);
+    }
+
+    json_out([
+        'anno'        => $anno ?: null,
+        'categorie'   => $rows,
+    ]);
+}
+
+
+// ─── Endpoint: conflitti (ammesso in una cat, escluso in un'altra) ────────────
+/**
+ * ?action=conflitti_categoria[&anno=YYYY][&pagina=1][&per_pagina=50]
+ *
+ * Restituisce enti ammessi in almeno una categoria ma esclusi in almeno
+ * un'altra nello stesso anno (es. AIRC ammessa ricerca_sanitaria ma esclusa
+ * da ets_onlus).
+ */
+function action_conflitti_categoria(): void {
+    $pdo        = db();
+    $anno       = int_param('anno');
+    $pagina     = max(1, int_param('pagina', 1));
+    $per_pagina = min(200, max(1, int_param('per_pagina', 50)));
+    $offset     = ($pagina - 1) * $per_pagina;
+
+    $where  = $anno ? 'AND a.anno = ?' : '';
+    $params = $anno ? [$anno] : [];
+
+    $sql_count = "
+        SELECT COUNT(*) FROM (
+            SELECT a.cod_fiscale, a.anno
+            FROM categoria_ammissioni a
+            JOIN categoria_ammissioni e
+              ON  e.cod_fiscale = a.cod_fiscale
+              AND e.anno        = a.anno
+              AND e.stato       = 'escluso'
+            WHERE a.stato = 'ammesso' $where
+            GROUP BY a.anno, a.cod_fiscale
+        ) sub";
+    $stmt_c = $pdo->prepare($sql_count);
+    $stmt_c->execute($params);
+    $totale = (int)$stmt_c->fetchColumn();
+
+    $params_pag = array_merge($params, [$per_pagina, $offset]);
+    $stmt = $pdo->prepare("
+        SELECT
+            a.anno,
+            a.cod_fiscale,
+            MAX(a.denominazione)                           AS denominazione,
+            GROUP_CONCAT(DISTINCT a.categoria
+                         ORDER BY a.categoria SEPARATOR ', ') AS categorie_ammesse,
+            GROUP_CONCAT(DISTINCT e.categoria
+                         ORDER BY e.categoria SEPARATOR ', ') AS categorie_escluse,
+            ent.importo_totale,
+            ent.regione
+        FROM categoria_ammissioni a
+        JOIN categoria_ammissioni e
+          ON  e.cod_fiscale = a.cod_fiscale
+          AND e.anno        = a.anno
+          AND e.stato       = 'escluso'
+        LEFT JOIN enti ent
+          ON  ent.cod_fiscale = a.cod_fiscale
+          AND ent.anno        = a.anno
+        WHERE a.stato = 'ammesso' $where
+        GROUP BY a.anno, a.cod_fiscale, ent.importo_totale, ent.regione
+        ORDER BY a.anno DESC, a.cod_fiscale
+        LIMIT ? OFFSET ?
+    ");
+    $stmt->execute($params_pag);
+    $rows = $stmt->fetchAll();
+
+    foreach ($rows as &$r) {
+        $r['anno']           = (int)$r['anno'];
+        $r['importo_totale'] = $r['importo_totale'] !== null ? (float)$r['importo_totale'] : null;
+    }
+    unset($r);
+
+    json_out([
+        'totale'     => $totale,
+        'pagina'     => $pagina,
+        'per_pagina' => $per_pagina,
+        'risultati'  => $rows,
+    ]);
+}
+
 
 // ─── Router ─────────────────────────────────────────────────────────────────
 
@@ -817,11 +1587,19 @@ try {
         'cerca_cf'           => action_cerca_cf(),
         'analisi_categorie'    => action_analisi_categorie(),
         'categoria_dettaglio'  => action_categoria_dettaglio(),
+        'regioni'              => action_regioni(),
+        'province'             => action_province(),
+        'classifica'           => action_classifica(),
         'files'                => action_files(),
         'download'             => action_download(),
         'inoptato'             => action_inoptato(),
+        'salva_lead'           => action_salva_lead(),
         'forecast'             => action_forecast(),
-        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, forecast", 404),
+        'ripartizioni'         => action_ripartizioni(),
+        'multi_categoria'      => action_multi_categoria(),
+        'composizione_categorie' => action_composizione_categorie(),
+        'conflitti_categoria'  => action_conflitti_categoria(),
+        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria", 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());

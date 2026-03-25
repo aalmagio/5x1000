@@ -33,24 +33,76 @@
         <p class="text-gray-500 mt-1">Anno {{ anno }}</p>
       </div>
 
-      <!-- KPI cards -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+      <!-- KPI cards — riga 1: metriche principali -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
         <div class="card bg-gradient-to-br from-brand-50 to-white border-brand-100">
           <p class="text-xs font-medium text-brand-500 uppercase tracking-wide mb-1">Enti beneficiari</p>
           <p class="text-2xl font-bold text-brand-700">{{ formatNum(data.totali.n_enti) }}</p>
+          <p class="text-xs text-gray-400 mt-1">
+            <span class="text-red-500">{{ formatNum(data.totali.nr_enti_0_scelte) }}</span> senza scelte ·
+            <span class="text-orange-500">{{ formatNum(data.totali.nr_enti_0_importo) }}</span> senza importo
+          </p>
         </div>
         <div class="card bg-gradient-to-br from-emerald-50 to-white border-emerald-100">
           <p class="text-xs font-medium text-emerald-500 uppercase tracking-wide mb-1">Scelte totali</p>
           <p class="text-2xl font-bold text-emerald-700">{{ formatNum(data.totali.totale_scelte) }}</p>
+          <p class="text-xs text-gray-400 mt-1">
+            {{ data.totali.perc_scelte_sul_totale != null ? data.totali.perc_scelte_sul_totale.toFixed(1) + '% del totale 5×mille' : '' }}
+          </p>
         </div>
         <div class="card bg-gradient-to-br from-violet-50 to-white border-violet-100">
           <p class="text-xs font-medium text-violet-500 uppercase tracking-wide mb-1">Importo totale</p>
           <p class="text-2xl font-bold text-violet-700">{{ formatEur(data.totali.totale_importo) }}</p>
+          <p class="text-xs text-gray-400 mt-1">
+            {{ data.totali.perc_importo_sul_totale != null ? data.totali.perc_importo_sul_totale.toFixed(1) + '% del totale 5×mille' : '' }}
+          </p>
         </div>
       </div>
 
+      <!-- KPI cards — riga 2: valore medio e generica -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        <div class="card bg-gradient-to-br from-sky-50 to-white border-sky-100">
+          <p class="text-xs font-medium text-sky-500 uppercase tracking-wide mb-1">Valore medio scelta espressa</p>
+          <p class="text-2xl font-bold text-sky-700">
+            {{ data.totali.valore_medio_espressa != null ? formatEur(data.totali.valore_medio_espressa) : '–' }}
+          </p>
+          <p class="text-xs text-gray-400 mt-1">espresso / nr. scelte</p>
+        </div>
+        <div class="card bg-gradient-to-br from-amber-50 to-white border-amber-100">
+          <p class="text-xs font-medium text-amber-500 uppercase tracking-wide mb-1">Valore medio redistribuito</p>
+          <p class="text-2xl font-bold text-amber-700">
+            {{ data.totali.valore_medio_redistribuito != null ? formatEur(data.totali.valore_medio_redistribuito) : '–' }}
+          </p>
+          <p class="text-xs text-gray-400 mt-1">generico / nr. enti</p>
+        </div>
+        <div class="card bg-gradient-to-br from-orange-50 to-white border-orange-100">
+          <p class="text-xs font-medium text-orange-500 uppercase tracking-wide mb-1">Incidenza generica</p>
+          <p class="text-2xl font-bold text-orange-700">
+            {{ data.totali.perc_incidenza_generica != null ? data.totali.perc_incidenza_generica.toFixed(1) + '%' : '–' }}
+          </p>
+          <p class="text-xs text-gray-400 mt-1">{{ formatEur(data.totali.totale_generico) }} su totale erogato</p>
+        </div>
+      </div>
+
+      <!-- Tile Map + Bar chart: affiancati su desktop -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+
+      <!-- Tile cartogram -->
+      <div class="card">
+        <RegionTileMap
+          :data="regioneTileData"
+          title="Mappa importo per regione"
+          :subtitle="`Anno ${anno}`"
+          color-low="#dbeafe"
+          color-high="#1e40af"
+          label-low="minore"
+          label-high="maggiore"
+          :format-fn="formatEurShort"
+        />
+      </div>
+
       <!-- Bar chart per regione -->
-      <div class="card mb-8">
+      <div class="card">
         <h2 class="mb-5">Distribuzione per regione</h2>
         <div class="space-y-2.5">
           <div
@@ -85,6 +137,8 @@
           </div>
         </div>
       </div>
+
+      </div><!-- end grid -->
 
       <!-- Tabella enti paginata -->
       <div class="card p-0 overflow-hidden">
@@ -168,6 +222,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import { fetchCategoriaDettaglio } from '@/api/client'
+import RegionTileMap from '@/components/RegionTileMap.vue'
 
 const route    = useRoute()
 const categoria = route.params.categoria
@@ -182,6 +237,20 @@ const formatNum = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
 const formatEur = (n) => n != null
   ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
   : '–'
+function formatEurShort(v) {
+  if (v == null) return '–'
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + 'Mrd'
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M'
+  if (v >= 1e3) return (v / 1e3).toFixed(0) + 'k'
+  return v.toFixed(0) + '€'
+}
+
+const regioneTileData = computed(() =>
+  (data.value?.per_regione ?? []).map(r => ({
+    regione: r.regione,
+    value:   r.totale_importo ?? 0,
+  }))
+)
 
 const maxRegione = computed(() =>
   data.value?.per_regione?.length

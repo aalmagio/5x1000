@@ -1,11 +1,26 @@
 <template>
   <div class="max-w-7xl mx-auto px-4 sm:px-6 py-10">
-    <div class="mb-6">
-      <h1 class="mb-1">Contribuenti che non scelgono</h1>
-      <p class="text-gray-500">
-        Analisi della quota di 5×1000 distribuita come <strong>scelta generica</strong>: contribuenti che hanno
-        destinato il 5×1000 senza indicare un ente specifico.
-      </p>
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="mb-1">Contribuenti che non scelgono</h1>
+        <p class="text-gray-500">
+          Analisi della quota di 5×1000 distribuita come <strong>scelta generica</strong>: contribuenti che hanno
+          destinato il 5×1000 senza indicare un ente specifico.
+        </p>
+      </div>
+      <!-- Toggle metrica -->
+      <div class="flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs flex-shrink-0">
+        <button
+          @click="metrica = 'importo'"
+          class="px-3 py-1.5 rounded-md transition-colors font-medium"
+          :class="metrica === 'importo' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'"
+        >€ Importo</button>
+        <button
+          @click="metrica = 'scelte'"
+          class="px-3 py-1.5 rounded-md transition-colors font-medium"
+          :class="metrica === 'scelte' ? 'bg-white shadow text-emerald-700' : 'text-gray-500 hover:text-gray-700'"
+        ># Firme</button>
+      </div>
     </div>
 
     <!-- Skeleton -->
@@ -25,34 +40,42 @@
     </div>
 
     <template v-else-if="dati">
-      <!-- KPI Cards -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <!-- KPI Cards — riga 1 -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
         <div class="card bg-gradient-to-br from-amber-50 to-white border-amber-100">
-          <p class="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1">% Generica ({{ ultimoAnno }})</p>
-          <p class="text-2xl font-bold text-amber-700">{{ ultimaPerc !== null ? ultimaPerc.toFixed(1) + '%' : '–' }}</p>
-          <p class="text-xs text-gray-400 mt-1">del totale distribuito</p>
+          <p class="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1">
+            {{ metrica === 'importo' ? '% Importo generico' : 'Firme espresse' }} ({{ ultimoAnno }})
+          </p>
+          <p class="text-2xl font-bold text-amber-700">
+            {{ metrica === 'importo' ? ultimaPercDisplay : formatNum(ultimoScelte) }}
+          </p>
+          <p class="text-xs text-gray-400 mt-1">{{ metrica === 'importo' ? 'del totale distribuito' : 'designazioni esplicite' }}</p>
         </div>
         <div class="card bg-gradient-to-br from-brand-50 to-white border-brand-100">
-          <p class="text-xs font-medium text-brand-500 uppercase tracking-wide mb-1">Importo generico ({{ ultimoAnno }})</p>
-          <p class="text-2xl font-bold text-brand-700">{{ formatEur(ultimoGenerico) }}</p>
-          <p class="text-xs text-gray-400 mt-1">scelte generiche</p>
+          <p class="text-xs font-medium text-brand-500 uppercase tracking-wide mb-1">
+            {{ metrica === 'importo' ? 'Importo generico' : 'Valore medio / firma' }} ({{ ultimoAnno }})
+          </p>
+          <p class="text-2xl font-bold text-brand-700">
+            {{ metrica === 'importo' ? formatEur(ultimoGenerico) : formatEur(ultimoValoreMedio) }}
+          </p>
+          <p class="text-xs text-gray-400 mt-1">{{ metrica === 'importo' ? 'scelte generiche' : '€ espresso / nr. firme' }}</p>
         </div>
         <div
           class="card bg-gradient-to-br border"
-          :class="variazionePerc !== null && variazionePerc < 0
+          :class="variazioneDisplay !== null && variazioneDisplay < 0
             ? 'from-green-50 to-white border-green-100'
             : 'from-orange-50 to-white border-orange-100'"
         >
           <p
             class="text-xs font-medium uppercase tracking-wide mb-1"
-            :class="variazionePerc !== null && variazionePerc < 0 ? 'text-green-600' : 'text-orange-600'"
+            :class="variazioneDisplay !== null && variazioneDisplay < 0 ? 'text-green-600' : 'text-orange-600'"
           >Variazione YoY</p>
           <p
             class="text-2xl font-bold"
-            :class="variazionePerc !== null && variazionePerc < 0 ? 'text-green-700' : 'text-orange-700'"
+            :class="variazioneDisplay !== null && variazioneDisplay < 0 ? 'text-green-700' : 'text-orange-700'"
           >
-            <template v-if="variazionePerc !== null">
-              {{ variazionePerc > 0 ? '+' : '' }}{{ variazionePerc.toFixed(2) }} pp
+            <template v-if="variazioneDisplay !== null">
+              {{ variazioneDisplay > 0 ? '+' : '' }}{{ variazioneDisplay.toFixed(2) }}{{ metrica === 'importo' ? ' pp' : '%' }}
             </template>
             <template v-else>–</template>
           </p>
@@ -60,17 +83,36 @@
         </div>
       </div>
 
-      <!-- Grafico storico % generica -->
+      <!-- KPI Cards — riga 2: nr scelte e valore medio -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+        <div class="card bg-gradient-to-br from-emerald-50 to-white border-emerald-100">
+          <p class="text-xs font-medium text-emerald-600 uppercase tracking-wide mb-1">Nr. scelte espresse ({{ ultimoAnno }})</p>
+          <p class="text-2xl font-bold text-emerald-700">{{ formatNum(ultimoScelte) }}</p>
+          <p class="text-xs text-gray-400 mt-1">designazioni esplicite ai beneficiari</p>
+        </div>
+        <div class="card bg-gradient-to-br from-violet-50 to-white border-violet-100">
+          <p class="text-xs font-medium text-violet-600 uppercase tracking-wide mb-1">Valore medio scelta espressa ({{ ultimoAnno }})</p>
+          <p class="text-2xl font-bold text-violet-700">{{ formatEur(ultimoValoreMedio) }}</p>
+          <p class="text-xs text-gray-400 mt-1">€ espresso / nr. scelte espresse</p>
+        </div>
+      </div>
+
+      <!-- Grafico storico % generica / firme generiche -->
       <div class="card mb-6">
         <div class="flex items-center justify-between mb-5">
           <div>
-            <h2 class="text-gray-900">Trend storico: % scelta generica</h2>
-            <p class="text-sm text-gray-400 mt-0.5">Quota del totale distribuita come generica, per anno</p>
+            <h2 class="text-gray-900">
+              {{ metrica === 'importo' ? 'Trend storico: % scelta generica' : 'Trend storico: firme espresse' }}
+            </h2>
+            <p class="text-sm text-gray-400 mt-0.5">
+              {{ metrica === 'importo' ? 'Quota del totale distribuita come generica, per anno' : 'Numero di firme (designazioni esplicite) per anno' }}
+            </p>
           </div>
           <span class="text-xs text-gray-400">{{ dati.per_anno.length }} anni</span>
         </div>
 
-        <div class="space-y-2">
+        <!-- Importo mode -->
+        <div v-if="metrica === 'importo'" class="space-y-2">
           <div
             v-for="r in dati.per_anno"
             :key="r.anno"
@@ -83,14 +125,9 @@
               >{{ r.anno }}</span>
             </div>
             <div class="flex-1 relative h-7 bg-gray-100 rounded overflow-hidden">
-              <!-- Barra generica (arancione) -->
               <div
                 class="absolute inset-y-0 left-0 rounded transition-all duration-500"
                 :style="{ width: (r.perc_generico ?? 0) + '%', background: 'rgba(245,158,11,0.55)' }"
-              ></div>
-              <!-- Barra espressa (blu) -->
-              <div
-                class="absolute inset-y-0 left-0 rounded-r opacity-0"
               ></div>
             </div>
             <div class="w-32 flex-shrink-0 text-right">
@@ -102,15 +139,43 @@
           </div>
         </div>
 
+        <!-- Firme mode: mostra tot_scelte (firme espresse) per anno -->
+        <div v-else class="space-y-2">
+          <div
+            v-for="r in dati.per_anno"
+            :key="r.anno"
+            class="flex items-center gap-3"
+          >
+            <div class="w-12 text-right flex-shrink-0">
+              <span
+                class="text-sm font-medium"
+                :class="r.anno === ultimoAnno ? 'text-emerald-700' : 'text-gray-500'"
+              >{{ r.anno }}</span>
+            </div>
+            <div class="flex-1 relative h-7 bg-gray-100 rounded overflow-hidden">
+              <div
+                class="absolute inset-y-0 left-0 rounded transition-all duration-500 bg-emerald-400"
+                :style="{ width: maxScelte > 0 ? ((r.tot_scelte ?? 0) / maxScelte * 100).toFixed(1) + '%' : '0%' }"
+              ></div>
+            </div>
+            <div class="w-36 flex-shrink-0 text-right">
+              <span class="text-sm font-semibold tabular-nums" :class="r.anno === ultimoAnno ? 'text-emerald-700' : 'text-gray-700'">
+                {{ formatNum(r.tot_scelte) }}
+              </span>
+              <span class="text-xs text-gray-400 ml-1">firme</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Legenda -->
         <div class="flex gap-4 mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
-          <span class="flex items-center gap-1.5">
+          <span v-if="metrica === 'importo'" class="flex items-center gap-1.5">
             <span class="inline-block w-3 h-3 rounded" style="background:rgba(245,158,11,0.55)"></span>
             Generica (inoptato)
           </span>
-          <span class="flex items-center gap-1.5">
-            <span class="inline-block w-3 h-3 rounded bg-brand-200"></span>
-            Espressa
+          <span v-else class="flex items-center gap-1.5">
+            <span class="inline-block w-3 h-3 rounded bg-emerald-400"></span>
+            Firme generiche
           </span>
         </div>
       </div>
@@ -150,6 +215,41 @@
         <div class="flex gap-4 mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
           <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-brand-400"></span>Espresso</span>
           <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-amber-300"></span>Generico</span>
+        </div>
+      </div>
+
+      <!-- Grafico nr scelte espresse e valore medio per anno -->
+      <div class="card mb-6">
+        <div class="mb-5">
+          <h2 class="text-gray-900">Nr. scelte espresse e valore medio</h2>
+          <p class="text-sm text-gray-400 mt-0.5">Numero di designazioni esplicite e valore medio per scelta, per anno</p>
+        </div>
+        <div class="space-y-2">
+          <div
+            v-for="r in dati.per_anno"
+            :key="r.anno"
+            class="flex items-center gap-3"
+          >
+            <div class="w-12 text-right flex-shrink-0">
+              <span class="text-sm font-medium text-gray-500">{{ r.anno }}</span>
+            </div>
+            <div class="flex-1 h-6 bg-gray-100 rounded overflow-hidden">
+              <div
+                class="h-full rounded transition-all duration-500 bg-emerald-400"
+                :style="{ width: maxScelte > 0 ? ((r.tot_scelte / maxScelte) * 100).toFixed(1) + '%' : '0%' }"
+              ></div>
+            </div>
+            <div class="w-28 flex-shrink-0 text-right text-xs tabular-nums text-gray-600">
+              {{ formatNum(r.tot_scelte) }} scelte
+            </div>
+            <div class="w-24 flex-shrink-0 text-right text-xs tabular-nums text-violet-600 font-medium">
+              {{ r.valore_medio_espressa != null ? formatEur(r.valore_medio_espressa) : '–' }}
+            </div>
+          </div>
+        </div>
+        <div class="flex gap-4 mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
+          <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-emerald-400"></span>Nr. scelte espresse</span>
+          <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded bg-violet-300"></span>Valore medio (€/scelta)</span>
         </div>
       </div>
 
@@ -219,6 +319,7 @@ const dati            = ref(null)
 const loadingBreakdown = ref(false)
 const breakdownTab    = ref('categoria')
 const breakdownRaw    = ref(null)
+const metrica         = ref('importo') // 'importo' | 'scelte'
 
 async function load() {
   loading.value = true
@@ -272,6 +373,21 @@ const ultimoGenerico = computed(() => {
   return dati.value.per_anno.at(-1).tot_generico
 })
 
+const ultimoScelte = computed(() => {
+  if (!dati.value?.per_anno?.length) return null
+  return dati.value.per_anno.at(-1).tot_scelte
+})
+
+const ultimoValoreMedio = computed(() => {
+  if (!dati.value?.per_anno?.length) return null
+  return dati.value.per_anno.at(-1).valore_medio_espressa ?? null
+})
+
+const maxScelte = computed(() => {
+  if (!dati.value?.per_anno?.length) return 1
+  return Math.max(...dati.value.per_anno.map(r => r.tot_scelte ?? 0), 1)
+})
+
 const variazionePerc = computed(() => {
   const rows = dati.value?.per_anno
   if (!rows || rows.length < 2) return null
@@ -279,6 +395,25 @@ const variazionePerc = computed(() => {
   const prev = rows.at(-2).perc_generico
   if (last === null || prev === null) return null
   return +(last - prev).toFixed(2)
+})
+
+// Computed adattivi al metrica corrente
+const ultimaPercDisplay = computed(() =>
+  ultimaPerc.value !== null ? ultimaPerc.value.toFixed(1) + '%' : '–'
+)
+
+// Variazione YoY firme espresse (in punti percentuali rispetto al totale)
+const variazioneDisplay = computed(() => {
+  if (metrica.value === 'scelte') {
+    // YoY assoluto del numero di firme espresse
+    const rows = dati.value?.per_anno
+    if (!rows || rows.length < 2) return null
+    const last = rows.at(-1).tot_scelte
+    const prev = rows.at(-2).tot_scelte
+    if (!prev) return null
+    return +((last - prev) / prev * 100).toFixed(2)
+  }
+  return variazionePerc.value
 })
 
 const breakdownAnno = computed(() => breakdownRaw.value?.anno_riferimento ?? ultimoAnno.value ?? '–')
@@ -316,6 +451,11 @@ function percGenerica(r) {
 }
 
 // ─── Formatters ──────────────────────────────────────────────────────────────
+
+function formatNum(v) {
+  if (v === null || v === undefined) return '–'
+  return Number(v).toLocaleString('it-IT')
+}
 
 function formatEur(v) {
   if (v === null || v === undefined) return '–'

@@ -78,7 +78,7 @@
       </div>
 
       <!-- KPI Cards -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         <div class="card bg-gradient-to-br from-brand-50 to-white border-brand-100">
           <p class="text-xs font-medium text-brand-500 uppercase tracking-wide mb-1">Totale ricevuto</p>
           <p class="text-2xl font-bold text-brand-700">{{ formatEur(totaleCumulato) }}</p>
@@ -93,6 +93,18 @@
           <p class="text-xs font-medium text-violet-500 uppercase tracking-wide mb-1">Media annua</p>
           <p class="text-2xl font-bold text-violet-700">{{ formatEur(mediaAnnua) }}</p>
           <p class="text-xs text-gray-400 mt-1">{{ ente.anni_presenti?.at(-1) }}–{{ ente.anni_presenti?.[0] }}</p>
+        </div>
+        <!-- Reddito medio stimato — basato su 5×1000 = 5‰ IRPEF, aliquota media 20% -->
+        <div v-if="redditoStimato" class="card bg-gradient-to-br from-amber-50 to-white border-amber-100">
+          <p class="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1">
+            Reddito medio stimato
+            <span
+              class="ml-1 cursor-help text-amber-400"
+              title="Stima: firma media / 0,005 (5×1000 = 5‰ IRPEF) / 0,20 (aliquota media). Indicativo, non considera detrazioni."
+            >ⓘ</span>
+          </p>
+          <p class="text-2xl font-bold text-amber-700">{{ formatEur(redditoStimato) }}</p>
+          <p class="text-xs text-gray-400 mt-1">IRPEF medio {{ formatEur(irpefMedio) }}</p>
         </div>
       </div>
 
@@ -154,6 +166,7 @@
             <thead>
               <tr>
                 <th>Anno</th>
+                <th v-if="categorieMultiple" class="hidden sm:table-cell">Categoria</th>
                 <th class="text-right">Scelte</th>
                 <th class="text-right hidden sm:table-cell">Importo espresso</th>
                 <th class="text-right hidden sm:table-cell">Importo generico</th>
@@ -161,16 +174,40 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="r in storicoOrdinato" :key="r.anno">
-                <td class="font-medium">
-                  {{ r.anno }}
-                  <span v-if="r.anno === annoUltimo" class="ml-1.5 text-xs text-brand-400 font-normal">ultimo</span>
-                </td>
-                <td class="text-right tabular-nums">{{ formatNum(r.n_scelte) }}</td>
-                <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(r.importo_espresso) }}</td>
-                <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(r.importo_generico) }}</td>
-                <td class="text-right font-semibold text-brand-700 tabular-nums">{{ formatEur(r.importo_totale) }}</td>
-              </tr>
+              <template v-for="r in storicoOrdinato" :key="r.anno">
+                <!-- Riga anno (totale) -->
+                <tr :class="r.cat_breakdown ? 'font-semibold bg-gray-50' : ''">
+                  <td class="font-medium">
+                    {{ r.anno }}
+                    <span v-if="r.anno === annoUltimo" class="ml-1.5 text-xs text-brand-400 font-normal">ultimo</span>
+                  </td>
+                  <td v-if="categorieMultiple" class="hidden sm:table-cell">
+                    <span v-if="r.categoria" class="badge capitalize text-xs" :class="catColor(r.categoria)">{{ r.categoria }}</span>
+                    <span v-else-if="r.cat_breakdown" class="text-xs text-gray-400">{{ r.cat_breakdown.length }} categorie</span>
+                    <span v-else class="text-gray-300">–</span>
+                  </td>
+                  <td class="text-right tabular-nums">{{ formatNum(r.n_scelte) }}</td>
+                  <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(r.importo_espresso) }}</td>
+                  <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(r.importo_generico) }}</td>
+                  <td class="text-right font-semibold text-brand-700 tabular-nums">{{ formatEur(r.importo_totale) }}</td>
+                </tr>
+                <!-- Sub-righe per categoria (solo anni con più categorie) -->
+                <tr
+                  v-if="r.cat_breakdown"
+                  v-for="cb in r.cat_breakdown"
+                  :key="r.anno + '-' + cb.categoria"
+                  class="text-xs text-gray-500 bg-white"
+                >
+                  <td class="pl-6 text-gray-400">↳</td>
+                  <td v-if="categorieMultiple" class="hidden sm:table-cell">
+                    <span class="badge capitalize" :class="catColor(cb.categoria)">{{ cb.categoria }}</span>
+                  </td>
+                  <td class="text-right tabular-nums">{{ formatNum(cb.n_scelte) }}</td>
+                  <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(cb.importo_espresso) }}</td>
+                  <td class="text-right tabular-nums hidden sm:table-cell text-gray-300">—</td>
+                  <td class="text-right tabular-nums text-gray-700">{{ formatEur(cb.importo_totale) }}</td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
@@ -282,6 +319,25 @@ const trend = computed(() => {
   if (!prev) return null
   return ((curr - prev) / prev) * 100
 })
+
+// ── Reddito medio stimato ─────────────────────────────────────────────────────
+// 5×1000 = 5‰ di IRPEF → firma media = irpef_medio × 0,005
+// Con aliquota media effettiva ~20%: reddito_imponibile ≈ irpef_medio / 0,20
+const irpefMedio = computed(() => {
+  const r = latestRow.value
+  if (!r?.importo_espresso || !r?.n_scelte) return null
+  return (r.importo_espresso / r.n_scelte) / 0.005
+})
+const redditoStimato = computed(() => {
+  if (!irpefMedio.value) return null
+  return irpefMedio.value / 0.20
+})
+
+// True se l'ente ha più di una categoria (in qualsiasi anno)
+const categorieMultiple = computed(() =>
+  (ente.value?.categorie?.length ?? 0) > 1 ||
+  storicoOrdinato.value.some(r => r.cat_breakdown)
+)
 
 onMounted(async () => {
   try {

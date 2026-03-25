@@ -104,7 +104,161 @@
       <span class="text-sm text-red-700">{{ error }}</span>
     </div>
 
-    <template v-if="result">
+    <!-- ── Vista YoY singolo ente ── -->
+    <template v-if="result && isSingleMode">
+      <!-- Scheda ente (printable/card) -->
+      <div id="entity-card" class="card mb-6 print:shadow-none print:border-0">
+        <div class="flex flex-wrap items-start justify-between gap-4 mb-4">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
+              :style="{ backgroundColor: COLORS[0] }">
+              {{ initials(entiTrovati[0]?.denominazione) }}
+            </div>
+            <div>
+              <h2 class="font-bold text-gray-900 text-lg leading-snug">{{ entiTrovati[0]?.denominazione }}</h2>
+              <p class="font-mono text-xs text-gray-400 mt-0.5">{{ entiTrovati[0]?.cf }}</p>
+              <div class="flex flex-wrap gap-1.5 mt-1.5">
+                <span class="badge bg-gray-100 text-gray-600 text-xs capitalize">
+                  {{ entiTrovati[0]?.categoria?.replace(/_/g,' ') ?? '–' }}
+                </span>
+                <span class="badge bg-gray-100 text-gray-600 text-xs">{{ entiTrovati[0]?.regione }}</span>
+                <span v-if="entiTrovati[0]?.runts" class="badge bg-green-100 text-green-700 text-xs">✓ RUNTS</span>
+              </div>
+            </div>
+          </div>
+          <div class="flex gap-2 print:hidden">
+            <button class="btn-secondary text-xs inline-flex items-center gap-1.5" @click="downloadCard">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+              </svg>
+              Scarica scheda
+            </button>
+            <button class="btn-secondary text-xs inline-flex items-center gap-1.5" @click="printCard">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+              </svg>
+              Stampa
+            </button>
+          </div>
+        </div>
+
+        <!-- KPI highlights -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+          <div class="bg-brand-50 rounded-lg p-3">
+            <p class="text-xs text-brand-500 font-medium uppercase tracking-wide mb-0.5">Anni presenti</p>
+            <p class="text-xl font-bold text-brand-700">{{ entiTrovati[0]?.anni_presenti }}</p>
+          </div>
+          <div class="bg-emerald-50 rounded-lg p-3">
+            <p class="text-xs text-emerald-500 font-medium uppercase tracking-wide mb-0.5">Totale cumulato</p>
+            <p class="text-xl font-bold text-emerald-700">{{ formatEur(entiTrovati[0]?.totale_cumulato) }}</p>
+          </div>
+          <div class="bg-violet-50 rounded-lg p-3">
+            <p class="text-xs text-violet-500 font-medium uppercase tracking-wide mb-0.5">Anno migliore</p>
+            <p class="text-xl font-bold text-violet-700">{{ entiTrovati[0]?.anno_migliore }}</p>
+          </div>
+          <div
+            class="rounded-lg p-3"
+            :class="lastYoY !== null && lastYoY >= 0 ? 'bg-green-50' : 'bg-red-50'"
+          >
+            <p class="text-xs font-medium uppercase tracking-wide mb-0.5"
+              :class="lastYoY !== null && lastYoY >= 0 ? 'text-green-500' : 'text-red-500'">
+              YoY ultimo anno
+            </p>
+            <p class="text-xl font-bold"
+              :class="lastYoY !== null && lastYoY >= 0 ? 'text-green-700' : 'text-red-700'">
+              {{ lastYoY !== null ? (lastYoY >= 0 ? '+' : '') + lastYoY.toFixed(1) + '%' : '–' }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Grafico YoY -->
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">Confronto anno su anno (YoY)</h3>
+        <div class="space-y-2 mb-2">
+          <div
+            v-for="(row, idx) in yoyRows"
+            :key="row.anno"
+            class="flex items-center gap-3"
+          >
+            <div class="w-12 text-right text-sm font-medium text-gray-500 flex-shrink-0">{{ row.anno }}</div>
+            <!-- Barra importo -->
+            <div class="flex-1 h-7 bg-gray-100 rounded-lg overflow-hidden">
+              <div
+                class="h-full rounded-lg transition-all duration-700 ease-out flex items-center justify-end pr-2"
+                :style="{
+                  width: animated ? ((row.importo / maxImporto) * 100).toFixed(1) + '%' : '0%',
+                  backgroundColor: COLORS[0],
+                  minWidth: row.importo > 0 ? '4px' : '0',
+                }"
+              >
+                <span v-if="(row.importo / maxImporto) > 0.3" class="text-xs font-semibold text-white whitespace-nowrap">
+                  {{ formatEur(row.importo) }}
+                </span>
+              </div>
+            </div>
+            <!-- Importo se barra corta -->
+            <div class="w-24 flex-shrink-0 text-right text-xs font-semibold tabular-nums text-gray-700">
+              <span v-if="(row.importo / maxImporto) <= 0.3">{{ formatEur(row.importo) }}</span>
+            </div>
+            <!-- Badge YoY -->
+            <div class="w-16 flex-shrink-0 text-right">
+              <span
+                v-if="idx > 0 && row.yoy !== null"
+                class="inline-block text-xs font-bold px-1.5 py-0.5 rounded-full"
+                :class="row.yoy >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+              >
+                {{ row.yoy >= 0 ? '▲' : '▼' }} {{ Math.abs(row.yoy).toFixed(1) }}%
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabella numerica singolo ente -->
+      <div class="card p-0 overflow-hidden mb-8">
+        <div class="px-6 py-4 border-b border-gray-100">
+          <h2>Storico completo</h2>
+        </div>
+        <div class="table-wrap rounded-none border-0">
+          <table>
+            <thead>
+              <tr>
+                <th>Anno</th>
+                <th class="text-right">Importo</th>
+                <th class="text-right">Scelte</th>
+                <th class="text-right">YoY importo</th>
+                <th class="text-right">YoY scelte</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, idx) in yoyRows" :key="row.anno">
+                <td class="font-medium text-gray-500 tabular-nums">{{ row.anno }}</td>
+                <td class="text-right tabular-nums font-semibold text-brand-700">{{ formatEur(row.importo) }}</td>
+                <td class="text-right tabular-nums text-gray-700">{{ formatNum(row.scelte) }}</td>
+                <td class="text-right tabular-nums">
+                  <span v-if="idx > 0 && row.yoy !== null"
+                    class="inline-block text-xs font-bold px-1.5 py-0.5 rounded-full"
+                    :class="row.yoy >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'">
+                    {{ row.yoy >= 0 ? '+' : '' }}{{ row.yoy.toFixed(1) }}%
+                  </span>
+                  <span v-else class="text-gray-300 text-xs">–</span>
+                </td>
+                <td class="text-right tabular-nums">
+                  <span v-if="idx > 0 && row.yoyScelte !== null"
+                    class="inline-block text-xs font-bold px-1.5 py-0.5 rounded-full"
+                    :class="row.yoyScelte >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'">
+                    {{ row.yoyScelte >= 0 ? '+' : '' }}{{ row.yoyScelte.toFixed(1) }}%
+                  </span>
+                  <span v-else class="text-gray-300 text-xs">–</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
+
+    <!-- ── Vista confronto multi-ente ── -->
+    <template v-if="result && !isSingleMode">
       <!-- Card riassuntive per ente -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-8">
         <div
@@ -282,13 +436,17 @@
           </table>
         </div>
       </div>
-    </template>
+    </template><!-- end multi-ente -->
+
   </div>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { fetchConfronta, fetchCercaCf } from '@/api/client'
+
+const router = useRouter()
 
 const COLORS = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6']
 
@@ -331,12 +489,113 @@ function addFromSearch(r) {
 
 const entiTrovati = computed(() => result.value?.enti.filter(e => e.trovato) ?? [])
 
+// True se caricato un solo ente → vista YoY
+const isSingleMode = computed(() => entiTrovati.value.length === 1)
+
 const anniConDati = computed(() => {
   if (!result.value) return []
   const anni = result.value.anni_disponibili
-  // Tieni solo anni in cui almeno un ente ha dati
   return anni.filter(a => entiTrovati.value.some(e => e.storico[a]))
 })
+
+// Righe YoY per singolo ente (ordinato crescente per anno)
+const yoyRows = computed(() => {
+  if (!isSingleMode.value) return []
+  const ente = entiTrovati.value[0]
+  const anni = anniConDati.value // già ordinato crescente
+  return anni.map((anno, idx) => {
+    const cur  = ente.storico[anno]
+    const prev = idx > 0 ? ente.storico[anni[idx - 1]] : null
+    const importo = cur?.importo_totale ?? 0
+    const scelte  = cur?.n_scelte ?? 0
+    const yoy = prev && prev.importo_totale
+      ? +((importo - prev.importo_totale) / prev.importo_totale * 100).toFixed(2)
+      : null
+    const yoyScelte = prev && prev.n_scelte
+      ? +((scelte - prev.n_scelte) / prev.n_scelte * 100).toFixed(2)
+      : null
+    return { anno, importo, scelte, yoy, yoyScelte }
+  })
+})
+
+const maxImporto = computed(() => {
+  if (!yoyRows.value.length) return 1
+  return Math.max(...yoyRows.value.map(r => r.importo), 1)
+})
+
+const lastYoY = computed(() => {
+  if (!yoyRows.value.length) return null
+  return yoyRows.value.at(-1)?.yoy ?? null
+})
+
+function initials(name) {
+  if (!name) return '?'
+  return name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase()
+}
+
+function printCard() {
+  window.print()
+}
+
+function downloadCard() {
+  // Genera un mini HTML stampabile con i dati dell'ente e lo scarica
+  const ente = entiTrovati.value[0]
+  if (!ente) return
+
+  const rows = yoyRows.value.map(r => `
+    <tr>
+      <td>${r.anno}</td>
+      <td>${formatEur(r.importo)}</td>
+      <td>${formatNum(r.scelte)}</td>
+      <td>${r.yoy !== null ? (r.yoy >= 0 ? '+' : '') + r.yoy.toFixed(1) + '%' : '–'}</td>
+    </tr>`).join('')
+
+  const html = `<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Scheda 5×1000 — ${ente.denominazione}</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; color: #111; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: #666; font-size: 13px; margin-bottom: 24px; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .kpi { background: #f3f4f6; border-radius: 8px; padding: 12px; }
+  .kpi .label { font-size: 10px; text-transform: uppercase; color: #666; margin-bottom: 4px; }
+  .kpi .value { font-size: 18px; font-weight: bold; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #f3f4f6; padding: 8px 12px; text-align: left; border-bottom: 2px solid #e5e7eb; }
+  td { padding: 7px 12px; border-bottom: 1px solid #f3f4f6; }
+  .footer { margin-top: 24px; font-size: 11px; color: #aaa; }
+</style>
+</head>
+<body>
+<h1>${ente.denominazione}</h1>
+<p class="sub">${ente.cf} &bull; ${ente.categoria?.replace(/_/g,' ') ?? ''} &bull; ${ente.regione ?? ''}</p>
+<div class="kpis">
+  <div class="kpi"><div class="label">Anni presenti</div><div class="value">${ente.anni_presenti}</div></div>
+  <div class="kpi"><div class="label">Totale cumulato</div><div class="value">${formatEur(ente.totale_cumulato)}</div></div>
+  <div class="kpi"><div class="label">Anno migliore</div><div class="value">${ente.anno_migliore}</div></div>
+  <div class="kpi"><div class="label">YoY ultimo anno</div><div class="value">${lastYoY.value !== null ? (lastYoY.value >= 0 ? '+' : '') + lastYoY.value.toFixed(1) + '%' : '–'}</div></div>
+</div>
+<table>
+  <thead><tr><th>Anno</th><th>Importo</th><th>Scelte</th><th>YoY</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<p class="footer">Fonte: Agenzia delle Entrate — dati 5×1000 &bull; Generato da 5x1000.almagioni.com il ${new Date().toLocaleDateString('it-IT')}</p>
+</body>
+</html>`
+
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = `scheda_5x1000_${ente.cf}.html`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 
 const maxImportoPerAnno = computed(() => {
   const m = {}
@@ -379,6 +638,12 @@ function reset() {
 async function compare() {
   const cfs = cfList.value.map(s => s.trim().toUpperCase()).filter(Boolean)
   if (!cfs.length) return
+
+  // Un solo CF → scheda ente diretta
+  if (cfs.length === 1) {
+    router.push({ name: 'ente', params: { cf: cfs[0] } })
+    return
+  }
 
   loading.value  = true
   error.value    = ''

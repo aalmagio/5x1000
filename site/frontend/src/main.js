@@ -15,6 +15,7 @@ const ApiDocs            = () => import('./pages/ApiDocs.vue')
 const CategoriaDettaglio = () => import('./pages/CategoriaDettaglio.vue')
 const Inoptato           = () => import('./pages/Inoptato.vue')
 const Forecast           = () => import('./pages/Forecast.vue')
+const Classifica         = () => import('./pages/Classifica.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -29,6 +30,7 @@ const router = createRouter({
     { path: '/download',                      component: Download,         name: 'download' },
     { path: '/about',                         component: About,            name: 'about' },
     { path: '/api',                           component: ApiDocs,          name: 'api' },
+    { path: '/classifica',                    component: Classifica,       name: 'classifica' },
     { path: '/ente/:cf',                      component: EnteDetail,       name: 'ente' },
   ],
   scrollBehavior: () => ({ top: 0 }),

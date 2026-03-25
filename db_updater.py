@@ -13,7 +13,7 @@ Configurazione tramite variabili d'ambiente (o file .env):
 Uso dalla pipeline:
     from db_updater import aggiorna_db_sito
     aggiorna_db_sito(
-        anni_processati=[2024, 2025],
+        anni_processati=[2023, 2024],
         steps_eseguiti=["download", "etl", "report"],
         csv_path=Path("Dati/enti_5x1000_norm.csv"),
         dati_dir=Path("Dati"),
@@ -127,7 +127,7 @@ def aggiorna_db_sito(
 
     Parametri
     ---------
-    anni_processati : lista anni elaborati, es. [2024, 2025]
+    anni_processati : lista anni elaborati, es. [2023, 2024]
     steps_eseguiti  : lista step eseguiti, es. ["download","etl","report"]
     csv_path        : Path al CSV normalizzato principale
     dati_dir        : Path alla cartella Dati/
@@ -224,11 +224,193 @@ def aggiorna_db_sito(
                     except Exception as exc_r:
                         logger.warning(f"db_updater: aggiornamento runts saltato – {exc_r}")
 
+                    # 4c. Ricalcola ripartizioni aggregate (per categoria/regione)
+                    try:
+                        _aggiorna_ripartizioni(cur, anni_processati)
+                        logger.info("db_updater: tabella ripartizioni aggiornata")
+                    except Exception as exc_rip:
+                        logger.warning(f"db_updater: aggiornamento ripartizioni saltato – {exc_rip}")
+
+            # 4d. Popola categoria_ammissioni dai file per-categoria
+            if dati_dir and dati_dir.exists():
+                try:
+                    n_cat = _aggiorna_categoria_ammissioni(cur, dati_dir)
+                    logger.info(f"db_updater: categoria_ammissioni: {n_cat} righe aggiornate")
+                except Exception as exc_cat:
+                    logger.warning(f"db_updater: categoria_ammissioni saltato – {exc_cat}")
+
         logger.info(f"db_updater: completato in {time.time() - t0:.1f}s")
         return True
 
     except Exception as exc:
         logger.error(f"db_updater: errore durante l'aggiornamento – {exc}", exc_info=True)
+        return False
+
+
+def aggiorna_anno_ciclo(
+    anno: int,
+    csv_path: Path | str,
+    dati_dir: Path | str,
+    db_config: dict | None = None,
+) -> bool:
+    """
+    Aggiorna il DB per un singolo anno in modalità ciclo (sito sempre attivo).
+
+    Differenze rispetto a aggiorna_db_sito():
+    - Usa UPSERT (INSERT … ON DUPLICATE KEY UPDATE) invece di DELETE+INSERT
+      → nessuna finestra di "buco" nella disponibilità dei dati.
+    - Aggiorna solo la tabella `enti` per l'anno indicato.
+    - Aggiorna `categoria_ammissioni` solo per i file dell'anno indicato.
+    - NON registra pipeline_run, NON aggiorna ripartizioni/runts
+      (quelle vengono ricalcolate alla fine del ciclo completo).
+
+    Ritorna True se completato senza errori.
+    """
+    try:
+        import pymysql
+        import pandas as pd
+    except ImportError as e:
+        logger.warning(f"db_updater: dipendenza mancante ({e}) – aggiorna_anno_ciclo saltato")
+        return False
+
+    cfg      = _db_config(db_config)
+    if not cfg["user"] or not cfg["database"]:
+        logger.warning("db_updater: SITE_DB_* non configurati – saltato")
+        return False
+
+    csv_path  = Path(csv_path) if csv_path else None
+    dati_dir  = Path(dati_dir) if dati_dir else None
+    t0        = time.time()
+
+    try:
+        conn = pymysql.connect(**cfg)
+        with conn:
+            cur = conn.cursor()
+
+            # Enti: UPSERT per l'anno
+            if csv_path and csv_path.exists():
+                _aggiorna_enti(cur, csv_path, pd, [anno], upsert=True)
+                logger.info(f"db_updater: enti anno {anno} aggiornati (upsert)")
+
+            # categoria_ammissioni: solo file di questo anno
+            if dati_dir and dati_dir.exists():
+                totale_cat = 0
+                for cat_dir in sorted(dati_dir.iterdir()):
+                    if not cat_dir.is_dir():
+                        continue
+                    cat_slug = _CAT_SLUG.get(cat_dir.name.upper(), cat_dir.name.lower())
+                    for stato in ("ammesso", "escluso"):
+                        pattern = f"{anno}_*_{'ammessi' if stato == 'ammesso' else 'esclusi'}.xlsx"
+                        for xlsx in sorted(cat_dir.glob(pattern)):
+                            righe = _leggi_xlsx_ammissioni(xlsx)
+                            if not righe:
+                                continue
+                            batch = [(anno, cat_slug, cf, denom, stato) for cf, denom in righe]
+                            cur.executemany(
+                                """
+                                INSERT INTO categoria_ammissioni
+                                  (anno, categoria, cod_fiscale, denominazione, stato)
+                                VALUES (%s, %s, %s, %s, %s)
+                                ON DUPLICATE KEY UPDATE
+                                  denominazione = COALESCE(VALUES(denominazione), denominazione),
+                                  stato         = VALUES(stato),
+                                  aggiornato_il = NOW()
+                                """,
+                                batch,
+                            )
+                            totale_cat += len(batch)
+                if totale_cat:
+                    logger.info(f"db_updater: categoria_ammissioni anno {anno}: {totale_cat} righe")
+
+        logger.info(f"db_updater: aggiorna_anno_ciclo({anno}) completato in {time.time()-t0:.1f}s")
+        return True
+
+    except Exception as exc:
+        logger.error(f"db_updater: aggiorna_anno_ciclo({anno}) errore – {exc}", exc_info=True)
+        return False
+
+
+def finalizza_ciclo(
+    anni_processati: list[int],
+    csv_path: Path | str,
+    dati_dir: Path | str,
+    t_inizio: float | None = None,
+    db_config: dict | None = None,
+) -> bool:
+    """
+    Operazioni finali da eseguire una sola volta al termine del ciclo completo:
+    - Ricalcola ripartizioni aggregate
+    - Aggiorna tabella runts
+    - Registra pipeline_run con status='ok'
+
+    Ritorna True se completato senza errori.
+    """
+    try:
+        import pymysql
+        import pandas as pd
+    except ImportError as e:
+        logger.warning(f"db_updater: dipendenza mancante ({e}) – finalizza_ciclo saltato")
+        return False
+
+    cfg = _db_config(db_config)
+    if not cfg["user"] or not cfg["database"]:
+        return False
+
+    csv_path = Path(csv_path) if csv_path else None
+    dati_dir = Path(dati_dir) if dati_dir else None
+    t0       = time.time()
+
+    try:
+        conn = pymysql.connect(**cfg)
+        with conn:
+            cur = conn.cursor()
+
+            # Runts
+            if csv_path and csv_path.exists():
+                try:
+                    _aggiorna_runts(cur, csv_path, pd)
+                    logger.info("db_updater: finalizza_ciclo – runts aggiornati")
+                except Exception as e:
+                    logger.warning(f"db_updater: finalizza_ciclo – runts saltato: {e}")
+
+            # Ripartizioni
+            try:
+                _aggiorna_ripartizioni(cur, anni_processati)
+                logger.info("db_updater: finalizza_ciclo – ripartizioni aggiornate")
+            except Exception as e:
+                logger.warning(f"db_updater: finalizza_ciclo – ripartizioni saltato: {e}")
+
+            # File catalogo
+            if dati_dir and dati_dir.exists():
+                try:
+                    _aggiorna_files(cur, dati_dir)
+                except Exception as e:
+                    logger.warning(f"db_updater: finalizza_ciclo – files saltato: {e}")
+
+            # pipeline_run
+            righe = 0
+            if csv_path and csv_path.exists():
+                with open(csv_path, "r", encoding="utf-8", errors="replace") as fh:
+                    righe = sum(1 for _ in fh) - 1
+            durata = int(time.time() - t_inizio) if t_inizio else None
+            cur.execute(
+                """INSERT INTO pipeline_runs
+                   (run_at, anni_processati, steps_eseguiti, righe_totali, status, durata_secondi)
+                   VALUES (%s, %s, %s, %s, 'ok', %s)""",
+                (
+                    datetime.now(),
+                    json.dumps([int(a) for a in anni_processati]),
+                    json.dumps(["ciclo"]),
+                    righe,
+                    durata,
+                ),
+            )
+
+        logger.info(f"db_updater: finalizza_ciclo completato in {time.time()-t0:.1f}s")
+        return True
+
+    except Exception as exc:
+        logger.error(f"db_updater: finalizza_ciclo errore – {exc}", exc_info=True)
         return False
 
 
@@ -311,6 +493,144 @@ def _aggiorna_files(cur, dati_dir: Path) -> None:
             except (IndexError, ValueError):
                 continue
             _upsert_file(cur, anno, "categoria", cat_slug, "xlsx", f)
+
+
+# ---------------------------------------------------------------------------
+# Aggiornamento tabella categoria_ammissioni
+# Legge i file *_ammessi.xlsx e *_esclusi.xlsx da ogni sottocartella di
+# dati_dir e popola la tabella con (anno, categoria, cod_fiscale, stato).
+# ---------------------------------------------------------------------------
+
+# Alias colonna codice fiscale (case-insensitive)
+_CF_ALIASES    = {"codice fiscale", "cf", "codice_fiscale", "cod. fiscale", "c.f."}
+# Alias colonna denominazione
+_DENOM_ALIASES = {"denominazione", "beneficiario", "ente", "nome"}
+
+
+def _detect_cf_denom_cols(header: list[str]) -> tuple[int | None, int | None]:
+    """
+    Ritorna (indice_cf, indice_denom) nella lista header.
+    Confronto case-insensitive e strip spazi.
+    """
+    cf_idx    = None
+    denom_idx = None
+    for i, col in enumerate(header):
+        c = col.strip().lower()
+        if cf_idx    is None and c in _CF_ALIASES:
+            cf_idx    = i
+        if denom_idx is None and c in _DENOM_ALIASES:
+            denom_idx = i
+    # Fallback parziale: cerca "fiscal" o "codice" per cf
+    if cf_idx is None:
+        for i, col in enumerate(header):
+            c = col.strip().lower()
+            if "fiscal" in c or ("codice" in c and cf_idx is None):
+                cf_idx = i
+                break
+    return cf_idx, denom_idx
+
+
+def _leggi_xlsx_ammissioni(path: Path) -> list[tuple[str, str | None]]:
+    """
+    Legge un file xlsx e restituisce lista di (cod_fiscale, denominazione).
+    Richiede openpyxl (già dipendenza della pipeline).
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        logger.warning("db_updater: openpyxl non disponibile – categoria_ammissioni saltata")
+        return []
+
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Workbook contains no default style", UserWarning)
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+
+    rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+    if not rows:
+        return []
+
+    # Prima riga = header
+    raw_header = [str(c) if c is not None else "" for c in rows[0]]
+    cf_idx, denom_idx = _detect_cf_denom_cols(raw_header)
+
+    if cf_idx is None:
+        logger.warning(f"db_updater: colonna CF non trovata in {path.name} (header={raw_header[:5]})")
+        return []
+
+    result = []
+    for row in rows[1:]:
+        if not row or cf_idx >= len(row):
+            continue
+        cf_raw = row[cf_idx]
+        if cf_raw is None:
+            continue
+        cf = str(cf_raw).strip().upper()
+        if not cf:
+            continue
+        denom = None
+        if denom_idx is not None and denom_idx < len(row) and row[denom_idx] is not None:
+            denom = str(row[denom_idx]).strip() or None
+        result.append((cf, denom))
+    return result
+
+
+def _aggiorna_categoria_ammissioni(cur, dati_dir: Path) -> int:
+    """
+    Popola la tabella `categoria_ammissioni` dai file *_ammessi.xlsx e
+    *_esclusi.xlsx in ogni sottocartella di dati_dir.
+
+    Strategia: UPSERT — aggiorna denominazione e stato se la coppia
+    (anno, categoria, cod_fiscale) esiste già.
+
+    Ritorna il numero totale di righe inserite/aggiornate.
+    """
+    totale = 0
+    for cat_dir in sorted(dati_dir.iterdir()):
+        if not cat_dir.is_dir():
+            continue
+        cat_slug = _CAT_SLUG.get(cat_dir.name.upper(), cat_dir.name.lower())
+
+        for stato in ("ammesso", "escluso"):
+            pattern = f"*_{'ammessi' if stato == 'ammesso' else 'esclusi'}.xlsx"
+            for xlsx in sorted(cat_dir.glob(pattern)):
+                # Estrai anno dal nome file (es. "2024_ASD_ammessi.xlsx")
+                try:
+                    anno = int(xlsx.stem.split("_")[0])
+                except (IndexError, ValueError):
+                    logger.warning(f"db_updater: impossibile estrarre anno da {xlsx.name}")
+                    continue
+
+                righe = _leggi_xlsx_ammissioni(xlsx)
+                if not righe:
+                    continue
+
+                batch = [
+                    (anno, cat_slug, cf, denom, stato)
+                    for cf, denom in righe
+                ]
+
+                cur.executemany(
+                    """
+                    INSERT INTO categoria_ammissioni
+                      (anno, categoria, cod_fiscale, denominazione, stato)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                      denominazione = COALESCE(VALUES(denominazione), denominazione),
+                      stato         = VALUES(stato),
+                      aggiornato_il = NOW()
+                    """,
+                    batch,
+                )
+                totale += len(batch)
+                logger.info(
+                    f"db_updater: categoria_ammissioni – {cat_slug}/{anno} "
+                    f"{stato}: {len(batch)} righe"
+                )
+
+    return totale
 
 
 # ---------------------------------------------------------------------------
@@ -445,28 +765,64 @@ _COL_MAP = {
 
 _CHUNK_SIZE = 5_000  # righe per batch INSERT
 
+# Colonne booleane (TINYINT 0/1) che pandas scrive nel CSV come "True"/"False".
+# Devono essere convertite in 1/0 prima dell'INSERT in MySQL, altrimenti
+# la stringa "True" viene interpretata come 0 da MySQL → tutti i flag a 0.
+_BOOL_COLS = frozenset({
+    "cat_volontariato", "cat_asd", "cat_ets_onlus",
+    "cat_ricerca_sci",  "cat_ricerca_san",
+    "cat_comuni",       "cat_beni_cult", "cat_aree_prot",
+    "runts_5x1000",
+})
 
-def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int]) -> None:
+
+def _bool_to_int(v) -> int:
+    """Converte 'True'/'False'/1/0/NaN → 1/0."""
+    if v is None:
+        return 0
+    s = str(v).strip().lower()
+    return 1 if s in ("true", "1", "yes", "sì", "si") else 0
+
+
+def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int], upsert: bool = False) -> None:
     """
-    Cancella e reinserisce le righe della tabella `enti` per gli anni indicati.
-    Se `anni` è vuota, reimporta TUTTI gli anni presenti nel CSV.
-    Usa bulk INSERT a chunks per limitare il consumo di memoria.
+    Aggiorna la tabella `enti` per gli anni indicati.
+
+    upsert=False (default, modalità reset):
+      DELETE righe degli anni → INSERT. Garantisce coerenza ma crea una
+      breve finestra in cui le righe dell'anno sono assenti.
+
+    upsert=True (modalità ciclo, sito sempre attivo):
+      INSERT ... ON DUPLICATE KEY UPDATE — nessuna cancellazione, ogni riga
+      viene aggiornata sul posto. Richiede UNIQUE KEY (anno, cod_fiscale).
+
+    Se `anni` è vuota reimporta TUTTI gli anni presenti nel CSV.
     """
     anni_int = [int(a) for a in anni]
-    tutti    = len(anni_int) == 0          # lista vuota → tutti gli anni
+    tutti    = len(anni_int) == 0
     cols_db  = list(_COL_MAP.values())
     ph_row   = "(" + ",".join(["%s"] * len(cols_db)) + ")"
-    insert_sql = (
-        f"INSERT INTO enti ({','.join(cols_db)}) VALUES {ph_row}"
-    )
 
-    if tutti:
-        cur.execute("DELETE FROM enti")
-        logger.info("db_updater: cancellate TUTTE le righe da tabella enti (reimport completo)")
+    if upsert:
+        update_cols = [c for c in cols_db if c not in ("anno", "cod_fiscale")]
+        update_clause = ", ".join(f"{c} = VALUES({c})" for c in update_cols)
+        insert_sql = (
+            f"INSERT INTO enti ({','.join(cols_db)}) VALUES {ph_row} "
+            f"ON DUPLICATE KEY UPDATE {update_clause}"
+        )
+        logger.info(
+            f"db_updater: UPSERT enti anni "
+            f"{'tutti' if tutti else anni_int} (sito attivo, nessun DELETE)"
+        )
     else:
-        placeholders = ",".join(["%s"] * len(anni_int))
-        cur.execute(f"DELETE FROM enti WHERE anno IN ({placeholders})", anni_int)
-        logger.info(f"db_updater: cancellate righe anni {anni_int} da tabella enti")
+        insert_sql = f"INSERT INTO enti ({','.join(cols_db)}) VALUES {ph_row}"
+        if tutti:
+            cur.execute("DELETE FROM enti")
+            logger.info("db_updater: cancellate TUTTE le righe da tabella enti (reimport completo)")
+        else:
+            placeholders = ",".join(["%s"] * len(anni_int))
+            cur.execute(f"DELETE FROM enti WHERE anno IN ({placeholders})", anni_int)
+            logger.info(f"db_updater: cancellate righe anni {anni_int} da tabella enti")
 
     anni_set  = set(anni_int)
     total_ins = 0
@@ -496,9 +852,14 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int]) -> None:
             if col not in chunk.columns:
                 chunk[col] = None
 
+        # Converti colonne booleane da "True"/"False" stringa a 1/0 intero.
+        # Pandas scrive i bool nel CSV come stringhe; MySQL TINYINT non
+        # riconosce "True" come 1 e lo converte silenziosamente a 0.
+        for col in _BOOL_COLS:
+            if col in chunk.columns:
+                chunk[col] = chunk[col].apply(_bool_to_int)
+
         # Sostituisci NaN con None (→ NULL in MySQL).
-        # chunk.where() non basta: pandas a volte lascia float('nan') residui.
-        # Usiamo un controllo esplicito in fase di building delle tuple.
         def _to_none(v):
             if v is None:
                 return None
@@ -511,6 +872,111 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int]) -> None:
         total_ins += len(rows)
 
     logger.info(f"db_updater: inserite {total_ins:,} righe in tabella enti")
+
+
+# ---------------------------------------------------------------------------
+# Aggiornamento tabella ripartizioni
+# ---------------------------------------------------------------------------
+
+_DDL_RIPARTIZIONI = """
+CREATE TABLE IF NOT EXISTS `ripartizioni` (
+  `id`               INT           NOT NULL AUTO_INCREMENT,
+  `anno`             SMALLINT      NOT NULL,
+  `categoria`        VARCHAR(50)   NOT NULL,
+  `regione`          VARCHAR(100)           DEFAULT NULL
+                     COMMENT 'NULL = totale nazionale',
+  `n_enti`           INT           NOT NULL DEFAULT 0
+                     COMMENT 'nr. enti beneficiari',
+  `n_contribuenti`   INT           NOT NULL DEFAULT 0
+                     COMMENT 'firme (scelte espresse)',
+  `importo_espresso` DECIMAL(15,2)          DEFAULT NULL,
+  `importo_generico` DECIMAL(15,2)          DEFAULT NULL,
+  `importo_totale`   DECIMAL(15,2)          DEFAULT NULL,
+  `aggiornato_il`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
+                     ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_rip` (`anno`, `categoria`, `regione`),
+  KEY `idx_rip_anno` (`anno`),
+  KEY `idx_rip_cat`  (`anno`, `categoria`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""
+
+_UPSERT_RIP = """
+INSERT INTO ripartizioni
+  (anno, categoria, regione, n_enti, n_contribuenti,
+   importo_espresso, importo_generico, importo_totale)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+ON DUPLICATE KEY UPDATE
+  n_enti           = VALUES(n_enti),
+  n_contribuenti   = VALUES(n_contribuenti),
+  importo_espresso = VALUES(importo_espresso),
+  importo_generico = VALUES(importo_generico),
+  importo_totale   = VALUES(importo_totale),
+  aggiornato_il    = NOW()
+"""
+
+
+def _aggiorna_ripartizioni(cur, anni: list[int]) -> None:
+    """
+    Ricalcola e aggiorna la tabella ripartizioni a partire dalla tabella enti.
+    Produce due livelli di aggregazione per ogni (anno, categoria):
+      - per regione  (granularità geografica)
+      - nazionale    (regione = NULL)
+    Va chiamata DOPO _aggiorna_enti().
+    """
+    cur.execute(_DDL_RIPARTIZIONI)
+
+    anni_int = [int(a) for a in anni]
+    tutti    = len(anni_int) == 0
+
+    if tutti:
+        cur.execute("DELETE FROM ripartizioni")
+        anni_filter_sql = ""
+        params_base: list = []
+    else:
+        ph = ",".join(["%s"] * len(anni_int))
+        cur.execute(f"DELETE FROM ripartizioni WHERE anno IN ({ph})", anni_int)
+        anni_filter_sql = f"WHERE anno IN ({ph}) AND categoria_principale IS NOT NULL"
+        params_base = anni_int[:]
+
+    # ── Per regione ──────────────────────────────────────────────────────────
+    sql_reg = f"""
+        SELECT anno, categoria_principale AS categoria, regione,
+               COUNT(*)              AS n_enti,
+               COALESCE(SUM(n_scelte), 0)          AS n_contribuenti,
+               SUM(importo_espresso)               AS importo_espresso,
+               SUM(importo_generico)               AS importo_generico,
+               SUM(importo_totale)                 AS importo_totale
+        FROM enti
+        {anni_filter_sql if tutti else 'WHERE anno IN (' + ','.join(['%s']*len(anni_int)) + ') AND categoria_principale IS NOT NULL'}
+        GROUP BY anno, categoria_principale, regione
+    """
+    cur.execute(sql_reg, params_base)
+    rows_reg = cur.fetchall()
+    if rows_reg:
+        cur.executemany(_UPSERT_RIP, rows_reg)
+
+    # ── Totali nazionali (regione = NULL) ─────────────────────────────────────
+    sql_naz = f"""
+        SELECT anno, categoria_principale AS categoria, NULL AS regione,
+               COUNT(*)              AS n_enti,
+               COALESCE(SUM(n_scelte), 0)          AS n_contribuenti,
+               SUM(importo_espresso)               AS importo_espresso,
+               SUM(importo_generico)               AS importo_generico,
+               SUM(importo_totale)                 AS importo_totale
+        FROM enti
+        {anni_filter_sql if tutti else 'WHERE anno IN (' + ','.join(['%s']*len(anni_int)) + ') AND categoria_principale IS NOT NULL'}
+        GROUP BY anno, categoria_principale
+    """
+    cur.execute(sql_naz, params_base)
+    rows_naz = cur.fetchall()
+    if rows_naz:
+        cur.executemany(_UPSERT_RIP, rows_naz)
+
+    logger.info(
+        f"db_updater: ripartizioni aggiornate — "
+        f"{len(rows_reg):,} righe per regione, {len(rows_naz):,} nazionali"
+    )
 
 
 # ---------------------------------------------------------------------------

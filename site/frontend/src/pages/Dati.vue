@@ -24,7 +24,10 @@
         </div>
         <div>
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Regione</label>
-          <input v-model="filters.regione" class="input-field" placeholder="es. LOMBARDIA" @keyup.enter="search()" />
+          <select v-model="filters.regione" class="input-field">
+            <option value="">Tutte le regioni</option>
+            <option v-for="r in regioni" :key="r" :value="r">{{ r }}</option>
+          </select>
         </div>
         <div>
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Nome / Codice fiscale</label>
@@ -209,10 +212,11 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { fetchEnti, fetchAnni, fetchCategorie } from '@/api/client'
+import { fetchEnti, fetchAnni, fetchCategorie, fetchRegioni } from '@/api/client'
 
 const anni      = ref([])
 const categorie = ref([])
+const regioni   = ref([])
 const result    = ref(null)
 const loading   = ref(false)
 const error     = ref(false)
@@ -297,15 +301,17 @@ async function search(p = 1) {
 
 function reset() {
   filters.value = { anno: null, categoria: null, regione: '', q: '', runts_filter: 'all' }
+  province.value = []
   search()
 }
 
 function goPage(p) { search(p) }
 
 onMounted(async () => {
-  const [aRes, cRes] = await Promise.all([fetchAnni(), fetchCategorie()])
+  const [aRes, cRes, rRes] = await Promise.all([fetchAnni(), fetchCategorie(), fetchRegioni()])
   anni.value      = aRes.data
   categorie.value = cRes.data
+  regioni.value   = rRes.data
   await search()
 })
 </script>

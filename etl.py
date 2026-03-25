@@ -141,6 +141,95 @@ def setup_logging(root: Path) -> None:
 
 
 # ============================================================================
+# UTILITY: NORMALIZZAZIONE NOMI REGIONE
+# ============================================================================
+
+# Mappa raw (maiuscolo) → display (20 regioni ufficiali italiane).
+# Speculare alla funzione normalize_regione() in api.php.
+# Forme senza trattino (Emilia Romagna, Friuli Venezia Giulia) per coerenza
+# con il dataset AdE che non usa mai il trattino in questi nomi.
+_REGIONE_NORM_MAP: dict[str, str] = {
+    "ABRUZZO":                             "Abruzzo",
+    "BASILICATA":                          "Basilicata",
+    "CALABRIA":                            "Calabria",
+    "CAMPANIA":                            "Campania",
+    # Emilia Romagna — senza trattino (forma usata dall'AdE)
+    "EMILIA-ROMAGNA":                      "Emilia Romagna",
+    "EMILIA ROMAGNA":                      "Emilia Romagna",
+    "EMILIAROMAGNA":                       "Emilia Romagna",   # PDF senza spazi
+    # Friuli — senza trattino
+    "FRIULI-VENEZIA GIULIA":               "Friuli Venezia Giulia",
+    "FRIULI VENEZIA GIULIA":               "Friuli Venezia Giulia",
+    "FRIULIVENEZIAGIULIA":                 "Friuli Venezia Giulia",   # PDF senza spazi
+    "FRIULI V.G.":                         "Friuli Venezia Giulia",
+    "FRIULI V.G":                          "Friuli Venezia Giulia",
+    "LAZIO":                               "Lazio",
+    "LIGURIA":                             "Liguria",
+    "LOMBARDIA":                           "Lombardia",
+    "MARCHE":                              "Marche",
+    "MOLISE":                              "Molise",
+    "PIEMONTE":                            "Piemonte",
+    "PUGLIA":                              "Puglia",
+    "SARDEGNA":                            "Sardegna",
+    "SICILIA":                             "Sicilia",
+    "TOSCANA":                             "Toscana",
+    "UMBRIA":                              "Umbria",
+    "VALLE D'AOSTA":                       "Valle d'Aosta",
+    "VALLE D'AOSTA/VALLEE D'AOSTE":        "Valle d'Aosta",
+    "VALLED'AOSTA":                        "Valle d'Aosta",   # PDF "Valled ' Aosta" compact
+    "VENETO":                              "Veneto",
+    # Province autonome / TAA → raggruppate nella regione ufficiale
+    "TRENTO":                              "Trentino-Alto Adige",
+    "BOLZANO":                             "Trentino-Alto Adige",
+    "TRENTINO-ALTO ADIGE":                 "Trentino-Alto Adige",
+    "TRENTINO ALTO ADIGE":                 "Trentino-Alto Adige",
+    "TRENTINO ALTO ADIGE (BOLZANO)":       "Trentino-Alto Adige",
+    "TRENTINO ALTO ADIGE (TRENTO)":        "Trentino-Alto Adige",
+    "TRENTINO-ALTO ADIGE (BOLZANO)":       "Trentino-Alto Adige",
+    "TRENTINO-ALTO ADIGE (TRENTO)":        "Trentino-Alto Adige",
+    "TAA BOLZANO":                         "Trentino-Alto Adige",
+    "TAA TRENTO":                          "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA DI TRENTO":        "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA DI BOLZANO":       "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA TRENTO":           "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA BOLZANO":          "Trentino-Alto Adige",
+    "ALTO ADIGE":                          "Trentino-Alto Adige",
+    "P.A. TRENTO":                         "Trentino-Alto Adige",
+    "P.A. BOLZANO":                        "Trentino-Alto Adige",
+}
+
+
+def normalize_regione(val) -> str:
+    """Normalizza il nome regione al formato display standard.
+
+    Strategie applicate in ordine:
+    1. Rimuove trattini/dash iniziali non-standard (artefatti PDF: "‐ Calabria").
+    2. Lookup esatto nella mappa (chiave uppercase).
+    3. Lookup compatto: rimuove tutti gli spazi interni e riprova.
+       Cattura varianti split da PDF ("Emiliaromag Na", "Friuliveneziag Iulia", …).
+    4. Fallback: title-case del valore ripulito.
+    """
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    s = str(val).strip()
+    # Rimuovi trattini/dash iniziali (standard U+002D e non-standard U+2010‥U+2015)
+    s = re.sub(r'^[\-\u2010-\u2015\s]+', '', s).strip()
+    key = s.upper()
+    if key in ("", "NAN", "NONE"):
+        return ""
+    # 1. Lookup esatto
+    result = _REGIONE_NORM_MAP.get(key)
+    if result:
+        return result
+    # 2. Lookup compatto (rimuove spazi: cattura split da estrazione PDF)
+    result = _REGIONE_NORM_MAP.get(key.replace(" ", ""))
+    if result:
+        return result
+    # 3. Fallback title-case
+    return s.title()
+
+
+# ============================================================================
 # UTILITY: NORMALIZZAZIONE NOMI COLONNA
 # ============================================================================
 
@@ -398,7 +487,7 @@ def normalize_year(df: pd.DataFrame, anno: int) -> pd.DataFrame:
         df[denom_col].astype(str).str.strip() if denom_col else ""
     )
     out["REGIONE"] = (
-        df[reg_col].astype(str).str.strip().str.upper() if reg_col else ""
+        df[reg_col].astype(str).str.strip().apply(normalize_regione) if reg_col else ""
     )
     out["PROVINCIA"] = (
         df[prov_col].astype(str).str.strip().str.upper()
@@ -609,7 +698,10 @@ def load_runts(runts_dir: Path) -> pd.DataFrame | None:
     runts_file = files[-1]
     logging.info(f"[RUNTS] Carico {runts_file.name}...")
 
-    df = pd.read_excel(runts_file, dtype=str)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Workbook contains no default style", UserWarning)
+        df = pd.read_excel(runts_file, dtype=str)
     logging.info(f"[RUNTS] {len(df):,} righe, {len(df.columns)} colonne")
 
     # Pulisce i nomi colonna (rimuove _x000D_\n e testo dopo \n)

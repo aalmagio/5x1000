@@ -3,8 +3,7 @@
     <div class="mb-8">
       <h1 class="mb-1">Download dataset</h1>
       <p class="text-gray-500">
-        Tutti i file sono liberamente scaricabili senza registrazione.
-        Licenza dati:
+        Lascia la tua email per accedere ai file. Licenza dati:
         <a href="https://creativecommons.org/licenses/by/4.0/" class="text-brand-600 hover:underline" target="_blank" rel="noopener">CC BY 4.0</a>.
       </p>
     </div>
@@ -45,12 +44,15 @@
               {{ completo.dimensione_mb }} MB &bull; Aggiornato il {{ formatDate(completo.aggiornato_il) }}
             </p>
           </div>
-          <a href="/download/csv/completo" class="btn-primary whitespace-nowrap flex-shrink-0 inline-flex items-center gap-2" download>
+          <button
+            class="btn-primary whitespace-nowrap flex-shrink-0 inline-flex items-center gap-2"
+            @click="requestDownload({ tipo: 'csv', anno: 'completo', href: '/download/csv/completo' })"
+          >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
             </svg>
             Scarica CSV
-          </a>
+          </button>
         </div>
       </div>
     </section>
@@ -94,38 +96,35 @@
             </p>
           </div>
           <div class="flex gap-2 flex-shrink-0">
-            <a
-              :href="`/download/csv/${item.anno}`"
+            <button
               class="btn-secondary text-xs px-3 py-1.5 inline-flex items-center gap-1"
-              download
+              @click="requestDownload({ tipo: 'csv', anno: item.anno, href: `/download/csv/${item.anno}` })"
             >
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
               </svg>
               CSV
-            </a>
-            <a
+            </button>
+            <button
               v-if="item.normalizzato"
-              :href="`/download/xlsx/${item.anno}`"
               class="btn-secondary text-xs px-3 py-1.5 inline-flex items-center gap-1"
-              download
+              @click="requestDownload({ tipo: 'xlsx', anno: item.anno, href: `/download/xlsx/${item.anno}` })"
             >
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
               </svg>
               Excel
-            </a>
-            <a
+            </button>
+            <button
               v-if="item.report"
-              :href="`/download/report/${item.anno}`"
               class="btn-primary text-xs px-3 py-1.5 inline-flex items-center gap-1"
-              download
+              @click="requestDownload({ tipo: 'report', anno: item.anno, href: `/download/report/${item.anno}` })"
             >
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
               </svg>
               Report
-            </a>
+            </button>
           </div>
         </div>
       </div>
@@ -166,16 +165,196 @@
       </div>
     </section>
   </div>
+
+  <!-- ── Modal email gate ──────────────────────────────────────────────────── -->
+  <Teleport to="body">
+    <div
+      v-if="modal.open"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4"
+    >
+      <!-- Backdrop: click chiude il modal -->
+      <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="skipAndDownload"></div>
+
+      <!-- Card -->
+      <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 z-10" @click.stop>
+        <!-- Icona -->
+        <div class="w-12 h-12 bg-brand-50 rounded-xl flex items-center justify-center mb-5 mx-auto">
+          <svg class="w-6 h-6 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+        </div>
+
+        <h3 class="text-lg font-bold text-gray-900 text-center mb-1">Scarica il dataset</h3>
+        <p class="text-sm text-gray-500 text-center mb-6">
+          Lascia la tua email per ricevere aggiornamenti sui dati 5×1000. Il download è gratuito anche senza registrazione.
+        </p>
+
+        <form @submit.prevent="submitLead" class="space-y-4">
+          <div>
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5 block">Nome (opzionale)</label>
+            <input
+              v-model="modal.nome"
+              type="text"
+              class="input-field"
+              placeholder="Il tuo nome"
+              autocomplete="name"
+            />
+          </div>
+          <div>
+            <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5 block">Email (opzionale)</label>
+            <input
+              v-model="modal.email"
+              type="email"
+              class="input-field"
+              :class="modal.emailError ? 'border-red-400' : ''"
+              placeholder="tuamail@esempio.it"
+              autocomplete="email"
+            />
+            <p v-if="modal.emailError" class="text-xs text-red-500 mt-1">{{ modal.emailError }}</p>
+          </div>
+
+          <!-- Newsletter checkbox -->
+          <label class="flex items-start gap-3 cursor-pointer group">
+            <input
+              v-model="modal.vuole_newsletter"
+              type="checkbox"
+              class="mt-0.5 w-4 h-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500 flex-shrink-0"
+            />
+            <span class="text-xs text-gray-500 group-hover:text-gray-700 transition-colors leading-relaxed">
+              Voglio ricevere aggiornamenti via email quando vengono pubblicati nuovi dati 5×1000.
+              Niente spam, disiscrizione in un click.
+            </span>
+          </label>
+
+          <div class="flex gap-3 pt-1">
+            <button
+              type="button"
+              class="btn-secondary flex-1 text-sm"
+              @click="skipAndDownload"
+            >
+              Scarica senza email
+            </button>
+            <button
+              type="submit"
+              class="btn-primary flex-1 inline-flex items-center justify-center gap-2"
+              :disabled="modal.saving"
+            >
+              <svg v-if="modal.saving" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+              </svg>
+              {{ modal.saving ? 'Un momento…' : 'Scarica' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { fetchFiles } from '@/api/client'
+import { ref, computed, onMounted, reactive } from 'vue'
+import { fetchFiles, salvaLead } from '@/api/client'
 
 const files        = ref([])
 const loadingFiles = ref(true)
 const errorFiles   = ref(false)
 
+// ── Lead modal ────────────────────────────────────────────────────────────────
+const STORAGE_KEY    = '5x1000_lead_v2'
+const EXPIRY_DAYS    = 90
+
+function leadDone() {
+  const raw = localStorage.getItem(STORAGE_KEY)
+  if (!raw) return false
+  try {
+    const { ts } = JSON.parse(raw)
+    return Date.now() - ts < EXPIRY_DAYS * 86_400_000
+  } catch {
+    return false
+  }
+}
+
+function markLeadDone() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ts: Date.now() }))
+}
+
+const modal = reactive({
+  open:             false,
+  email:            '',
+  nome:             '',
+  emailError:       '',
+  saving:           false,
+  vuole_newsletter: false,
+  pending:          null,  // { tipo, anno, href } — download in attesa
+})
+
+function requestDownload({ tipo, anno, href }) {
+  // Se l'utente ha già interagito con il modal di recente (< 90 giorni), scarica direttamente
+  if (leadDone()) {
+    triggerDownload(href)
+    return
+  }
+  modal.pending          = { tipo, anno, href }
+  modal.email            = ''
+  modal.nome             = ''
+  modal.emailError       = ''
+  modal.vuole_newsletter = false
+  modal.open             = true
+}
+
+// Scarica senza lasciare l'email (click su backdrop o sul bottone "Senza email")
+function skipAndDownload() {
+  const href = modal.pending?.href
+  modal.open = false
+  markLeadDone()
+  if (href) triggerDownload(href)
+}
+
+async function submitLead() {
+  modal.emailError = ''
+  const email = modal.email.trim()
+
+  // Email fornita ma non valida → errore
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    modal.emailError = 'Inserisci un indirizzo email valido.'
+    return
+  }
+
+  // Email fornita → salva il lead
+  if (email) {
+    modal.saving = true
+    try {
+      await salvaLead({
+        email,
+        nome:             modal.nome,
+        tipo:             modal.pending?.tipo,
+        anno:             modal.pending?.anno !== 'completo' ? modal.pending?.anno : undefined,
+        vuole_newsletter: modal.vuole_newsletter,
+      })
+      markLeadDone()
+    } catch {
+      // Degrada silenziosamente
+    } finally {
+      modal.saving = false
+    }
+  }
+
+  modal.open = false
+  if (modal.pending?.href) triggerDownload(modal.pending.href)
+}
+
+function triggerDownload(href) {
+  const a = document.createElement('a')
+  a.href     = href
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+
+// ── Files ─────────────────────────────────────────────────────────────────────
 const completo = computed(() =>
   files.value.find(f => f.tipo === 'completo' && f.formato === 'csv')
 )

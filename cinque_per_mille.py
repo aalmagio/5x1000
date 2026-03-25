@@ -92,7 +92,6 @@ def _apply_config(cfg):
 
 
 YEAR_URLS = {
-    2025: "https://www.agenziaentrate.gov.it/portale/elenco-permanente-delle-onlus-accreditate-per-il-2025",
     2024: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-dei-beneficiari",
     2023: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-dei-beneficiari-2023",
     2022: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-degli-enti-ammessi-in-una-o-piu-categorie-di-beneficiari",
