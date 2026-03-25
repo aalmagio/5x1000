@@ -706,8 +706,26 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
             logging.warning(f"[CICLO] {anno}/etl fallito — DB non aggiornato per questo anno")
             continue
 
+        # Verifica che l'ETL abbia davvero prodotto righe per questo anno nel CSV.
+        # (L'ETL esce con 0 anche se crasha su un anno specifico.)
+        righe_anno = 0
+        if csv_path.exists():
+            try:
+                import pandas as _pd
+                _sample = _pd.read_csv(csv_path, usecols=["ANNO"], dtype=str)
+                righe_anno = int((_sample["ANNO"].str.strip() == str(anno)).sum())
+            except Exception:
+                pass
+        if righe_anno == 0:
+            logging.error(
+                f"[CICLO] {anno}/etl: exit 0 ma 0 righe nel CSV → ETL interno fallito, "
+                f"controlla il log ETL. DB non aggiornato, .done non scritto."
+            )
+            results[f"etl_{anno}"] = (False, dur)
+            continue
+
         # Aggiorna DB via UPSERT (sito sempre attivo)
-        logging.info(f"[CICLO] {anno} → aggiornamento DB (UPSERT)...")
+        logging.info(f"[CICLO] {anno} → aggiornamento DB (UPSERT, {righe_anno:,} righe)...")
         try:
             from db_updater import aggiorna_anno_ciclo
             ok_db = aggiorna_anno_ciclo(anno=anno, csv_path=csv_path, dati_dir=dati_dir)
