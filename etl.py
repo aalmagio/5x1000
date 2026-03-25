@@ -146,58 +146,87 @@ def setup_logging(root: Path) -> None:
 
 # Mappa raw (maiuscolo) → display (20 regioni ufficiali italiane).
 # Speculare alla funzione normalize_regione() in api.php.
+# Forme senza trattino (Emilia Romagna, Friuli Venezia Giulia) per coerenza
+# con il dataset AdE che non usa mai il trattino in questi nomi.
 _REGIONE_NORM_MAP: dict[str, str] = {
-    "ABRUZZO":                            "Abruzzo",
-    "BASILICATA":                         "Basilicata",
-    "CALABRIA":                           "Calabria",
-    "CAMPANIA":                           "Campania",
-    "EMILIA-ROMAGNA":                     "Emilia-Romagna",
-    "EMILIA ROMAGNA":                     "Emilia-Romagna",
-    "FRIULI-VENEZIA GIULIA":              "Friuli-Venezia Giulia",
-    "FRIULI VENEZIA GIULIA":              "Friuli-Venezia Giulia",
-    "LAZIO":                              "Lazio",
-    "LIGURIA":                            "Liguria",
-    "LOMBARDIA":                          "Lombardia",
-    "MARCHE":                             "Marche",
-    "MOLISE":                             "Molise",
-    "PIEMONTE":                           "Piemonte",
-    "PUGLIA":                             "Puglia",
-    "SARDEGNA":                           "Sardegna",
-    "SICILIA":                            "Sicilia",
-    "TOSCANA":                            "Toscana",
-    "UMBRIA":                             "Umbria",
-    "VALLE D'AOSTA":                      "Valle d'Aosta",
-    "VALLE D'AOSTA/VALLEE D'AOSTE":       "Valle d'Aosta",
-    "VENETO":                             "Veneto",
-    # Province autonome → raggruppate nella regione ufficiale
-    "TRENTO":                             "Trentino-Alto Adige",
-    "BOLZANO":                            "Trentino-Alto Adige",
-    "TRENTINO-ALTO ADIGE":                "Trentino-Alto Adige",
-    "TRENTINO ALTO ADIGE":                "Trentino-Alto Adige",
-    "PROVINCIA AUTONOMA DI TRENTO":       "Trentino-Alto Adige",
-    "PROVINCIA AUTONOMA DI BOLZANO":      "Trentino-Alto Adige",
-    "PROVINCIA AUTONOMA TRENTO":          "Trentino-Alto Adige",
-    "PROVINCIA AUTONOMA BOLZANO":         "Trentino-Alto Adige",
-    "ALTO ADIGE":                         "Trentino-Alto Adige",
-    "P.A. TRENTO":                        "Trentino-Alto Adige",
-    "P.A. BOLZANO":                       "Trentino-Alto Adige",
+    "ABRUZZO":                             "Abruzzo",
+    "BASILICATA":                          "Basilicata",
+    "CALABRIA":                            "Calabria",
+    "CAMPANIA":                            "Campania",
+    # Emilia Romagna — senza trattino (forma usata dall'AdE)
+    "EMILIA-ROMAGNA":                      "Emilia Romagna",
+    "EMILIA ROMAGNA":                      "Emilia Romagna",
+    "EMILIAROMAGNA":                       "Emilia Romagna",   # PDF senza spazi
+    # Friuli — senza trattino
+    "FRIULI-VENEZIA GIULIA":               "Friuli Venezia Giulia",
+    "FRIULI VENEZIA GIULIA":               "Friuli Venezia Giulia",
+    "FRIULIVENEZIAGIULIA":                 "Friuli Venezia Giulia",   # PDF senza spazi
+    "FRIULI V.G.":                         "Friuli Venezia Giulia",
+    "FRIULI V.G":                          "Friuli Venezia Giulia",
+    "LAZIO":                               "Lazio",
+    "LIGURIA":                             "Liguria",
+    "LOMBARDIA":                           "Lombardia",
+    "MARCHE":                              "Marche",
+    "MOLISE":                              "Molise",
+    "PIEMONTE":                            "Piemonte",
+    "PUGLIA":                              "Puglia",
+    "SARDEGNA":                            "Sardegna",
+    "SICILIA":                             "Sicilia",
+    "TOSCANA":                             "Toscana",
+    "UMBRIA":                              "Umbria",
+    "VALLE D'AOSTA":                       "Valle d'Aosta",
+    "VALLE D'AOSTA/VALLEE D'AOSTE":        "Valle d'Aosta",
+    "VALLED'AOSTA":                        "Valle d'Aosta",   # PDF "Valled ' Aosta" compact
+    "VENETO":                              "Veneto",
+    # Province autonome / TAA → raggruppate nella regione ufficiale
+    "TRENTO":                              "Trentino-Alto Adige",
+    "BOLZANO":                             "Trentino-Alto Adige",
+    "TRENTINO-ALTO ADIGE":                 "Trentino-Alto Adige",
+    "TRENTINO ALTO ADIGE":                 "Trentino-Alto Adige",
+    "TRENTINO ALTO ADIGE (BOLZANO)":       "Trentino-Alto Adige",
+    "TRENTINO ALTO ADIGE (TRENTO)":        "Trentino-Alto Adige",
+    "TRENTINO-ALTO ADIGE (BOLZANO)":       "Trentino-Alto Adige",
+    "TRENTINO-ALTO ADIGE (TRENTO)":        "Trentino-Alto Adige",
+    "TAA BOLZANO":                         "Trentino-Alto Adige",
+    "TAA TRENTO":                          "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA DI TRENTO":        "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA DI BOLZANO":       "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA TRENTO":           "Trentino-Alto Adige",
+    "PROVINCIA AUTONOMA BOLZANO":          "Trentino-Alto Adige",
+    "ALTO ADIGE":                          "Trentino-Alto Adige",
+    "P.A. TRENTO":                         "Trentino-Alto Adige",
+    "P.A. BOLZANO":                        "Trentino-Alto Adige",
 }
 
 
 def normalize_regione(val) -> str:
     """Normalizza il nome regione al formato display standard.
 
-    Restituisce la stringa mappata (es. 'CAMPANIA' → 'Campania',
-    'TRENTO' → 'Trentino-Alto Adige') o il valore in title-case se sconosciuto.
-    Gestisce in ingresso None, float NaN e stringhe.
+    Strategie applicate in ordine:
+    1. Rimuove trattini/dash iniziali non-standard (artefatti PDF: "‐ Calabria").
+    2. Lookup esatto nella mappa (chiave uppercase).
+    3. Lookup compatto: rimuove tutti gli spazi interni e riprova.
+       Cattura varianti split da PDF ("Emiliaromag Na", "Friuliveneziag Iulia", …).
+    4. Fallback: title-case del valore ripulito.
     """
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return ""
     s = str(val).strip()
+    # Rimuovi trattini/dash iniziali (standard U+002D e non-standard U+2010‥U+2015)
+    s = re.sub(r'^[\-\u2010-\u2015\s]+', '', s).strip()
     key = s.upper()
     if key in ("", "NAN", "NONE"):
         return ""
-    return _REGIONE_NORM_MAP.get(key, s.title())
+    # 1. Lookup esatto
+    result = _REGIONE_NORM_MAP.get(key)
+    if result:
+        return result
+    # 2. Lookup compatto (rimuove spazi: cattura split da estrazione PDF)
+    result = _REGIONE_NORM_MAP.get(key.replace(" ", ""))
+    if result:
+        return result
+    # 3. Fallback title-case
+    return s.title()
 
 
 # ============================================================================
