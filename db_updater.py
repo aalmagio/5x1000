@@ -541,7 +541,10 @@ def _leggi_xlsx_ammissioni(path: Path) -> list[tuple[str, str | None]]:
         logger.warning("db_updater: openpyxl non disponibile – categoria_ammissioni saltata")
         return []
 
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Workbook contains no default style", UserWarning)
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb.active
 
     rows = list(ws.iter_rows(values_only=True))

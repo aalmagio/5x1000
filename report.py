@@ -152,7 +152,10 @@ def load_category_file(path, cat_key):
     Legge un file .xlsx di categoria e restituisce una lista di dict normalizzati.
     Gestisce i 3 schemi: 12 colonne, 10 colonne, 7 colonne (Comuni).
     """
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Workbook contains no default style", UserWarning)
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb.active
     rows = list(ws.iter_rows(values_only=True))
     wb.close()

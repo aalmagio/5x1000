@@ -667,7 +667,10 @@ def load_runts(runts_dir: Path) -> pd.DataFrame | None:
     runts_file = files[-1]
     logging.info(f"[RUNTS] Carico {runts_file.name}...")
 
-    df = pd.read_excel(runts_file, dtype=str)
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Workbook contains no default style", UserWarning)
+        df = pd.read_excel(runts_file, dtype=str)
     logging.info(f"[RUNTS] {len(df):,} righe, {len(df.columns)} colonne")
 
     # Pulisce i nomi colonna (rimuove _x000D_\n e testo dopo \n)
