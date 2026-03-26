@@ -467,6 +467,25 @@ function action_ente(): void {
     }
     krsort($per_anno); // anno decrescente
 
+    // Carica il breakdown per categoria da categoria_ammissioni
+    $stmt_ca = $pdo->prepare(
+        "SELECT anno, categoria, n_scelte, importo_espresso, importo_generico, importo_totale
+         FROM categoria_ammissioni
+         WHERE cod_fiscale = ? AND stato = 'ammesso'
+         ORDER BY anno DESC, importo_totale DESC"
+    );
+    $stmt_ca->execute([$cf]);
+    $cat_per_anno = [];
+    foreach ($stmt_ca->fetchAll() as $cr) {
+        $cat_per_anno[(int)$cr['anno']][] = [
+            'categoria'        => $cr['categoria'],
+            'n_scelte'         => (int)$cr['n_scelte'],
+            'importo_espresso' => (float)$cr['importo_espresso'],
+            'importo_generico' => (float)$cr['importo_generico'],
+            'importo_totale'   => (float)$cr['importo_totale'],
+        ];
+    }
+
     $storico = [];
     foreach ($per_anno as $anno => $anno_rows) {
         $r0          = $anno_rows[0];
@@ -475,13 +494,17 @@ function action_ente(): void {
         $tot_gen     = array_sum(array_column($anno_rows, 'importo_generico'));
         $tot_tot     = array_sum(array_column($anno_rows, 'importo_totale'));
 
-        // Breakdown per categoria (solo se ci sono più righe nello stesso anno)
+        // Breakdown per categoria: priorità a categoria_ammissioni (più completo),
+        // fallback su più righe enti nello stesso anno
         $cat_breakdown = null;
-        if (count($anno_rows) > 1) {
+        if (isset($cat_per_anno[$anno]) && count($cat_per_anno[$anno]) > 1) {
+            $cat_breakdown = $cat_per_anno[$anno];
+        } elseif (count($anno_rows) > 1) {
             $cat_breakdown = array_map(fn($r) => [
                 'categoria'        => $r['categoria_principale'],
                 'n_scelte'         => (int)$r['n_scelte'],
                 'importo_espresso' => (float)$r['importo_espresso'],
+                'importo_generico' => null,
                 'importo_totale'   => (float)$r['importo_totale'],
             ], $anno_rows);
         }
