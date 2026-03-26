@@ -433,16 +433,16 @@ function action_ente(): void {
     // Denominazione canonica: RUNTS se disponibile, altrimenti anno più recente
     $denom_canonica = ($first['runts_denominazione'] ?: null) ?? $first['denominazione'];
 
-    // Mappa flag → nome categoria
+    // Mappa flag → slug categoria (stesso formato di categoria_principale)
     $cat_map = [
-        'cat_volontariato' => 'Volontariato',
-        'cat_asd'          => 'ASD',
-        'cat_ets_onlus'    => 'ETS/ONLUS',
-        'cat_ricerca_sci'  => 'Ricerca Scientifica',
-        'cat_ricerca_san'  => 'Ricerca Sanitaria',
-        'cat_comuni'       => 'Comuni',
-        'cat_beni_cult'    => 'Beni Culturali',
-        'cat_aree_prot'    => 'Aree Protette',
+        'cat_volontariato' => 'volontariato',
+        'cat_asd'          => 'asd',
+        'cat_ets_onlus'    => 'ets_onlus',
+        'cat_ricerca_sci'  => 'ricerca_scientifica',
+        'cat_ricerca_san'  => 'ricerca_sanitaria',
+        'cat_comuni'       => 'comuni',
+        'cat_beni_cult'    => 'beni_culturali',
+        'cat_aree_prot'    => 'aree_protette',
     ];
 
     // Raccoglie TUTTE le categorie su TUTTE le righe (sia da categoria_principale
