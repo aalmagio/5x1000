@@ -332,43 +332,54 @@ def is_header_row(row, header_signature):
 
 
 def extract_data_from_pdf(pdf_path, header_signature, num_cols):
-    rows = []
+    """
+    Generatore: yielda le righe del PDF una pagina alla volta.
+    Chiude ogni pagina dopo l'elaborazione e richiama gc.collect() ogni
+    20 pagine per contenere il consumo di RAM con PDF di grandi dimensioni.
+    """
+    import gc
     try:
         pdf = pdfplumber.open(pdf_path)
     except Exception as e:
         logging.error(f"  Errore nell'aprire {pdf_path}: {e}")
-        return rows
+        return
 
-    for page_idx, page in enumerate(pdf.pages):
-        try:
-            tables = page.extract_tables()
-        except Exception as e:
-            logging.warning(f"  Errore pagina {page_idx + 1} di {os.path.basename(pdf_path)}: {e}")
-            continue
+    try:
+        for page_idx, page in enumerate(pdf.pages):
+            try:
+                tables = page.extract_tables()
+            except Exception as e:
+                logging.warning(f"  Errore pagina {page_idx + 1} di {os.path.basename(pdf_path)}: {e}")
+                continue
 
-        for table in tables:
-            for row in table:
-                cleaned = [clean_cell(c) for c in row]
+            for table in tables:
+                for row in table:
+                    cleaned = [clean_cell(c) for c in row]
 
-                if is_header_row(row, header_signature):
-                    continue
-
-                if all(c == "" for c in cleaned):
-                    continue
-
-                # Sotto-intestazione
-                if cleaned[0] == "" and any(c != "" for c in cleaned[4:]):
-                    non_empty = [c for c in cleaned if c]
-                    if all(len(c) < 40 for c in non_empty) and len(non_empty) <= num_cols // 2:
+                    if is_header_row(row, header_signature):
                         continue
 
-                while len(cleaned) < num_cols:
-                    cleaned.append("")
-                cleaned = cleaned[:num_cols]
-                rows.append(cleaned)
+                    if all(c == "" for c in cleaned):
+                        continue
 
-    pdf.close()
-    return rows
+                    # Sotto-intestazione
+                    if cleaned[0] == "" and any(c != "" for c in cleaned[4:]):
+                        non_empty = [c for c in cleaned if c]
+                        if all(len(c) < 40 for c in non_empty) and len(non_empty) <= num_cols // 2:
+                            continue
+
+                    while len(cleaned) < num_cols:
+                        cleaned.append("")
+                    cleaned = cleaned[:num_cols]
+                    yield cleaned
+
+            # Libera la pagina dalla cache di pdfplumber e forza il GC
+            page.flush_cache()
+            if page_idx % 20 == 0:
+                gc.collect()
+    finally:
+        pdf.close()
+        gc.collect()
 
 # ============================================================================
 # CSV EXTRACTION
@@ -535,7 +546,16 @@ def create_excel(header, all_rows, output_path, sheet_name="Dati"):
 
 
 def process_folder_pdf(folder_path, year):
-    """Processa i PDF di una cartella e genera un Excel."""
+    """
+    Processa i PDF di una cartella e genera un Excel.
+    Usa openpyxl in write-only mode + il generatore extract_data_from_pdf
+    per tenere basso il consumo di RAM anche con PDF da milioni di righe.
+    """
+    import gc
+    from openpyxl import Workbook as _Wb
+    from openpyxl.cell.cell import WriteOnlyCell
+    from openpyxl.styles import Font as _Fnt, PatternFill as _PF, Alignment as _Al
+
     pdf_files = sorted(glob.glob(os.path.join(folder_path, "*.pdf")))
     if not pdf_files:
         return False
@@ -553,28 +573,60 @@ def process_folder_pdf(folder_path, year):
         logging.error(f"  Impossibile determinare l'intestazione dai PDF")
         return False
 
-    all_rows = []
-    for pdf_path in pdf_files:
-        pdf_name = os.path.basename(pdf_path)
-        rows = extract_data_from_pdf(pdf_path, signature, num_cols)
-        logging.info(f"  {pdf_name}: {len(rows)} righe")
-        all_rows.extend(rows)
-
-    if not all_rows:
-        logging.warning(f"  Nessun dato estratto dai PDF")
-        return False
-
-    # Filtra righe con codice fiscale vuoto
-    before = len(all_rows)
-    all_rows = [r for r in all_rows if r[0].strip()]
-    dropped = before - len(all_rows)
-    if dropped:
-        logging.info(f"  Rimosse {dropped} righe con codice fiscale vuoto")
-
     output_path = os.path.join(folder_path, f"dati_{year}.xlsx")
-    create_excel(header, all_rows, output_path, year)
-    logging.info(f"  => Creato: dati_{year}.xlsx ({len(all_rows)} righe)")
-    return True
+
+    # Write-only workbook: non carica nulla in RAM, scrive riga per riga
+    ec = EXCEL_CONFIG
+    wb = _Wb(write_only=True)
+    ws = wb.create_sheet(title=str(year)[:31])
+
+    # Riga di intestazione
+    hdr_cells = []
+    for col_name in header:
+        c = WriteOnlyCell(ws, value=col_name)
+        c.font      = _Fnt(name=ec["header_font"], bold=True, size=ec["header_size"], color=ec["header_fg"])
+        c.fill      = _PF("solid", fgColor=ec["header_bg"])
+        c.alignment = _Al(horizontal="center", vertical="center", wrap_text=True)
+        hdr_cells.append(c)
+    ws.append(hdr_cells)
+
+    total_rows = 0
+    skipped_cf = 0
+
+    try:
+        for pdf_path in pdf_files:
+            pdf_name  = os.path.basename(pdf_path)
+            file_rows = 0
+            for row in extract_data_from_pdf(pdf_path, signature, num_cols):
+                if not row[0].strip():      # salta righe senza codice fiscale
+                    skipped_cf += 1
+                    continue
+                ws.append(row)
+                file_rows  += 1
+                total_rows += 1
+            logging.info(f"  {pdf_name}: {file_rows} righe")
+            gc.collect()
+
+        if total_rows == 0:
+            logging.warning(f"  Nessun dato estratto dai PDF")
+            wb.close()
+            return False
+
+        if skipped_cf:
+            logging.info(f"  Rimosse {skipped_cf} righe con codice fiscale vuoto")
+
+        wb.save(output_path)
+        logging.info(f"  => Creato: dati_{year}.xlsx ({total_rows} righe)")
+        return True
+
+    except Exception as e:
+        logging.error(f"  Errore durante la creazione di dati_{year}.xlsx: {e}")
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        return False
+    finally:
+        wb.close()
+        gc.collect()
 
 
 def process_folder_csv(folder_path, year):
