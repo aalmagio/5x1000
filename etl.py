@@ -401,6 +401,16 @@ IMP_GEN_ALIASES = {
     "per scelte generiche",
     "importo proporzionale per le scelte generiche",
 }
+IMP_RIP_ALIASES = {
+    # AdE ha varianti leggermente diverse per anno
+    "importo proporzionale per ripartizione importi inferiori a 100 euro",
+    "importo proporzionale per ripartizione importi inferiori a euro 100",
+    "importo proporzionale per ripartizione",
+    "importo per ripartizione importi inferiori a 100 euro",
+    "importo per ripartizione",
+    "importo ripartizione",
+    "ripartizione importi inferiori",
+}
 IMP_TOT_ALIASES = {
     "importo totale",
     "totale",
@@ -465,9 +475,10 @@ def normalize_year(df: pd.DataFrame, anno: int) -> pd.DataFrame:
 
     # --- Colonne numeriche ---
     n_scelte_col = find_col_partial(ci, N_SCELTE_ALIASES)
-    imp_esp_col = find_col_partial(ci, IMP_ESP_ALIASES)
-    imp_gen_col = find_col_partial(ci, IMP_GEN_ALIASES)
-    imp_tot_col = find_col_partial(ci, IMP_TOT_ALIASES)
+    imp_esp_col  = find_col_partial(ci, IMP_ESP_ALIASES)
+    imp_gen_col  = find_col_partial(ci, IMP_GEN_ALIASES)
+    imp_rip_col  = find_col_partial(ci, IMP_RIP_ALIASES)
+    imp_tot_col  = find_col_partial(ci, IMP_TOT_ALIASES)
 
     # Warn se colonne critiche mancano
     if cf_col is None:
@@ -562,6 +573,9 @@ def normalize_year(df: pd.DataFrame, anno: int) -> pd.DataFrame:
     )
     out["IMPORTO_GENERICO"] = (
         df[imp_gen_col].apply(parse_importo) if imp_gen_col else None
+    )
+    out["IMPORTO_RIPARTIZIONE"] = (
+        df[imp_rip_col].apply(parse_importo) if imp_rip_col else None
     )
     out["IMPORTO_TOTALE"] = (
         df[imp_tot_col].apply(parse_importo) if imp_tot_col else None
