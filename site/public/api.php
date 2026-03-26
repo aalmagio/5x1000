@@ -1572,6 +1572,142 @@ function action_conflitti_categoria(): void {
 }
 
 
+// ─── Geo: aggregati per regione / provincia / comune ─────────────────────────
+/**
+ * ?action=geo[&anno=YYYY][&categoria=CAT]
+ *   → { anno, totale: {n_enti,n_scelte,importo_totale}, per_regione: [...] }
+ *
+ * ?action=geo&regione=NOME_DISPLAY[&anno=YYYY][&categoria=CAT]
+ *   → { anno, regione, per_provincia: [{provincia, n_enti, n_scelte, importo_totale}] }
+ *
+ * ?action=geo&provincia=SIGLA[&anno=YYYY][&categoria=CAT]
+ *   → { anno, provincia, per_comune: [{comune, n_enti, n_scelte, importo_totale}] }
+ */
+function action_geo(): void {
+    $pdo       = db();
+    $anno      = int_param('anno');
+    $regione   = str_param('regione');   // nome display normalizzato
+    $provincia = str_param('provincia'); // sigla 2/3 char
+    $categoria = str_param('categoria');
+
+    if (!$anno) {
+        $anno = (int)$pdo->query("SELECT MAX(anno) FROM enti")->fetchColumn();
+    }
+
+    $cond   = ['e.anno = ?'];
+    $params = [$anno];
+    if ($categoria) {
+        $cond[]   = 'e.categoria_principale = ?';
+        $params[] = $categoria;
+    }
+
+    // ── Livello comune ───────────────────────────────────────────────────────
+    if ($provincia) {
+        $cond[]   = 'e.provincia = ?';
+        $params[] = strtoupper($provincia);
+        $stmt = $pdo->prepare(
+            "SELECT e.comune,
+                    COUNT(*) AS n_enti,
+                    SUM(e.n_scelte) AS n_scelte,
+                    SUM(e.importo_totale) AS importo_totale
+             FROM enti e
+             WHERE " . implode(' AND ', $cond) . "
+               AND e.comune IS NOT NULL AND e.comune != ''
+             GROUP BY e.comune
+             ORDER BY importo_totale DESC"
+        );
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$r) {
+            $r['n_enti']         = (int)$r['n_enti'];
+            $r['n_scelte']       = (int)($r['n_scelte'] ?? 0);
+            $r['importo_totale'] = (float)($r['importo_totale'] ?? 0);
+        }
+        json_out(['anno' => $anno, 'provincia' => strtoupper($provincia), 'per_comune' => $rows]);
+        return;
+    }
+
+    // ── Livello provincia ────────────────────────────────────────────────────
+    if ($regione) {
+        $raw_regioni = regione_display_to_raws($pdo, $regione);
+        if (!$raw_regioni) {
+            json_out(['anno' => $anno, 'regione' => $regione, 'per_provincia' => []]);
+            return;
+        }
+        $ph      = implode(',', array_fill(0, count($raw_regioni), '?'));
+        $cond[]  = "e.regione IN ($ph)";
+        $params  = array_merge($params, $raw_regioni);
+        $stmt = $pdo->prepare(
+            "SELECT e.provincia,
+                    COUNT(*) AS n_enti,
+                    SUM(e.n_scelte) AS n_scelte,
+                    SUM(e.importo_totale) AS importo_totale
+             FROM enti e
+             WHERE " . implode(' AND ', $cond) . "
+               AND e.provincia IS NOT NULL AND e.provincia != ''
+             GROUP BY e.provincia
+             ORDER BY importo_totale DESC"
+        );
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$r) {
+            $r['n_enti']         = (int)$r['n_enti'];
+            $r['n_scelte']       = (int)($r['n_scelte'] ?? 0);
+            $r['importo_totale'] = (float)($r['importo_totale'] ?? 0);
+        }
+        json_out(['anno' => $anno, 'regione' => $regione, 'per_provincia' => $rows]);
+        return;
+    }
+
+    // ── Livello regione (top level) ──────────────────────────────────────────
+    $stmt = $pdo->prepare(
+        "SELECT e.regione,
+                COUNT(*) AS n_enti,
+                SUM(e.n_scelte) AS n_scelte,
+                SUM(e.importo_totale) AS importo_totale
+         FROM enti e
+         WHERE " . implode(' AND ', $cond) . "
+         GROUP BY e.regione
+         ORDER BY importo_totale DESC"
+    );
+    $stmt->execute($params);
+    $raw_rows = $stmt->fetchAll();
+
+    // Aggrega per nome display normalizzato (es. TRENTO+BOLZANO → Trentino-Alto Adige)
+    $agg = [];
+    foreach ($raw_rows as $r) {
+        $disp = normalize_regione($r['regione'] ?? '');
+        if (!isset($agg[$disp])) {
+            $agg[$disp] = ['regione' => $disp, 'n_enti' => 0, 'n_scelte' => 0, 'importo_totale' => 0.0];
+        }
+        $agg[$disp]['n_enti']         += (int)$r['n_enti'];
+        $agg[$disp]['n_scelte']       += (int)($r['n_scelte'] ?? 0);
+        $agg[$disp]['importo_totale'] += (float)($r['importo_totale'] ?? 0);
+    }
+    $per_regione = array_values($agg);
+    usort($per_regione, fn($a, $b) => $b['importo_totale'] <=> $a['importo_totale']);
+
+    $totale_enti    = array_sum(array_column($per_regione, 'n_enti'));
+    $totale_scelte  = array_sum(array_column($per_regione, 'n_scelte'));
+    $totale_importo = array_sum(array_column($per_regione, 'importo_totale'));
+    foreach ($per_regione as &$r) {
+        $r['perc_importo'] = $totale_importo > 0
+            ? round($r['importo_totale'] / $totale_importo * 100, 2)
+            : 0.0;
+    }
+
+    json_out([
+        'anno'        => $anno,
+        'totale'      => [
+            'n_enti'         => $totale_enti,
+            'n_scelte'       => $totale_scelte,
+            'importo_totale' => $totale_importo,
+        ],
+        'per_regione' => $per_regione,
+    ]);
+}
+
+
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 try {
@@ -1599,7 +1735,8 @@ try {
         'multi_categoria'      => action_multi_categoria(),
         'composizione_categorie' => action_composizione_categorie(),
         'conflitti_categoria'  => action_conflitti_categoria(),
-        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria", 404),
+        'geo'                  => action_geo(),
+        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria, geo", 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());
