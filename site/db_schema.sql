@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS `enti` (
   `n_scelte`               INT                    DEFAULT 0,
   `importo_espresso`       DECIMAL(15,2)          DEFAULT NULL,
   `importo_generico`       DECIMAL(15,2)          DEFAULT NULL,
+  `importo_ripartizione`   DECIMAL(15,2)          DEFAULT NULL
+                           COMMENT 'Importo proporzionale per ripartizione importi < 100 €',
   `importo_totale`         DECIMAL(15,2)          DEFAULT NULL,
   -- Dati RUNTS
   `runts_denominazione`    VARCHAR(500)           DEFAULT NULL,
@@ -167,8 +169,13 @@ CREATE TABLE IF NOT EXISTS `categoria_ammissioni` (
   `categoria`     VARCHAR(50)   NOT NULL  COMMENT 'slug: asd, ets_onlus, ricerca_scientifica, …',
   `cod_fiscale`   VARCHAR(20)   NOT NULL,
   `denominazione` VARCHAR(500)           DEFAULT NULL,
-  `stato`         ENUM('ammesso','escluso') NOT NULL,
-  `aggiornato_il` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `stato`              ENUM('ammesso','escluso') NOT NULL,
+  -- Metriche per gli enti ammessi (NULL per esclusi se non presenti nel file)
+  `n_scelte`           INT           DEFAULT NULL,
+  `importo_espresso`   DECIMAL(15,2) DEFAULT NULL,
+  `importo_generico`   DECIMAL(15,2) DEFAULT NULL,
+  `importo_totale`     DECIMAL(15,2) DEFAULT NULL,
+  `aggiornato_il`      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_cat_amm`       (`anno`, `categoria`, `cod_fiscale`),
   KEY `idx_ca_cf`               (`cod_fiscale`),

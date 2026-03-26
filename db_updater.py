@@ -305,19 +305,14 @@ def aggiorna_anno_ciclo(
                             righe = _leggi_xlsx_ammissioni(xlsx)
                             if not righe:
                                 continue
-                            batch = [(anno, cat_slug, cf, denom, stato) for cf, denom in righe]
-                            cur.executemany(
-                                """
-                                INSERT INTO categoria_ammissioni
-                                  (anno, categoria, cod_fiscale, denominazione, stato)
-                                VALUES (%s, %s, %s, %s, %s)
-                                ON DUPLICATE KEY UPDATE
-                                  denominazione = COALESCE(VALUES(denominazione), denominazione),
-                                  stato         = VALUES(stato),
-                                  aggiornato_il = NOW()
-                                """,
-                                batch,
-                            )
+                            batch = [
+                                (anno, cat_slug,
+                                 r["cf"], r["denom"], stato,
+                                 r["n_scelte"], r["importo_espresso"],
+                                 r["importo_generico"], r["importo_totale"])
+                                for r in righe
+                            ]
+                            cur.executemany(_CAT_AMM_UPSERT, batch)
                             totale_cat += len(batch)
                 if totale_cat:
                     logger.info(f"db_updater: categoria_ammissioni anno {anno}: {totale_cat} righe")
@@ -501,39 +496,70 @@ def _aggiorna_files(cur, dati_dir: Path) -> None:
 # dati_dir e popola la tabella con (anno, categoria, cod_fiscale, stato).
 # ---------------------------------------------------------------------------
 
-# Alias colonna codice fiscale (case-insensitive)
+# ---------------------------------------------------------------------------
+# Lettura file categoria: CF, denominazione + metriche
+# ---------------------------------------------------------------------------
+
+# Alias colonna codice fiscale (case-insensitive, strip)
 _CF_ALIASES    = {"codice fiscale", "cf", "codice_fiscale", "cod. fiscale", "c.f."}
 # Alias colonna denominazione
 _DENOM_ALIASES = {"denominazione", "beneficiario", "ente", "nome"}
+# Alias metriche (cerchiamo prima match esatto, poi parziale)
+_N_SCELTE_CAT_ALIASES = frozenset({
+    "numero scelte", "n. scelte", "n scelte", "numero di scelte",
+    "preferenze", "n preferenze", "numero preferenze",
+})
+_IMP_ESP_CAT_ALIASES = frozenset({
+    "importo per scelte espresse", "importo scelte espresse",
+    "importo (euro) per scelte espresse",
+    "importo (euro) importo delle scelte espresse",
+    "importo delle scelte espresse",
+})
+_IMP_GEN_CAT_ALIASES = frozenset({
+    "importo proporzionale per le scelte generiche",
+    "per scelte generiche", "importo generiche",
+    "importo proporzionale scelte generiche",
+})
+_IMP_TOT_CAT_ALIASES = frozenset({
+    "importo totale", "totale", "importo totale erogabile",
+    "importo totale (euro)", "importo totale euro",
+})
 
 
-def _detect_cf_denom_cols(header: list[str]) -> tuple[int | None, int | None]:
+def _find_col_idx(header_norm: list[str], aliases: frozenset[str]) -> int | None:
+    """Ritorna l'indice della colonna che matcha un alias (esatto poi parziale)."""
+    for i, c in enumerate(header_norm):
+        if c in aliases:
+            return i
+    for i, c in enumerate(header_norm):
+        for a in aliases:
+            if len(a) > 6 and (a in c or c in a):
+                return i
+    return None
+
+
+def _parse_num(val) -> float | None:
+    """Converte un valore grezzo di cella in float, None se non parsabile."""
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val) if val == val else None   # NaN check
+    s = str(val).strip().replace(".", "").replace(",", ".").replace(" ", "")
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _leggi_xlsx_ammissioni(path: Path) -> list[dict]:
     """
-    Ritorna (indice_cf, indice_denom) nella lista header.
-    Confronto case-insensitive e strip spazi.
-    """
-    cf_idx    = None
-    denom_idx = None
-    for i, col in enumerate(header):
-        c = col.strip().lower()
-        if cf_idx    is None and c in _CF_ALIASES:
-            cf_idx    = i
-        if denom_idx is None and c in _DENOM_ALIASES:
-            denom_idx = i
-    # Fallback parziale: cerca "fiscal" o "codice" per cf
-    if cf_idx is None:
-        for i, col in enumerate(header):
-            c = col.strip().lower()
-            if "fiscal" in c or ("codice" in c and cf_idx is None):
-                cf_idx = i
-                break
-    return cf_idx, denom_idx
+    Legge un file xlsx categoria e restituisce lista di dict con:
+      cf, denom, n_scelte, importo_espresso, importo_generico, importo_totale
 
-
-def _leggi_xlsx_ammissioni(path: Path) -> list[tuple[str, str | None]]:
-    """
-    Legge un file xlsx e restituisce lista di (cod_fiscale, denominazione).
-    Richiede openpyxl (già dipendenza della pipeline).
+    Applica deduplicazione per CF: se lo stesso CF compare più volte,
+    mantiene la prima denominazione non-null e somma le metriche numeriche.
     """
     try:
         import openpyxl
@@ -546,21 +572,41 @@ def _leggi_xlsx_ammissioni(path: Path) -> list[tuple[str, str | None]]:
         warnings.filterwarnings("ignore", "Workbook contains no default style", UserWarning)
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb.active
-
     rows = list(ws.iter_rows(values_only=True))
     wb.close()
     if not rows:
         return []
 
-    # Prima riga = header
-    raw_header = [str(c) if c is not None else "" for c in rows[0]]
-    cf_idx, denom_idx = _detect_cf_denom_cols(raw_header)
+    # Header normalizzato
+    raw_header  = [str(c).strip() if c is not None else "" for c in rows[0]]
+    header_norm = [h.lower() for h in raw_header]
 
+    # Individua colonne
+    cf_idx    = None
+    denom_idx = None
+    for i, c in enumerate(header_norm):
+        if cf_idx    is None and c in _CF_ALIASES:
+            cf_idx    = i
+        if denom_idx is None and c in _DENOM_ALIASES:
+            denom_idx = i
+    # Fallback CF: "fiscal" o "codice"
     if cf_idx is None:
-        logger.warning(f"db_updater: colonna CF non trovata in {path.name} (header={raw_header[:5]})")
+        for i, c in enumerate(header_norm):
+            if "fiscal" in c or "codice" in c:
+                cf_idx = i
+                break
+    if cf_idx is None:
+        logger.warning(f"db_updater: colonna CF non trovata in {path.name} "
+                       f"(header: {raw_header[:6]})")
         return []
 
-    result = []
+    n_idx   = _find_col_idx(header_norm, _N_SCELTE_CAT_ALIASES)
+    esp_idx = _find_col_idx(header_norm, _IMP_ESP_CAT_ALIASES)
+    gen_idx = _find_col_idx(header_norm, _IMP_GEN_CAT_ALIASES)
+    tot_idx = _find_col_idx(header_norm, _IMP_TOT_CAT_ALIASES)
+
+    # Leggi righe dati
+    seen: dict[str, dict] = {}
     for row in rows[1:]:
         if not row or cf_idx >= len(row):
             continue
@@ -568,13 +614,62 @@ def _leggi_xlsx_ammissioni(path: Path) -> list[tuple[str, str | None]]:
         if cf_raw is None:
             continue
         cf = str(cf_raw).strip().upper()
+        # Rimuovi artefatti ".0" da Excel (CF numerico letto come float)
+        import re as _re
+        cf = _re.sub(r"\.0+$", "", cf)
         if not cf:
             continue
+
+        def _get(idx):
+            return row[idx] if idx is not None and idx < len(row) else None
+
         denom = None
         if denom_idx is not None and denom_idx < len(row) and row[denom_idx] is not None:
             denom = str(row[denom_idx]).strip() or None
-        result.append((cf, denom))
-    return result
+
+        n_scelte = _parse_num(_get(n_idx))
+        imp_esp  = _parse_num(_get(esp_idx))
+        imp_gen  = _parse_num(_get(gen_idx))
+        imp_tot  = _parse_num(_get(tot_idx))
+        # Intero per n_scelte
+        n_scelte_int = int(n_scelte) if n_scelte is not None else None
+
+        if cf not in seen:
+            seen[cf] = {
+                "cf":               cf,
+                "denom":            denom,
+                "n_scelte":         n_scelte_int,
+                "importo_espresso": imp_esp,
+                "importo_generico": imp_gen,
+                "importo_totale":   imp_tot,
+            }
+        else:
+            # CF duplicato: somma metriche, mantieni prima denom non-null
+            e = seen[cf]
+            if e["denom"] is None and denom is not None:
+                e["denom"] = denom
+            for k, v in (("n_scelte", n_scelte_int), ("importo_espresso", imp_esp),
+                         ("importo_generico", imp_gen), ("importo_totale", imp_tot)):
+                if v is not None:
+                    e[k] = (e[k] or 0) + v
+
+    return list(seen.values())
+
+
+_CAT_AMM_UPSERT = """
+    INSERT INTO categoria_ammissioni
+      (anno, categoria, cod_fiscale, denominazione, stato,
+       n_scelte, importo_espresso, importo_generico, importo_totale)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    ON DUPLICATE KEY UPDATE
+      denominazione    = COALESCE(VALUES(denominazione), denominazione),
+      stato            = VALUES(stato),
+      n_scelte         = COALESCE(VALUES(n_scelte),         n_scelte),
+      importo_espresso = COALESCE(VALUES(importo_espresso), importo_espresso),
+      importo_generico = COALESCE(VALUES(importo_generico), importo_generico),
+      importo_totale   = COALESCE(VALUES(importo_totale),   importo_totale),
+      aggiornato_il    = NOW()
+"""
 
 
 def _aggiorna_categoria_ammissioni(cur, dati_dir: Path) -> int:
@@ -582,8 +677,10 @@ def _aggiorna_categoria_ammissioni(cur, dati_dir: Path) -> int:
     Popola la tabella `categoria_ammissioni` dai file *_ammessi.xlsx e
     *_esclusi.xlsx in ogni sottocartella di dati_dir.
 
-    Strategia: UPSERT — aggiorna denominazione e stato se la coppia
-    (anno, categoria, cod_fiscale) esiste già.
+    - Legge CF, denominazione e metriche (n_scelte, importi).
+    - Deduplication per CF già applicata in _leggi_xlsx_ammissioni.
+    - Usa UPSERT: aggiorna se la coppia (anno, categoria, cod_fiscale) esiste.
+    - La riconciliazione importi va fatta solo sugli ammessi.
 
     Ritorna il numero totale di righe inserite/aggiornate.
     """
@@ -596,7 +693,6 @@ def _aggiorna_categoria_ammissioni(cur, dati_dir: Path) -> int:
         for stato in ("ammesso", "escluso"):
             pattern = f"*_{'ammessi' if stato == 'ammesso' else 'esclusi'}.xlsx"
             for xlsx in sorted(cat_dir.glob(pattern)):
-                # Estrai anno dal nome file (es. "2024_ASD_ammessi.xlsx")
                 try:
                     anno = int(xlsx.stem.split("_")[0])
                 except (IndexError, ValueError):
@@ -608,22 +704,13 @@ def _aggiorna_categoria_ammissioni(cur, dati_dir: Path) -> int:
                     continue
 
                 batch = [
-                    (anno, cat_slug, cf, denom, stato)
-                    for cf, denom in righe
+                    (anno, cat_slug,
+                     r["cf"], r["denom"], stato,
+                     r["n_scelte"], r["importo_espresso"],
+                     r["importo_generico"], r["importo_totale"])
+                    for r in righe
                 ]
-
-                cur.executemany(
-                    """
-                    INSERT INTO categoria_ammissioni
-                      (anno, categoria, cod_fiscale, denominazione, stato)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                      denominazione = COALESCE(VALUES(denominazione), denominazione),
-                      stato         = VALUES(stato),
-                      aggiornato_il = NOW()
-                    """,
-                    batch,
-                )
+                cur.executemany(_CAT_AMM_UPSERT, batch)
                 totale += len(batch)
                 logger.info(
                     f"db_updater: categoria_ammissioni – {cat_slug}/{anno} "
@@ -754,6 +841,7 @@ _COL_MAP = {
     "N_SCELTE":              "n_scelte",
     "IMPORTO_ESPRESSO":      "importo_espresso",
     "IMPORTO_GENERICO":      "importo_generico",
+    "IMPORTO_RIPARTIZIONE":  "importo_ripartizione",
     "IMPORTO_TOTALE":        "importo_totale",
     "RUNTS_DENOMINAZIONE":   "runts_denominazione",
     "RUNTS_SEZIONE":         "runts_sezione",

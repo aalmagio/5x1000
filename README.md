@@ -46,6 +46,7 @@ Il file `Dati/enti_5x1000_norm.csv` prodotto da `etl.py` ha queste colonne:
 | `N_SCELTE` | int | Numero di scelte dei contribuenti |
 | `IMPORTO_ESPRESSO` | float | Importo da scelte espresse (€) |
 | `IMPORTO_GENERICO` | float | Importo da scelte generiche (€) |
+| `IMPORTO_RIPARTIZIONE` | float | Quota ripartita proporzionalmente per scelte < 100 € (€) |
 | `IMPORTO_TOTALE` | float | Importo totale erogato (€) |
 | `RUNTS_DENOMINAZIONE` | str | Nome nel RUNTS (se presente) |
 | `RUNTS_SEZIONE` | str | Sezione RUNTS (ODV, APS, ecc.) |
@@ -55,6 +56,112 @@ Il file `Dati/enti_5x1000_norm.csv` prodotto da `etl.py` ha queste colonne:
 | `RUNTS_DATA_ISCRIZIONE` | str | Data iscrizione al RUNTS |
 
 > **Nota sul RUNTS**: il file degli iscritti al RUNTS va scaricato manualmente da [registroterzosettore.it](https://www.registroterzoettore.gov.it) e salvato nella cartella `Runts/`. Il join avviene su `COD_FISCALE`. Il match attuale è circa il 55% delle righe (gli enti più vecchi non sono ancora nel RUNTS).
+
+---
+
+## Comandi principali
+
+### 1 — Resetta il dataset (riparte da zero)
+
+```bash
+# Elimina tutti i file in Dati/ e svuota le tabelle DB, poi chiede conferma
+python pipeline.py --reset
+
+# Salta la conferma interattiva (utile in script)
+python pipeline.py --reset --force
+
+# Solo reset del database (non tocca i file su disco)
+python pipeline.py --reset-db --force
+```
+
+> ⚠ **Attenzione**: `--reset` è distruttivo. Usare `--force` solo quando sicuri.
+
+---
+
+### 2 — Aggiorna tutti gli anni uno alla volta (modalità ciclo)
+
+Scarica e processa ogni anno in sequenza senza mettere il sito in manutenzione.
+I passi già completati vengono saltati in caso di interruzione e ripresa.
+
+```bash
+# Prima esecuzione: chiede sorgente, steps, opzioni e le salva in ciclo_defaults.yaml
+python pipeline.py --ciclo
+
+# Esecuzioni successive: usa i default salvati, completamente non interattivo
+python pipeline.py --ciclo
+
+# Override sorgente o anni specifici
+python pipeline.py --ciclo --source pdf --anni 2022,2023,2024
+```
+
+I default vengono salvati in `ciclo_defaults.yaml` nella root del progetto.
+I file sentinella `.done` in `Dati/.stato/` tracciano i passi completati.
+
+---
+
+### 3 — Aggiorna un anno specifico
+
+```bash
+# Riesegue tutti gli step per il solo anno 2024
+python pipeline.py --anni 2024
+
+# Solo ETL + aggiornamento DB (dati già scaricati)
+python pipeline.py --anni 2024 --only etl,db
+
+# Senza riscaricare i file (solo rielaborazione)
+python pipeline.py --anni 2024 --skip-download
+```
+
+---
+
+### 4 — Aggiornamento intelligente da cron (smart mode)
+
+Analizza i file presenti, salta anni e step già aggiornati, poi elabora solo
+ciò che è cambiato. Ideale per esecuzioni periodiche automatizzate.
+
+```bash
+# Smart + ciclo: nessuna interazione, zero downtime, salta il già fatto
+python pipeline.py --ciclo --smart
+
+# Esempio crontab (ogni domenica alle 3:00)
+# 0 3 * * 0  cd /path/to/5x1000 && python pipeline.py --ciclo --smart >> log/cron.log 2>&1
+```
+
+---
+
+### 5 — Aggiungi un nuovo anno
+
+```bash
+# 1. Scarica e converti i dati del nuovo anno
+python cinque_per_mille.py --source csv --anni 2025
+
+# 2. Scarica i file per categoria del nuovo anno
+python scarica_categorie.py --input categorie.xlsx --anni 2025
+
+# 3. Normalizza, genera report e aggiorna il DB
+python pipeline.py --anni 2025 --skip-download
+
+# In alternativa, usa --ciclo e specificherà solo il nuovo anno
+python pipeline.py --ciclo --anni 2025
+```
+
+---
+
+### Altri comandi utili
+
+```bash
+# Aggiorna solo il database del sito (dopo un ETL già fatto)
+python db_updater.py
+
+# Rigenera le proiezioni trend
+python forecast.py
+
+# Carica il CSV su Google Sheets (per Looker Studio)
+python gsheets.py --sheet-id TUO_SHEET_ID
+
+# Verifica cosa verrebbe rieseguito in smart mode (dry run)
+python pipeline_checker.py
+```
 
 ---
 
