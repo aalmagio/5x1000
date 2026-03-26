@@ -242,7 +242,7 @@
                     </td>
                     <td class="text-right tabular-nums">{{ formatNum(cb.n_scelte) }}</td>
                     <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(cb.importo_espresso) }}</td>
-                    <td class="text-right tabular-nums hidden sm:table-cell text-gray-300">—</td>
+                    <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(cb.importo_generico) }}</td>
                     <td class="text-right tabular-nums text-gray-700">{{ formatEur(cb.importo_totale) }}</td>
                   </tr>
                 </template>
