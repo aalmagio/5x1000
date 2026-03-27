@@ -443,7 +443,7 @@ def extract_pdf_group(pdf_files, output_path, sheet_name):
     all_rows = []
     for pdf_path in pdf_files:
         pdf_name = os.path.basename(pdf_path)
-        rows = extract_data_from_pdf(pdf_path, signature, num_cols)
+        rows = list(extract_data_from_pdf(pdf_path, signature, num_cols))
         logging.info(f"    {pdf_name}: {len(rows)} righe")
         all_rows.extend(rows)
 
