@@ -24,6 +24,9 @@ header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Referrer-Policy: strict-origin-when-cross-origin');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -927,7 +930,14 @@ function action_download(): void {
     if (!$row) err('File non trovato nel catalogo', 404);
 
     $path = $row['percorso'];
-    if (!file_exists($path) || !is_readable($path)) {
+    // Path traversal guard: il file deve essere dentro la directory Dati/
+    $allowed_base = realpath(__DIR__ . '/../../Dati');
+    $real_path    = realpath($path);
+    if ($real_path === false || $allowed_base === false ||
+        strncmp($real_path, $allowed_base, strlen($allowed_base)) !== 0) {
+        err('File non disponibile sul server', 404);
+    }
+    if (!is_readable($real_path)) {
         err('File non disponibile sul server', 404);
     }
 
@@ -1763,7 +1773,7 @@ try {
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());
-    err('Errore database: ' . $e->getMessage(), 500);
+    err('Errore database', 500);
 } catch (Throwable $e) {
     error_log('[api.php] Error: ' . $e->getMessage());
     err('Errore interno del server', 500);
