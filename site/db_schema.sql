@@ -86,10 +86,15 @@ CREATE TABLE IF NOT EXISTS `enti` (
   KEY `idx_anno`           (`anno`),
   KEY `idx_cf`             (`cod_fiscale`),
   UNIQUE KEY `uq_ente_anno` (`anno`, `cod_fiscale`),
-  KEY `idx_anno_cat`       (`anno`, `categoria_principale`),
-  KEY `idx_regione`        (`anno`, `regione`),
-  KEY `idx_denominazione`  (`denominazione`(100)),
-  KEY `idx_importo`        (`anno`, `importo_totale`)
+  KEY `idx_anno_cat`        (`anno`, `categoria_principale`),
+  KEY `idx_regione`         (`anno`, `regione`),
+  KEY `idx_denominazione`   (`denominazione`(100)),
+  KEY `idx_importo`         (`anno`, `importo_totale`),
+  KEY `idx_enti_anno_prov`  (`anno`, `provincia`),
+  KEY `idx_enti_anno_comune`(`anno`, `comune`),
+  KEY `idx_enti_cat_importo`(`anno`, `categoria_principale`, `importo_totale`),
+  KEY `idx_enti_anno_scelte`(`anno`, `n_scelte`),
+  FULLTEXT KEY `ft_enti_denom` (`denominazione`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
@@ -107,7 +112,8 @@ CREATE TABLE IF NOT EXISTS `runts` (
   `data_iscrizione`  DATE          DEFAULT NULL,
   `aggiornato_il`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`cod_fiscale`),
-  KEY `idx_runts_denominazione` (`denominazione`(100))
+  KEY `idx_runts_denominazione` (`denominazione`(100)),
+  FULLTEXT KEY `ft_runts_denom` (`denominazione`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
@@ -179,7 +185,8 @@ CREATE TABLE IF NOT EXISTS `categoria_ammissioni` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_cat_amm`       (`anno`, `categoria`, `cod_fiscale`),
   KEY `idx_ca_cf`               (`cod_fiscale`),
-  KEY `idx_ca_anno_cat_stato`   (`anno`, `categoria`, `stato`)
+  KEY `idx_ca_anno_cat_stato`   (`anno`, `categoria`, `stato`),
+  KEY `idx_ca_cf_anno_stato`    (`cod_fiscale`, `anno`, `stato`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
