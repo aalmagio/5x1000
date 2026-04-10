@@ -52,9 +52,9 @@
               <span
                 v-for="cat in (ente.categorie?.length ? ente.categorie : [ente.categoria])"
                 :key="cat"
-                class="badge capitalize"
+                class="badge"
                 :class="catColor(cat)"
-              >{{ cat ?? '–' }}</span>
+              >{{ slugLabel(cat) }}</span>
               <span v-if="ente.runts_denominazione" class="badge bg-green-100 text-green-700">✓ RUNTS</span>
             </div>
           </div>
@@ -110,12 +110,24 @@
 
       <!-- Bar chart storico importi -->
       <div class="card mb-6">
-        <div class="flex items-center justify-between mb-5">
+        <div class="flex items-center justify-between mb-4">
           <div>
             <h2 class="text-gray-900">Andamento storico</h2>
             <p class="text-sm text-gray-400 mt-0.5">Importo totale ricevuto per anno</p>
           </div>
           <span class="text-xs text-gray-400">{{ ente.anni_presenti?.length }} anni di dati</span>
+        </div>
+
+        <!-- Legenda categorie (solo per enti multi-categoria) -->
+        <div v-if="hasCatBreakdown" class="flex flex-wrap gap-3 mb-4">
+          <div
+            v-for="cat in categorieBreakdown"
+            :key="cat"
+            class="flex items-center gap-1.5 text-xs text-gray-600"
+          >
+            <span class="w-3 h-3 rounded-sm flex-shrink-0" :style="{ backgroundColor: catHex(cat) }"></span>
+            {{ slugLabel(cat) }}
+          </div>
         </div>
 
         <div class="space-y-2.5">
@@ -130,9 +142,30 @@
                 {{ r.anno }}
               </span>
             </div>
-            <!-- Barra -->
-            <div class="flex-1 h-8 bg-gray-100 rounded-lg overflow-hidden">
+            <!-- Barra (stacked per multi-categoria, singola altrimenti) -->
+            <div class="flex-1 h-8 bg-gray-100 rounded-lg overflow-hidden flex">
+              <template v-if="r.cat_breakdown && animated">
+                <div
+                  v-for="cb in r.cat_breakdown"
+                  :key="cb.categoria"
+                  class="h-full transition-all duration-700 ease-out"
+                  :style="{
+                    width: `${((cb.importo_totale ?? 0) / maxImporto * 100).toFixed(1)}%`,
+                    backgroundColor: catHex(cb.categoria),
+                    minWidth: (cb.importo_totale ?? 0) > 0 ? '3px' : '0',
+                  }"
+                ></div>
+              </template>
+              <template v-else-if="r.cat_breakdown && !animated">
+                <div
+                  v-for="cb in r.cat_breakdown"
+                  :key="cb.categoria"
+                  class="h-full"
+                  style="width:0%"
+                ></div>
+              </template>
               <div
+                v-else
                 class="h-full rounded-lg transition-all duration-700 ease-out flex items-center justify-end pr-3"
                 :style="{
                   width: animated ? `${((r.importo_totale ?? 0) / maxImporto * 100).toFixed(1)}%` : '0%',
@@ -148,11 +181,12 @@
                 </span>
               </div>
             </div>
-            <!-- Importo fuori barra (per barre corte) -->
+            <!-- Importo totale a destra -->
             <div class="w-28 flex-shrink-0 text-xs font-semibold text-gray-600 text-right">
-              <span v-if="(r.importo_totale ?? 0) / maxImporto <= 0.3">
+              <span v-if="!r.cat_breakdown || (r.importo_totale ?? 0) / maxImporto <= 0.3">
                 {{ formatEur(r.importo_totale) }}
               </span>
+              <span v-else class="text-gray-400">{{ formatEur(r.importo_totale) }}</span>
             </div>
           </div>
         </div>
@@ -182,7 +216,7 @@
                     <span v-if="r.anno === annoUltimo" class="ml-1.5 text-xs text-brand-400 font-normal">ultimo</span>
                   </td>
                   <td v-if="categorieMultiple" class="hidden sm:table-cell">
-                    <span v-if="r.categoria" class="badge capitalize text-xs" :class="catColor(r.categoria)">{{ r.categoria }}</span>
+                    <span v-if="r.categoria" class="badge text-xs" :class="catColor(r.categoria)">{{ slugLabel(r.categoria) }}</span>
                     <span v-else-if="r.cat_breakdown" class="text-xs text-gray-400">{{ r.cat_breakdown.length }} categorie</span>
                     <span v-else class="text-gray-300">–</span>
                   </td>
@@ -192,21 +226,26 @@
                   <td class="text-right font-semibold text-brand-700 tabular-nums">{{ formatEur(r.importo_totale) }}</td>
                 </tr>
                 <!-- Sub-righe per categoria (solo anni con più categorie) -->
-                <tr
-                  v-if="r.cat_breakdown"
-                  v-for="cb in r.cat_breakdown"
-                  :key="r.anno + '-' + cb.categoria"
-                  class="text-xs text-gray-500 bg-white"
-                >
-                  <td class="pl-6 text-gray-400">↳</td>
-                  <td v-if="categorieMultiple" class="hidden sm:table-cell">
-                    <span class="badge capitalize" :class="catColor(cb.categoria)">{{ cb.categoria }}</span>
-                  </td>
-                  <td class="text-right tabular-nums">{{ formatNum(cb.n_scelte) }}</td>
-                  <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(cb.importo_espresso) }}</td>
-                  <td class="text-right tabular-nums hidden sm:table-cell text-gray-300">—</td>
-                  <td class="text-right tabular-nums text-gray-700">{{ formatEur(cb.importo_totale) }}</td>
-                </tr>
+                <template v-if="r.cat_breakdown">
+                  <tr
+                    v-for="cb in r.cat_breakdown"
+                    :key="r.anno + '-' + cb.categoria"
+                    class="text-xs text-gray-500 bg-white"
+                  >
+                    <td class="pl-6">
+                      <span class="inline-flex items-center gap-1.5 text-gray-400">
+                        <span class="w-2 h-2 rounded-sm flex-shrink-0" :style="{ backgroundColor: catHex(cb.categoria) }"></span>
+                      </span>
+                    </td>
+                    <td v-if="categorieMultiple" class="hidden sm:table-cell">
+                      <span class="badge text-xs" :class="catColor(cb.categoria)">{{ slugLabel(cb.categoria) }}</span>
+                    </td>
+                    <td class="text-right tabular-nums">{{ formatNum(cb.n_scelte) }}</td>
+                    <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(cb.importo_espresso) }}</td>
+                    <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(cb.importo_generico) }}</td>
+                    <td class="text-right tabular-nums text-gray-700">{{ formatEur(cb.importo_totale) }}</td>
+                  </tr>
+                </template>
               </template>
             </tbody>
           </table>
@@ -261,17 +300,53 @@ const loading  = ref(true)
 const error    = ref(false)
 const animated = ref(false)
 
-const CAT_COLORS = {
-  'volontariato':        'bg-green-100 text-green-700',
-  'ets/onlus':           'bg-green-100 text-green-700',
-  'asd':                 'bg-blue-100 text-blue-700',
-  'ricerca scientifica': 'bg-yellow-100 text-yellow-700',
-  'ricerca sanitaria':   'bg-red-100 text-red-700',
-  'comuni':              'bg-orange-100 text-orange-700',
-  'beni culturali':      'bg-pink-100 text-pink-700',
-  'aree protette':       'bg-teal-100 text-teal-700',
+// ── Slug → label display ─────────────────────────────────────────────────────
+const SLUG_LABELS = {
+  volontariato:       'Volontariato',
+  asd:                'ASD',
+  ets_onlus:          'ETS/ONLUS',
+  'ets/onlus':        'ETS/ONLUS',
+  ricerca_scientifica:'Ricerca Scientifica',
+  ricerca_sanitaria:  'Ricerca Sanitaria',
+  comuni:             'Comuni',
+  beni_culturali:     'Beni Culturali',
+  aree_protette:      'Aree Protette',
 }
-const catColor = (c) => CAT_COLORS[(c ?? '').toLowerCase()] ?? 'bg-brand-100 text-brand-700'
+const slugLabel = (s) => SLUG_LABELS[(s ?? '').toLowerCase()] ?? (s ?? '–')
+
+// ── Colori badge (Tailwind classes) ─────────────────────────────────────────
+const SLUG_BADGE = {
+  volontariato:       'bg-green-100 text-green-700',
+  ets_onlus:          'bg-emerald-100 text-emerald-700',
+  'ets/onlus':        'bg-emerald-100 text-emerald-700',
+  asd:                'bg-blue-100 text-blue-700',
+  ricerca_scientifica:'bg-yellow-100 text-yellow-700',
+  ricerca_sanitaria:  'bg-red-100 text-red-700',
+  comuni:             'bg-orange-100 text-orange-700',
+  beni_culturali:     'bg-pink-100 text-pink-700',
+  aree_protette:      'bg-teal-100 text-teal-700',
+}
+const catColor = (c) => SLUG_BADGE[(c ?? '').toLowerCase()] ?? 'bg-brand-100 text-brand-700'
+
+// ── Colori hex per stacked bar ───────────────────────────────────────────────
+const SLUG_HEX = {
+  volontariato:       '#10b981',
+  ets_onlus:          '#34d399',
+  'ets/onlus':        '#34d399',
+  asd:                '#3b82f6',
+  ricerca_scientifica:'#f59e0b',
+  ricerca_sanitaria:  '#ef4444',
+  comuni:             '#f97316',
+  beni_culturali:     '#ec4899',
+  aree_protette:      '#14b8a6',
+}
+const FALLBACK_HEX = ['#6366f1','#8b5cf6','#06b6d4','#84cc16']
+const catHex = (c) => {
+  const key = (c ?? '').toLowerCase()
+  return SLUG_HEX[key] ?? FALLBACK_HEX[
+    Math.abs([...key].reduce((h, ch) => (h << 5) - h + ch.charCodeAt(0), 0)) % FALLBACK_HEX.length
+  ]
+}
 
 const formatNum  = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
 const formatDate = (d) => d
@@ -281,15 +356,15 @@ const formatEur = (n) => n != null
   ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
   : '–'
 
-// Storico ordinato dal più vecchio al più recente
+// Storico ordinato dal più recente al più vecchio
 const storicoOrdinato = computed(() => {
   if (!ente.value?.storico) return []
-  return [...ente.value.storico].sort((a, b) => a.anno - b.anno)
+  return [...ente.value.storico].sort((a, b) => b.anno - a.anno)
 })
 
-const latestRow      = computed(() => storicoOrdinato.value.at(-1))
+const latestRow      = computed(() => storicoOrdinato.value[0])
 const annoUltimo     = computed(() => latestRow.value?.anno)
-const annoPrecedente = computed(() => storicoOrdinato.value.at(-2)?.anno)
+const annoPrecedente = computed(() => storicoOrdinato.value[1]?.anno)
 
 const totaleCumulato = computed(() =>
   storicoOrdinato.value.reduce((acc, r) => acc + (r.importo_totale ?? 0), 0)
@@ -314,15 +389,37 @@ const maxImporto = computed(() =>
 const trend = computed(() => {
   const s = storicoOrdinato.value
   if (s.length < 2) return null
-  const curr = s.at(-1)?.importo_totale ?? 0
-  const prev = s.at(-2)?.importo_totale ?? 0
+  const curr = s[0]?.importo_totale ?? 0
+  const prev = s[1]?.importo_totale ?? 0
   if (!prev) return null
   return ((curr - prev) / prev) * 100
 })
 
+// True se almeno un anno ha il breakdown per categoria
+const hasCatBreakdown = computed(() =>
+  storicoOrdinato.value.some(r => r.cat_breakdown)
+)
+
+// Lista ordinata delle categorie che appaiono nei breakdown (per legenda)
+const categorieBreakdown = computed(() => {
+  const set = new Set()
+  for (const r of storicoOrdinato.value) {
+    if (r.cat_breakdown) {
+      for (const cb of r.cat_breakdown) {
+        if (cb.categoria) set.add(cb.categoria)
+      }
+    }
+  }
+  return [...set]
+})
+
+// True se l'ente ha più di una categoria (in qualsiasi anno)
+const categorieMultiple = computed(() =>
+  (ente.value?.categorie?.length ?? 0) > 1 ||
+  hasCatBreakdown.value
+)
+
 // ── Reddito medio stimato ─────────────────────────────────────────────────────
-// 5×1000 = 5‰ di IRPEF → firma media = irpef_medio × 0,005
-// Con aliquota media effettiva ~20%: reddito_imponibile ≈ irpef_medio / 0,20
 const irpefMedio = computed(() => {
   const r = latestRow.value
   if (!r?.importo_espresso || !r?.n_scelte) return null
@@ -332,12 +429,6 @@ const redditoStimato = computed(() => {
   if (!irpefMedio.value) return null
   return irpefMedio.value / 0.20
 })
-
-// True se l'ente ha più di una categoria (in qualsiasi anno)
-const categorieMultiple = computed(() =>
-  (ente.value?.categorie?.length ?? 0) > 1 ||
-  storicoOrdinato.value.some(r => r.cat_breakdown)
-)
 
 onMounted(async () => {
   try {

@@ -66,6 +66,9 @@ export const fetchClassifica = (params) => get('classifica', params ?? {})
 // Province (con cascading da regione)
 export const fetchProvince = (regione) => get('province', regione ? { regione } : {})
 
+// Geo: aggregati erogato per regione / provincia / comune
+export const fetchGeo = (params) => get('geo', params ?? {})
+
 // Lead generation: salva email prima del download
 export const salvaLead = ({ email, nome, tipo, anno, vuole_newsletter } = {}) =>
   api.post('', new URLSearchParams({

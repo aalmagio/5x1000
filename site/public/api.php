@@ -24,6 +24,9 @@ header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Referrer-Policy: strict-origin-when-cross-origin');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -187,43 +190,104 @@ function action_categorie(): void {
 // Trento e Bolzano vengono entrambi raggruppati sotto "Trentino-Alto Adige".
 function normalize_regione(string $raw): string {
     static $map = [
-        'ABRUZZO'                            => 'Abruzzo',
-        'BASILICATA'                         => 'Basilicata',
-        'CALABRIA'                           => 'Calabria',
-        'CAMPANIA'                           => 'Campania',
-        'EMILIA-ROMAGNA'                     => 'Emilia-Romagna',
-        'EMILIA ROMAGNA'                     => 'Emilia-Romagna',
-        'FRIULI-VENEZIA GIULIA'              => 'Friuli-Venezia Giulia',
-        'FRIULI VENEZIA GIULIA'              => 'Friuli-Venezia Giulia',
-        'LAZIO'                              => 'Lazio',
-        'LIGURIA'                            => 'Liguria',
-        'LOMBARDIA'                          => 'Lombardia',
-        'MARCHE'                             => 'Marche',
-        'MOLISE'                             => 'Molise',
-        'PIEMONTE'                           => 'Piemonte',
-        'PUGLIA'                             => 'Puglia',
-        'SARDEGNA'                           => 'Sardegna',
-        'SICILIA'                            => 'Sicilia',
-        'TOSCANA'                            => 'Toscana',
-        'UMBRIA'                             => 'Umbria',
-        "VALLE D'AOSTA"                      => "Valle d'Aosta",
-        "VALLE D'AOSTA/VALLEE D'AOSTE"       => "Valle d'Aosta",
-        'VENETO'                             => 'Veneto',
-        // Province autonome → raggruppate sotto la regione ufficiale
-        'TRENTO'                             => 'Trentino-Alto Adige',
-        'BOLZANO'                            => 'Trentino-Alto Adige',
-        'TRENTINO-ALTO ADIGE'                => 'Trentino-Alto Adige',
-        'TRENTINO ALTO ADIGE'                => 'Trentino-Alto Adige',
-        'PROVINCIA AUTONOMA DI TRENTO'       => 'Trentino-Alto Adige',
-        'PROVINCIA AUTONOMA DI BOLZANO'      => 'Trentino-Alto Adige',
-        'PROVINCIA AUTONOMA TRENTO'          => 'Trentino-Alto Adige',
-        'PROVINCIA AUTONOMA BOLZANO'         => 'Trentino-Alto Adige',
-        'ALTO ADIGE'                         => 'Trentino-Alto Adige',
-        'P.A. TRENTO'                        => 'Trentino-Alto Adige',
-        'P.A. BOLZANO'                       => 'Trentino-Alto Adige',
+        // ── Abruzzo ──────────────────────────────────────────────────────────
+        'ABRUZZO'                                => 'Abruzzo',
+        // ── Basilicata ───────────────────────────────────────────────────────
+        'BASILICATA'                             => 'Basilicata',
+        // ── Calabria ─────────────────────────────────────────────────────────
+        'CALABRIA'                               => 'Calabria',
+        // ── Campania ─────────────────────────────────────────────────────────
+        'CAMPANIA'                               => 'Campania',
+        // ── Emilia-Romagna ───────────────────────────────────────────────────
+        'EMILIA-ROMAGNA'                         => 'Emilia-Romagna',
+        'EMILIA ROMAGNA'                         => 'Emilia-Romagna',
+        'EMILIAROMAGNA'                          => 'Emilia-Romagna',
+        'EMILIAROMAG NA'                         => 'Emilia-Romagna',
+        'EMILIAROMAG'                            => 'Emilia-Romagna',
+        'EMILIAROMAGN'                           => 'Emilia-Romagna',
+        'EMILIAROMA GNA'                         => 'Emilia-Romagna',
+        'E M ILIA ROMAGN'                        => 'Emilia-Romagna',
+        // ── Friuli-Venezia Giulia ────────────────────────────────────────────
+        'FRIULI-VENEZIA GIULIA'                  => 'Friuli-Venezia Giulia',
+        'FRIULI VENEZIA GIULIA'                  => 'Friuli-Venezia Giulia',
+        'FRIULI VENEZIA - GIULIA'                => 'Friuli-Venezia Giulia',
+        'FRIULI VENEZIA G'                       => 'Friuli-Venezia Giulia',
+        'FRIULI VENEZIA'                         => 'Friuli-Venezia Giulia',
+        'FRIULI V.G.'                            => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIA GIULIA'                   => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAG IULIA'                   => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAGI ULIA'                   => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAGIU LIA'                   => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAGIUL IA'                   => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAGIULIA'                    => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIA'                          => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAG'                         => 'Friuli-Venezia Giulia',
+        // ── Lazio ────────────────────────────────────────────────────────────
+        'LAZIO'                                  => 'Lazio',
+        // ── Liguria ──────────────────────────────────────────────────────────
+        'LIGURIA'                                => 'Liguria',
+        'LIGURA'                                 => 'Liguria',
+        // ── Lombardia ────────────────────────────────────────────────────────
+        'LOMBARDIA'                              => 'Lombardia',
+        'LOMBARIA'                               => 'Lombardia',
+        // ── Marche ───────────────────────────────────────────────────────────
+        'MARCHE'                                 => 'Marche',
+        // ── Molise ───────────────────────────────────────────────────────────
+        'MOLISE'                                 => 'Molise',
+        // ── Piemonte ─────────────────────────────────────────────────────────
+        'PIEMONTE'                               => 'Piemonte',
+        // ── Puglia ───────────────────────────────────────────────────────────
+        'PUGLIA'                                 => 'Puglia',
+        'PUGLIE'                                 => 'Puglia',
+        // ── Sardegna ─────────────────────────────────────────────────────────
+        'SARDEGNA'                               => 'Sardegna',
+        // ── Sicilia ──────────────────────────────────────────────────────────
+        'SICILIA'                                => 'Sicilia',
+        // ── Toscana ──────────────────────────────────────────────────────────
+        'TOSCANA'                                => 'Toscana',
+        // ── Trentino-Alto Adige ──────────────────────────────────────────────
+        'TRENTINO-ALTO ADIGE'                    => 'Trentino-Alto Adige',
+        'TRENTINO ALTO ADIGE'                    => 'Trentino-Alto Adige',
+        'TRENTINO ALTO ADIGE (BOLZANO)'          => 'Trentino-Alto Adige',
+        'TRENTINO ALTO ADIGE (TRENTO)'           => 'Trentino-Alto Adige',
+        'TRENTO'                                 => 'Trentino-Alto Adige',
+        'BOLZANO'                                => 'Trentino-Alto Adige',
+        'ALTO ADIGE'                             => 'Trentino-Alto Adige',
+        'TAA BOLZANO'                            => 'Trentino-Alto Adige',
+        'TAA TRENTO'                             => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA DI TRENTO'           => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA DI BOLZANO'          => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA TRENTO'              => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA BOLZANO'             => 'Trentino-Alto Adige',
+        'P.A. TRENTO'                            => 'Trentino-Alto Adige',
+        'P.A. BOLZANO'                           => 'Trentino-Alto Adige',
+        // ── Umbria ───────────────────────────────────────────────────────────
+        'UMBRIA'                                 => 'Umbria',
+        // ── Valle d'Aosta ────────────────────────────────────────────────────
+        "VALLE D'AOSTA"                          => "Valle d'Aosta",
+        "VALLE D'AOSTA/VALLEE D'AOSTE"           => "Valle d'Aosta",
+        "VALLED ' AOSTA"                         => "Valle d'Aosta",
+        "VALLE D ' AOSTA"                        => "Valle d'Aosta",
+        'VALLE'                                  => "Valle d'Aosta",
+        // ── Veneto ───────────────────────────────────────────────────────────
+        'VENETO'                                 => 'Veneto',
+        // ── Valori non riconoscibili ─────────────────────────────────────────
+        '#RIF!'                                  => 'ND',
+        'ND'                                     => 'ND',
     ];
+
     $key = strtoupper(trim($raw));
-    return $map[$key] ?? ucwords(strtolower($raw));
+
+    // Lookup diretto
+    if (isset($map[$key])) return $map[$key];
+
+    // Rimuovi caratteri non-lettera iniziali e finali poi riprova
+    // Gestisce: "=- Toscana", "‐ Calabria", "Lazio -", "Veneto -", "Lombardia -"
+    $clean = preg_replace(['/^[^A-Z]+/u', '/[^A-Z\')]+$/u'], '', $key);
+    $clean = preg_replace('/\s+/', ' ', trim($clean));
+    if ($clean !== $key && isset($map[$clean])) return $map[$clean];
+
+    return ucwords(strtolower(trim($raw)));
 }
 
 // Dato un nome display (es. "Trentino-Alto Adige"), restituisce tutti i valori
@@ -433,16 +497,16 @@ function action_ente(): void {
     // Denominazione canonica: RUNTS se disponibile, altrimenti anno più recente
     $denom_canonica = ($first['runts_denominazione'] ?: null) ?? $first['denominazione'];
 
-    // Mappa flag → nome categoria
+    // Mappa flag → slug categoria (stesso formato di categoria_principale)
     $cat_map = [
-        'cat_volontariato' => 'Volontariato',
-        'cat_asd'          => 'ASD',
-        'cat_ets_onlus'    => 'ETS/ONLUS',
-        'cat_ricerca_sci'  => 'Ricerca Scientifica',
-        'cat_ricerca_san'  => 'Ricerca Sanitaria',
-        'cat_comuni'       => 'Comuni',
-        'cat_beni_cult'    => 'Beni Culturali',
-        'cat_aree_prot'    => 'Aree Protette',
+        'cat_volontariato' => 'volontariato',
+        'cat_asd'          => 'asd',
+        'cat_ets_onlus'    => 'ets_onlus',
+        'cat_ricerca_sci'  => 'ricerca_scientifica',
+        'cat_ricerca_san'  => 'ricerca_sanitaria',
+        'cat_comuni'       => 'comuni',
+        'cat_beni_cult'    => 'beni_culturali',
+        'cat_aree_prot'    => 'aree_protette',
     ];
 
     // Raccoglie TUTTE le categorie su TUTTE le righe (sia da categoria_principale
@@ -467,6 +531,25 @@ function action_ente(): void {
     }
     krsort($per_anno); // anno decrescente
 
+    // Carica il breakdown per categoria da categoria_ammissioni
+    $stmt_ca = $pdo->prepare(
+        "SELECT anno, categoria, n_scelte, importo_espresso, importo_generico, importo_totale
+         FROM categoria_ammissioni
+         WHERE cod_fiscale = ? AND stato = 'ammesso'
+         ORDER BY anno DESC, importo_totale DESC"
+    );
+    $stmt_ca->execute([$cf]);
+    $cat_per_anno = [];
+    foreach ($stmt_ca->fetchAll() as $cr) {
+        $cat_per_anno[(int)$cr['anno']][] = [
+            'categoria'        => $cr['categoria'],
+            'n_scelte'         => (int)$cr['n_scelte'],
+            'importo_espresso' => (float)$cr['importo_espresso'],
+            'importo_generico' => (float)$cr['importo_generico'],
+            'importo_totale'   => (float)$cr['importo_totale'],
+        ];
+    }
+
     $storico = [];
     foreach ($per_anno as $anno => $anno_rows) {
         $r0          = $anno_rows[0];
@@ -475,13 +558,17 @@ function action_ente(): void {
         $tot_gen     = array_sum(array_column($anno_rows, 'importo_generico'));
         $tot_tot     = array_sum(array_column($anno_rows, 'importo_totale'));
 
-        // Breakdown per categoria (solo se ci sono più righe nello stesso anno)
+        // Breakdown per categoria: priorità a categoria_ammissioni (più completo),
+        // fallback su più righe enti nello stesso anno
         $cat_breakdown = null;
-        if (count($anno_rows) > 1) {
+        if (isset($cat_per_anno[$anno]) && count($cat_per_anno[$anno]) > 1) {
+            $cat_breakdown = $cat_per_anno[$anno];
+        } elseif (count($anno_rows) > 1) {
             $cat_breakdown = array_map(fn($r) => [
                 'categoria'        => $r['categoria_principale'],
                 'n_scelte'         => (int)$r['n_scelte'],
                 'importo_espresso' => (float)$r['importo_espresso'],
+                'importo_generico' => null,
                 'importo_totale'   => (float)$r['importo_totale'],
             ], $anno_rows);
         }
@@ -904,7 +991,14 @@ function action_download(): void {
     if (!$row) err('File non trovato nel catalogo', 404);
 
     $path = $row['percorso'];
-    if (!file_exists($path) || !is_readable($path)) {
+    // Path traversal guard: il file deve essere dentro la directory Dati/
+    $allowed_base = realpath(__DIR__ . '/../../Dati');
+    $real_path    = realpath($path);
+    if ($real_path === false || $allowed_base === false ||
+        strncmp($real_path, $allowed_base, strlen($allowed_base)) !== 0) {
+        err('File non disponibile sul server', 404);
+    }
+    if (!is_readable($real_path)) {
         err('File non disponibile sul server', 404);
     }
 
@@ -1572,6 +1666,142 @@ function action_conflitti_categoria(): void {
 }
 
 
+// ─── Geo: aggregati per regione / provincia / comune ─────────────────────────
+/**
+ * ?action=geo[&anno=YYYY][&categoria=CAT]
+ *   → { anno, totale: {n_enti,n_scelte,importo_totale}, per_regione: [...] }
+ *
+ * ?action=geo&regione=NOME_DISPLAY[&anno=YYYY][&categoria=CAT]
+ *   → { anno, regione, per_provincia: [{provincia, n_enti, n_scelte, importo_totale}] }
+ *
+ * ?action=geo&provincia=SIGLA[&anno=YYYY][&categoria=CAT]
+ *   → { anno, provincia, per_comune: [{comune, n_enti, n_scelte, importo_totale}] }
+ */
+function action_geo(): void {
+    $pdo       = db();
+    $anno      = int_param('anno');
+    $regione   = str_param('regione');   // nome display normalizzato
+    $provincia = str_param('provincia'); // sigla 2/3 char
+    $categoria = str_param('categoria');
+
+    if (!$anno) {
+        $anno = (int)$pdo->query("SELECT MAX(anno) FROM enti")->fetchColumn();
+    }
+
+    $cond   = ['e.anno = ?'];
+    $params = [$anno];
+    if ($categoria) {
+        $cond[]   = 'e.categoria_principale = ?';
+        $params[] = $categoria;
+    }
+
+    // ── Livello comune ───────────────────────────────────────────────────────
+    if ($provincia) {
+        $cond[]   = 'e.provincia = ?';
+        $params[] = strtoupper($provincia);
+        $stmt = $pdo->prepare(
+            "SELECT e.comune,
+                    COUNT(*) AS n_enti,
+                    SUM(e.n_scelte) AS n_scelte,
+                    SUM(e.importo_totale) AS importo_totale
+             FROM enti e
+             WHERE " . implode(' AND ', $cond) . "
+               AND e.comune IS NOT NULL AND e.comune != ''
+             GROUP BY e.comune
+             ORDER BY importo_totale DESC"
+        );
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$r) {
+            $r['n_enti']         = (int)$r['n_enti'];
+            $r['n_scelte']       = (int)($r['n_scelte'] ?? 0);
+            $r['importo_totale'] = (float)($r['importo_totale'] ?? 0);
+        }
+        json_out(['anno' => $anno, 'provincia' => strtoupper($provincia), 'per_comune' => $rows]);
+        return;
+    }
+
+    // ── Livello provincia ────────────────────────────────────────────────────
+    if ($regione) {
+        $raw_regioni = regione_display_to_raws($pdo, $regione);
+        if (!$raw_regioni) {
+            json_out(['anno' => $anno, 'regione' => $regione, 'per_provincia' => []]);
+            return;
+        }
+        $ph      = implode(',', array_fill(0, count($raw_regioni), '?'));
+        $cond[]  = "e.regione IN ($ph)";
+        $params  = array_merge($params, $raw_regioni);
+        $stmt = $pdo->prepare(
+            "SELECT e.provincia,
+                    COUNT(*) AS n_enti,
+                    SUM(e.n_scelte) AS n_scelte,
+                    SUM(e.importo_totale) AS importo_totale
+             FROM enti e
+             WHERE " . implode(' AND ', $cond) . "
+               AND e.provincia IS NOT NULL AND e.provincia != ''
+             GROUP BY e.provincia
+             ORDER BY importo_totale DESC"
+        );
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$r) {
+            $r['n_enti']         = (int)$r['n_enti'];
+            $r['n_scelte']       = (int)($r['n_scelte'] ?? 0);
+            $r['importo_totale'] = (float)($r['importo_totale'] ?? 0);
+        }
+        json_out(['anno' => $anno, 'regione' => $regione, 'per_provincia' => $rows]);
+        return;
+    }
+
+    // ── Livello regione (top level) ──────────────────────────────────────────
+    $stmt = $pdo->prepare(
+        "SELECT e.regione,
+                COUNT(*) AS n_enti,
+                SUM(e.n_scelte) AS n_scelte,
+                SUM(e.importo_totale) AS importo_totale
+         FROM enti e
+         WHERE " . implode(' AND ', $cond) . "
+         GROUP BY e.regione
+         ORDER BY importo_totale DESC"
+    );
+    $stmt->execute($params);
+    $raw_rows = $stmt->fetchAll();
+
+    // Aggrega per nome display normalizzato (es. TRENTO+BOLZANO → Trentino-Alto Adige)
+    $agg = [];
+    foreach ($raw_rows as $r) {
+        $disp = normalize_regione($r['regione'] ?? '');
+        if (!isset($agg[$disp])) {
+            $agg[$disp] = ['regione' => $disp, 'n_enti' => 0, 'n_scelte' => 0, 'importo_totale' => 0.0];
+        }
+        $agg[$disp]['n_enti']         += (int)$r['n_enti'];
+        $agg[$disp]['n_scelte']       += (int)($r['n_scelte'] ?? 0);
+        $agg[$disp]['importo_totale'] += (float)($r['importo_totale'] ?? 0);
+    }
+    $per_regione = array_values($agg);
+    usort($per_regione, fn($a, $b) => $b['importo_totale'] <=> $a['importo_totale']);
+
+    $totale_enti    = array_sum(array_column($per_regione, 'n_enti'));
+    $totale_scelte  = array_sum(array_column($per_regione, 'n_scelte'));
+    $totale_importo = array_sum(array_column($per_regione, 'importo_totale'));
+    foreach ($per_regione as &$r) {
+        $r['perc_importo'] = $totale_importo > 0
+            ? round($r['importo_totale'] / $totale_importo * 100, 2)
+            : 0.0;
+    }
+
+    json_out([
+        'anno'        => $anno,
+        'totale'      => [
+            'n_enti'         => $totale_enti,
+            'n_scelte'       => $totale_scelte,
+            'importo_totale' => $totale_importo,
+        ],
+        'per_regione' => $per_regione,
+    ]);
+}
+
+
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 try {
@@ -1599,11 +1829,12 @@ try {
         'multi_categoria'      => action_multi_categoria(),
         'composizione_categorie' => action_composizione_categorie(),
         'conflitti_categoria'  => action_conflitti_categoria(),
-        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria", 404),
+        'geo'                  => action_geo(),
+        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria, geo", 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());
-    err('Errore database: ' . $e->getMessage(), 500);
+    err('Errore database', 500);
 } catch (Throwable $e) {
     error_log('[api.php] Error: ' . $e->getMessage());
     err('Errore interno del server', 500);

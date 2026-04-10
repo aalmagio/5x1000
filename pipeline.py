@@ -604,6 +604,131 @@ def _ciclo_defaults_path(root_dir: str) -> str:
     return os.path.join(root_dir, _CICLO_DEFAULTS_FILE)
 
 
+def _controlla_aggiornamento_elenco(root_dir: str, anno: int) -> bool:
+    """
+    Confronta i nomi dei file attesi dalla pagina AdE con quelli presenti in {anno}/.
+    Se trova file online che non esistono localmente → invalida download.done e etl.done
+    e restituisce True.  In caso di errore di rete o di importazione restituisce False
+    (comportamento sicuro: non forza un re-download inutile).
+    """
+    try:
+        import requests as _req
+        from cinque_per_mille import (
+            find_download_links, sanitize_filename, YEAR_URLS, HEADERS,
+        )
+    except ImportError as e:
+        logging.debug(f"[CICLO] check_elenco({anno}): import fallito ({e})")
+        return False
+
+    url = YEAR_URLS.get(anno)
+    if not url:
+        return False
+
+    try:
+        session = _req.Session()
+        session.headers.update(HEADERS)
+        links = find_download_links(url, session)
+        nomi_online: set[str] = set()
+        for ext in ("pdf", "csv"):
+            for idx, u in enumerate(links.get(ext, []), 1):
+                nomi_online.add(sanitize_filename(u, idx, ext))
+
+        if not nomi_online:
+            return False
+
+        local_folder = os.path.join(root_dir, str(anno))
+        local_files = set(os.listdir(local_folder)) if os.path.isdir(local_folder) else set()
+        nuovi = sorted(nomi_online - local_files)
+
+        if nuovi:
+            logging.info(
+                f"[CICLO] {anno}/download: file aggiornati su AdE → {nuovi}\n"
+                f"[CICLO] {anno}/download: invalido .done, rieseguo download e ETL"
+            )
+            _clear_done(root_dir, anno, "download")
+            _clear_done(root_dir, anno, "etl")
+            return True
+
+        logging.debug(f"[CICLO] check_elenco({anno}): nessun file nuovo ({len(nomi_online)} trovati online)")
+        return False
+
+    except Exception as e:
+        logging.warning(f"[CICLO] check_elenco({anno}): errore rete ({e}) — skip check, mantengo .done")
+        return False
+
+
+def _controlla_aggiornamento_categorie(root_dir: str, anno: int, input_path: str) -> bool:
+    """
+    Confronta i nomi dei file di categoria attesi (da categorie.xlsx + pagine AdE)
+    con i file presenti in {anno}/{slug}/.
+    Se trova file nuovi → invalida categorie.done e etl.done, restituisce True.
+    In caso di errore restituisce False (skip sicuro).
+    """
+    if not os.path.isfile(input_path):
+        return False
+
+    try:
+        import requests as _req
+        from scarica_categorie import (
+            load_links,
+            smart_filename as _smart_fn,
+            _is_direct_file_url,
+            _detect_file_ext,
+            find_download_links as _find_links,
+            HEADERS as _CAT_HEADERS,
+        )
+    except ImportError as e:
+        logging.debug(f"[CICLO] check_categorie({anno}): import fallito ({e})")
+        return False
+
+    try:
+        entries = [r for r in load_links(input_path) if int(r["anno"]) == anno]
+    except Exception as e:
+        logging.warning(f"[CICLO] check_categorie({anno}): errore lettura links ({e})")
+        return False
+
+    if not entries:
+        return False
+
+    session = _req.Session()
+    session.headers.update(_CAT_HEADERS)
+    nuovi_totali: list[str] = []
+
+    for entry in entries:
+        slug = entry["slug"]
+        url  = entry["url"]
+        local_folder = os.path.join(root_dir, str(anno), slug)
+        local_files  = set(os.listdir(local_folder)) if os.path.isdir(local_folder) else set()
+        try:
+            nomi_online: set[str] = set()
+            if _is_direct_file_url(url):
+                ext = _detect_file_ext(url, session) or "csv"
+                nomi_online.add(_smart_fn(url, 1, ext))
+            else:
+                links = _find_links(url, session)
+                for ext in ("pdf", "csv"):
+                    for idx, u in enumerate(links.get(ext, []), 1):
+                        nomi_online.add(_smart_fn(u, idx, ext))
+
+            nuovi = sorted(nomi_online - local_files)
+            if nuovi:
+                nuovi_totali.extend(f"{slug}/{n}" for n in nuovi)
+        except Exception as e:
+            logging.debug(f"[CICLO] check_categorie({anno}/{slug}): {e}")
+
+    if nuovi_totali:
+        logging.info(
+            f"[CICLO] {anno}/categorie: file aggiornati su AdE → {nuovi_totali}\n"
+            f"[CICLO] {anno}/categorie: invalido .done, rieseguo download e ETL"
+        )
+        _clear_done(root_dir, anno, "categorie")
+        _clear_done(root_dir, anno, "etl")
+        return True
+
+    logging.debug(f"[CICLO] check_categorie({anno}): nessun file nuovo")
+    return False
+
+
 def _carica_ciclo_defaults(root_dir: str) -> dict | None:
     """
     Legge ciclo_defaults.yaml.
@@ -761,6 +886,11 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
     for anno in anni_iter:
         # 1a. Elenco complessivo
         if _is_done(root_dir, anno, "download"):
+            # Controlla se AdE ha pubblicato file nuovi/diversi rispetto a quelli locali.
+            # Se sì, il check invalida il .done e il blocco sottostante rieseguirà il download.
+            _controlla_aggiornamento_elenco(root_dir, anno)
+
+        if _is_done(root_dir, anno, "download"):
             logging.info(f"[CICLO] {anno}/download → già fatto, skip")
         else:
             cmd = [PYTHON, "cinque_per_mille.py", "--source", source_eff, "--anni", str(anno)]
@@ -773,6 +903,10 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
                 logging.warning(f"[CICLO] {anno}/download fallito — continuo con gli altri anni")
 
         # 1b. Categorie
+        if _is_done(root_dir, anno, "categorie"):
+            # Stessa logica: verifica se ci sono file di categoria nuovi su AdE.
+            _controlla_aggiornamento_categorie(root_dir, anno, input_path)
+
         if _is_done(root_dir, anno, "categorie"):
             logging.info(f"[CICLO] {anno}/categorie → già fatto, skip")
         elif not os.path.isfile(input_path):
