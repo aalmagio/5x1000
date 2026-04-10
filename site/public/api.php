@@ -190,43 +190,104 @@ function action_categorie(): void {
 // Trento e Bolzano vengono entrambi raggruppati sotto "Trentino-Alto Adige".
 function normalize_regione(string $raw): string {
     static $map = [
-        'ABRUZZO'                            => 'Abruzzo',
-        'BASILICATA'                         => 'Basilicata',
-        'CALABRIA'                           => 'Calabria',
-        'CAMPANIA'                           => 'Campania',
-        'EMILIA-ROMAGNA'                     => 'Emilia-Romagna',
-        'EMILIA ROMAGNA'                     => 'Emilia-Romagna',
-        'FRIULI-VENEZIA GIULIA'              => 'Friuli-Venezia Giulia',
-        'FRIULI VENEZIA GIULIA'              => 'Friuli-Venezia Giulia',
-        'LAZIO'                              => 'Lazio',
-        'LIGURIA'                            => 'Liguria',
-        'LOMBARDIA'                          => 'Lombardia',
-        'MARCHE'                             => 'Marche',
-        'MOLISE'                             => 'Molise',
-        'PIEMONTE'                           => 'Piemonte',
-        'PUGLIA'                             => 'Puglia',
-        'SARDEGNA'                           => 'Sardegna',
-        'SICILIA'                            => 'Sicilia',
-        'TOSCANA'                            => 'Toscana',
-        'UMBRIA'                             => 'Umbria',
-        "VALLE D'AOSTA"                      => "Valle d'Aosta",
-        "VALLE D'AOSTA/VALLEE D'AOSTE"       => "Valle d'Aosta",
-        'VENETO'                             => 'Veneto',
-        // Province autonome → raggruppate sotto la regione ufficiale
-        'TRENTO'                             => 'Trentino-Alto Adige',
-        'BOLZANO'                            => 'Trentino-Alto Adige',
-        'TRENTINO-ALTO ADIGE'                => 'Trentino-Alto Adige',
-        'TRENTINO ALTO ADIGE'                => 'Trentino-Alto Adige',
-        'PROVINCIA AUTONOMA DI TRENTO'       => 'Trentino-Alto Adige',
-        'PROVINCIA AUTONOMA DI BOLZANO'      => 'Trentino-Alto Adige',
-        'PROVINCIA AUTONOMA TRENTO'          => 'Trentino-Alto Adige',
-        'PROVINCIA AUTONOMA BOLZANO'         => 'Trentino-Alto Adige',
-        'ALTO ADIGE'                         => 'Trentino-Alto Adige',
-        'P.A. TRENTO'                        => 'Trentino-Alto Adige',
-        'P.A. BOLZANO'                       => 'Trentino-Alto Adige',
+        // ── Abruzzo ──────────────────────────────────────────────────────────
+        'ABRUZZO'                                => 'Abruzzo',
+        // ── Basilicata ───────────────────────────────────────────────────────
+        'BASILICATA'                             => 'Basilicata',
+        // ── Calabria ─────────────────────────────────────────────────────────
+        'CALABRIA'                               => 'Calabria',
+        // ── Campania ─────────────────────────────────────────────────────────
+        'CAMPANIA'                               => 'Campania',
+        // ── Emilia-Romagna ───────────────────────────────────────────────────
+        'EMILIA-ROMAGNA'                         => 'Emilia-Romagna',
+        'EMILIA ROMAGNA'                         => 'Emilia-Romagna',
+        'EMILIAROMAGNA'                          => 'Emilia-Romagna',
+        'EMILIAROMAG NA'                         => 'Emilia-Romagna',
+        'EMILIAROMAG'                            => 'Emilia-Romagna',
+        'EMILIAROMAGN'                           => 'Emilia-Romagna',
+        'EMILIAROMA GNA'                         => 'Emilia-Romagna',
+        'E M ILIA ROMAGN'                        => 'Emilia-Romagna',
+        // ── Friuli-Venezia Giulia ────────────────────────────────────────────
+        'FRIULI-VENEZIA GIULIA'                  => 'Friuli-Venezia Giulia',
+        'FRIULI VENEZIA GIULIA'                  => 'Friuli-Venezia Giulia',
+        'FRIULI VENEZIA - GIULIA'                => 'Friuli-Venezia Giulia',
+        'FRIULI VENEZIA G'                       => 'Friuli-Venezia Giulia',
+        'FRIULI VENEZIA'                         => 'Friuli-Venezia Giulia',
+        'FRIULI V.G.'                            => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIA GIULIA'                   => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAG IULIA'                   => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAGI ULIA'                   => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAGIU LIA'                   => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAGIUL IA'                   => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAGIULIA'                    => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIA'                          => 'Friuli-Venezia Giulia',
+        'FRIULIVENEZIAG'                         => 'Friuli-Venezia Giulia',
+        // ── Lazio ────────────────────────────────────────────────────────────
+        'LAZIO'                                  => 'Lazio',
+        // ── Liguria ──────────────────────────────────────────────────────────
+        'LIGURIA'                                => 'Liguria',
+        'LIGURA'                                 => 'Liguria',
+        // ── Lombardia ────────────────────────────────────────────────────────
+        'LOMBARDIA'                              => 'Lombardia',
+        'LOMBARIA'                               => 'Lombardia',
+        // ── Marche ───────────────────────────────────────────────────────────
+        'MARCHE'                                 => 'Marche',
+        // ── Molise ───────────────────────────────────────────────────────────
+        'MOLISE'                                 => 'Molise',
+        // ── Piemonte ─────────────────────────────────────────────────────────
+        'PIEMONTE'                               => 'Piemonte',
+        // ── Puglia ───────────────────────────────────────────────────────────
+        'PUGLIA'                                 => 'Puglia',
+        'PUGLIE'                                 => 'Puglia',
+        // ── Sardegna ─────────────────────────────────────────────────────────
+        'SARDEGNA'                               => 'Sardegna',
+        // ── Sicilia ──────────────────────────────────────────────────────────
+        'SICILIA'                                => 'Sicilia',
+        // ── Toscana ──────────────────────────────────────────────────────────
+        'TOSCANA'                                => 'Toscana',
+        // ── Trentino-Alto Adige ──────────────────────────────────────────────
+        'TRENTINO-ALTO ADIGE'                    => 'Trentino-Alto Adige',
+        'TRENTINO ALTO ADIGE'                    => 'Trentino-Alto Adige',
+        'TRENTINO ALTO ADIGE (BOLZANO)'          => 'Trentino-Alto Adige',
+        'TRENTINO ALTO ADIGE (TRENTO)'           => 'Trentino-Alto Adige',
+        'TRENTO'                                 => 'Trentino-Alto Adige',
+        'BOLZANO'                                => 'Trentino-Alto Adige',
+        'ALTO ADIGE'                             => 'Trentino-Alto Adige',
+        'TAA BOLZANO'                            => 'Trentino-Alto Adige',
+        'TAA TRENTO'                             => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA DI TRENTO'           => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA DI BOLZANO'          => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA TRENTO'              => 'Trentino-Alto Adige',
+        'PROVINCIA AUTONOMA BOLZANO'             => 'Trentino-Alto Adige',
+        'P.A. TRENTO'                            => 'Trentino-Alto Adige',
+        'P.A. BOLZANO'                           => 'Trentino-Alto Adige',
+        // ── Umbria ───────────────────────────────────────────────────────────
+        'UMBRIA'                                 => 'Umbria',
+        // ── Valle d'Aosta ────────────────────────────────────────────────────
+        "VALLE D'AOSTA"                          => "Valle d'Aosta",
+        "VALLE D'AOSTA/VALLEE D'AOSTE"           => "Valle d'Aosta",
+        "VALLED ' AOSTA"                         => "Valle d'Aosta",
+        "VALLE D ' AOSTA"                        => "Valle d'Aosta",
+        'VALLE'                                  => "Valle d'Aosta",
+        // ── Veneto ───────────────────────────────────────────────────────────
+        'VENETO'                                 => 'Veneto',
+        // ── Valori non riconoscibili ─────────────────────────────────────────
+        '#RIF!'                                  => 'ND',
+        'ND'                                     => 'ND',
     ];
+
     $key = strtoupper(trim($raw));
-    return $map[$key] ?? ucwords(strtolower($raw));
+
+    // Lookup diretto
+    if (isset($map[$key])) return $map[$key];
+
+    // Rimuovi caratteri non-lettera iniziali e finali poi riprova
+    // Gestisce: "=- Toscana", "‐ Calabria", "Lazio -", "Veneto -", "Lombardia -"
+    $clean = preg_replace(['/^[^A-Z]+/u', '/[^A-Z\')]+$/u'], '', $key);
+    $clean = preg_replace('/\s+/', ' ', trim($clean));
+    if ($clean !== $key && isset($map[$clean])) return $map[$clean];
+
+    return ucwords(strtolower(trim($raw)));
 }
 
 // Dato un nome display (es. "Trentino-Alto Adige"), restituisce tutti i valori
