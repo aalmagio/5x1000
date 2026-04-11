@@ -777,7 +777,7 @@ def _aggiorna_runts(cur, csv_path: Path, pd) -> None:
             sede_prov   = best.get("RUNTS_SEDE_PROV")     or None
             raw_attivo  = str(best.get("RUNTS_5X1000", "0") or "0").strip()
             attivo      = 1 if raw_attivo in ("1", "True", "true") else 0
-            data_isc    = best.get("RUNTS_DATA_ISCRIZIONE") or None
+            data_isc    = _parse_date_ita(best.get("RUNTS_DATA_ISCRIZIONE"))
         else:
             best        = group.iloc[0]
             denom       = best.get("DENOMINAZIONE") or None
@@ -868,6 +868,25 @@ def _bool_to_int(v) -> int:
     """Converte 'True'/'False'/1/0/NaN → 1/0."""
     if v is None:
         return 0
+
+
+_DATE_FORMATS = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d")
+
+def _parse_date_ita(v) -> "str | None":
+    """Converte date in vari formati (dd/mm/yyyy, ecc.) → 'yyyy-mm-dd' per MySQL DATE.
+    Restituisce None se il valore è vuoto o non parsabile."""
+    if v is None:
+        return None
+    s = str(v).strip()
+    if not s or s in ("nan", "None", "NaT", "0000-00-00"):
+        return None
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    logger.debug(f"db_updater: data non parsabile ignorata: {s!r}")
+    return None
     s = str(v).strip().lower()
     return 1 if s in ("true", "1", "yes", "sì", "si") else 0
 
@@ -946,6 +965,10 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int], upsert: bool = Fals
         for col in _BOOL_COLS:
             if col in chunk.columns:
                 chunk[col] = chunk[col].apply(_bool_to_int)
+
+        # Converti date italiane dd/mm/yyyy → yyyy-mm-dd per MySQL DATE.
+        if "runts_data_iscrizione" in chunk.columns:
+            chunk["runts_data_iscrizione"] = chunk["runts_data_iscrizione"].apply(_parse_date_ita)
 
         # Sostituisci NaN con None (→ NULL in MySQL).
         def _to_none(v):
