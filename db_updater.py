@@ -818,6 +818,159 @@ def _aggiorna_runts(cur, csv_path: Path, pd) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Aggiornamento RUNTS da file Excel standalone
+# ---------------------------------------------------------------------------
+
+# Possibili nomi di colonna nel file RUNTS (uppercase, auto-detect)
+_RUNTS_COL_ALIASES: dict[str, list[str]] = {
+    "cod_fiscale":     ["CODICE FISCALE", "COD_FISCALE", "COD. FISCALE", "CF", "CODFISCALE"],
+    "denominazione":   ["DENOMINAZIONE", "NOME", "RAGIONE SOCIALE"],
+    "sezione":         ["SEZIONE", "SEZIONE RUNTS"],
+    "sede_comune":     ["SEDE COMUNE", "SEDE_COMUNE", "COMUNE SEDE", "COMUNE LEGALE", "COMUNE"],
+    "sede_prov":       ["SEDE PROV", "SEDE_PROV", "PROV SEDE", "PROVINCIA", "PROV", "SIGLA"],
+    "attivo_5x1000":   ["5X1000", "ABILITATO 5X1000", "CINQUE PER MILLE", "RUNTS_5X1000"],
+    "data_iscrizione": ["DATA ISCRIZIONE", "DATA_ISCRIZIONE", "RUNTS_DATA_ISCRIZIONE",
+                        "DATA PRIMA ISCRIZIONE", "DATA"],
+}
+
+
+def aggiorna_runts_da_xlsx(xlsx_path: Path, conn) -> bool:
+    """
+    Aggiorna le tabelle `runts` e i campi RUNTS in `enti` da un file Excel RUNTS standalone.
+
+    Accetta file con colonne in vari formati (auto-detect tramite _RUNTS_COL_ALIASES).
+    Operazioni:
+      1. UPSERT in `runts` (una riga per CF)
+      2. UPDATE dei campi runts_* in `enti` per ogni CF trovato (tutti gli anni)
+
+    Uso CLI:
+      python db_updater.py --runts /path/to/elenco_runts.xlsx
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        logger.error("db_updater: pandas non disponibile")
+        return False
+
+    logger.info(f"db_updater: lettura file RUNTS {xlsx_path}")
+    try:
+        df = pd.read_excel(xlsx_path, dtype=str)
+    except Exception as e:
+        logger.error(f"db_updater: impossibile leggere {xlsx_path}: {e}")
+        return False
+
+    # Normalizza intestazioni: strip + uppercase
+    df.columns = [str(c).strip().upper() for c in df.columns]
+    logger.info(f"db_updater: colonne rilevate: {list(df.columns)}")
+
+    # Risolvi mapping colonne
+    col = {}
+    for field, aliases in _RUNTS_COL_ALIASES.items():
+        for alias in aliases:
+            if alias in df.columns:
+                col[field] = alias
+                break
+
+    if "cod_fiscale" not in col:
+        logger.error(
+            f"db_updater: colonna codice fiscale non trovata. "
+            f"Colonne disponibili: {list(df.columns)}"
+        )
+        return False
+
+    logger.info(f"db_updater: mapping colonne RUNTS → {col}")
+
+    # Costruisci lista righe normalizzate
+    records: list[dict] = []
+    for _, row in df.iterrows():
+        cf = str(row.get(col["cod_fiscale"], "") or "").strip()
+        if not cf or cf.lower() in ("nan", "none", ""):
+            continue
+
+        def _get(field: str) -> "str | None":
+            if field not in col:
+                return None
+            v = str(row.get(col[field], "") or "").strip()
+            return None if v.lower() in ("nan", "none", "") else v
+
+        attivo_raw = _get("attivo_5x1000") or "0"
+        attivo = 1 if attivo_raw.lower() in ("1", "true", "si", "sì", "yes", "x") else 0
+
+        records.append({
+            "cf":             cf,
+            "denominazione":  _get("denominazione"),
+            "sezione":        _get("sezione"),
+            "sede_comune":    _get("sede_comune"),
+            "sede_prov":      _get("sede_prov"),
+            "attivo":         attivo,
+            "data_isc":       _parse_date_ita(_get("data_iscrizione")),
+        })
+
+    if not records:
+        logger.warning("db_updater: nessuna riga valida nel file RUNTS")
+        return False
+
+    logger.info(f"db_updater: {len(records):,} enti RUNTS da aggiornare")
+
+    upsert_runts = """
+        INSERT INTO runts
+          (cod_fiscale, denominazione, sezione, sede_comune, sede_prov,
+           attivo_5x1000, data_iscrizione)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+          denominazione   = VALUES(denominazione),
+          sezione         = VALUES(sezione),
+          sede_comune     = VALUES(sede_comune),
+          sede_prov       = VALUES(sede_prov),
+          attivo_5x1000   = VALUES(attivo_5x1000),
+          data_iscrizione = VALUES(data_iscrizione),
+          aggiornato_il   = NOW()
+    """
+
+    update_enti = """
+        UPDATE enti SET
+          runts_denominazione   = %s,
+          runts_sezione         = %s,
+          runts_sede_comune     = %s,
+          runts_sede_prov       = %s,
+          runts_5x1000          = %s,
+          runts_data_iscrizione = %s
+        WHERE cod_fiscale = %s
+    """
+
+    try:
+        with conn.cursor() as cur:
+            # 1. UPSERT tabella runts
+            batch_runts = [
+                (r["cf"], r["denominazione"], r["sezione"], r["sede_comune"],
+                 r["sede_prov"], r["attivo"], r["data_isc"])
+                for r in records
+            ]
+            for i in range(0, len(batch_runts), _CHUNK_SIZE):
+                cur.executemany(upsert_runts, batch_runts[i:i + _CHUNK_SIZE])
+            logger.info(f"db_updater: runts aggiornata ({len(batch_runts):,} righe)")
+
+            # 2. UPDATE campi RUNTS in tabella enti (tutti gli anni per quel CF)
+            batch_enti = [
+                (r["denominazione"], r["sezione"], r["sede_comune"],
+                 r["sede_prov"], r["attivo"], r["data_isc"], r["cf"])
+                for r in records
+            ]
+            updated = 0
+            for i in range(0, len(batch_enti), _CHUNK_SIZE):
+                cur.executemany(update_enti, batch_enti[i:i + _CHUNK_SIZE])
+                updated += cur.rowcount
+            logger.info(f"db_updater: enti aggiornata — {updated:,} righe modificate")
+
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"db_updater: errore aggiornamento RUNTS: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Aggiornamento tabella enti
 # ---------------------------------------------------------------------------
 
@@ -1124,12 +1277,35 @@ if __name__ == "__main__":
                     help="Percorso al CSV normalizzato (default: Dati/enti_5x1000_norm.csv)")
     ap.add_argument("--dati-dir", default=None,
                     help="Cartella Dati/ (default: ./Dati)")
+    ap.add_argument("--runts", default=None, metavar="FILE.xlsx",
+                    help="Aggiorna solo i dati RUNTS da un file Excel standalone "
+                         "(aggiorna tabelle runts ed enti, salta tutto il resto)")
     args = ap.parse_args()
 
     root = pathlib.Path(__file__).parent
     dati_dir = pathlib.Path(args.dati_dir) if args.dati_dir else root / "Dati"
     csv_path = pathlib.Path(args.csv) if args.csv else dati_dir / "enti_5x1000_norm.csv"
 
+    # ── Modalità --runts: aggiorna solo dati RUNTS ───────────────────────────
+    if args.runts:
+        xlsx_path = pathlib.Path(args.runts)
+        if not xlsx_path.is_file():
+            logger.error(f"File non trovato: {xlsx_path}")
+            sys.exit(1)
+        cfg = _db_config()
+        if not cfg["user"] or not cfg["database"]:
+            logger.error("SITE_DB_* non configurati — imposta le variabili d'ambiente")
+            sys.exit(1)
+        try:
+            conn = pymysql.connect(**{**cfg, "autocommit": False})
+        except Exception as e:
+            logger.error(f"Impossibile connettersi al DB: {e}")
+            sys.exit(1)
+        ok = aggiorna_runts_da_xlsx(xlsx_path, conn)
+        conn.close()
+        sys.exit(0 if ok else 1)
+
+    # ── Modalità normale: reimport CSV completo ──────────────────────────────
     anni_list = []
     if args.anni:
         try:
