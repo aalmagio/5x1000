@@ -47,7 +47,8 @@ pipeline:
   input_categorie: "categorie.xlsx"   # File Excel con link alle pagine delle categorie
   # sheet_id: "1ABC..."              # ID del Google Sheet (decommentare e valorizzare)
   step_timeouts:
-    download:   7200   # secondi — download elenco completo AdE (può essere lento)
+    metadata:   1200   # secondi — scraping metadati da AdE
+    download:   7200   # secondi — download elenco complessivo AdE (può essere lento)
     categorie:  7200   # secondi — download per categoria
     etl:        3600   # secondi — normalizzazione e merge
     report:     1800   # secondi — generazione report Excel

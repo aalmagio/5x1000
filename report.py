@@ -35,6 +35,7 @@ from etl import (
     parse_importo,
     parse_intero,
     normalize_cf,
+    normalize_regione,
     EXCEL_CONFIG,
     _load_config,
     _apply_config,
@@ -147,6 +148,16 @@ def find_category_files(dati_dir, anno, cat):
     return result
 
 
+def _norm_pr(val) -> str:
+    """Normalizza il codice provincia: rimuove spazi interni, uppercase, max 2 caratteri."""
+    if val is None:
+        return ""
+    s = re.sub(r"\s+", "", str(val)).upper()
+    if s in ("", "NAN", "NONE", "-"):
+        return ""
+    return s[:2]
+
+
 def load_category_file(path, cat_key):
     """
     Legge un file .xlsx di categoria e restituisce una lista di dict normalizzati.
@@ -206,8 +217,8 @@ def load_category_file(path, cat_key):
             # Schema 7 col: Prog, CF, Comune, Provincia, Regione, Scelte, Importo
             rec["denominazione"] = str(cells[2]).strip() if cells[2] else ""
             rec["comune"] = str(cells[2]).strip() if cells[2] else ""
-            rec["pr"] = str(cells[3]).strip() if cells[3] else ""
-            rec["regione"] = str(cells[4]).strip() if cells[4] else ""
+            rec["pr"] = _norm_pr(cells[3])
+            rec["regione"] = normalize_regione(cells[4])
             rec["n_scelte"] = parse_intero(cells[5]) or 0
             importo = parse_importo(cells[6]) or 0.0
             rec["importo_espresse"] = importo
@@ -217,8 +228,8 @@ def load_category_file(path, cat_key):
         elif n_cols >= 12:
             # Schema 12 col: con redistribuzione ed erogabile
             rec["denominazione"] = str(cells[2]).strip() if cells[2] else ""
-            rec["regione"] = str(cells[3]).strip() if cells[3] else ""
-            rec["pr"] = str(cells[4]).strip() if cells[4] else ""
+            rec["regione"] = normalize_regione(cells[3])
+            rec["pr"] = _norm_pr(cells[4])
             rec["comune"] = str(cells[5]).strip() if cells[5] else ""
             rec["n_scelte"] = parse_intero(cells[6]) or 0
             rec["importo_espresse"] = parse_importo(cells[7]) or 0.0
@@ -228,8 +239,8 @@ def load_category_file(path, cat_key):
         else:
             # Schema 10 col: senza redistribuzione
             rec["denominazione"] = str(cells[2]).strip() if cells[2] else ""
-            rec["regione"] = str(cells[3]).strip() if cells[3] else ""
-            rec["pr"] = str(cells[4]).strip() if cells[4] else ""
+            rec["regione"] = normalize_regione(cells[3])
+            rec["pr"] = _norm_pr(cells[4])
             rec["comune"] = str(cells[5]).strip() if cells[5] else ""
             rec["n_scelte"] = parse_intero(cells[6]) or 0
             rec["importo_espresse"] = parse_importo(cells[7]) or 0.0

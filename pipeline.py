@@ -60,7 +60,7 @@ _load_dotenv(os.path.dirname(os.path.abspath(__file__)))
 # CONFIGURAZIONE
 # ============================================================================
 
-STEPS_ALL = ["download", "categorie", "etl", "report", "gsheets"]
+STEPS_ALL = ["metadata", "download", "categorie", "etl", "report", "gsheets"]
 
 DEFAULT_INPUT = "categorie.xlsx"
 
@@ -236,6 +236,10 @@ Step disponibili: download, categorie, etl, report, gsheets
     parser.add_argument(
         "--input", type=str, default=None,
         help=f"File Excel con link categorie (default: {DEFAULT_INPUT} o da config.yaml)",
+    )
+    parser.add_argument(
+        "--skip-metadata", action="store_true",
+        help="Salta il scraping metadati da AdE (date aggiornamenti file)",
     )
     parser.add_argument(
         "--skip-download", action="store_true",
@@ -877,6 +881,22 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
     logging.info(f"MODALITÀ CICLO — {len(anni_iter)} anni ({anni_iter[-1]}–{anni_iter[0]})")
     logging.info(f"Sito rimane attivo durante l'elaborazione (UPSERT)")
     logging.info(f"{'='*60}")
+
+    # ------------------------------------------------------------------
+    # FASE 0: Metadata (scraping date AdE)
+    # ------------------------------------------------------------------
+    if not getattr(args, "skip_metadata", False):
+        logging.info("\n[CICLO] ── FASE 0: Metadata ──")
+        anni_str = ",".join(str(a) for a in anni_iter) if anni_iter else ""
+        cmd = [PYTHON, "ade_metadata_scraper.py"]
+        if anni_str:
+            cmd.extend(["--anni", anni_str])
+        ok, dur = run_step("Scraping metadati AdE", cmd, root_dir, timeout=_timeout_fn("metadata"))
+        results["metadata"] = (ok, dur)
+        if not ok:
+            logging.warning("[CICLO] Metadata fallito, continuo con i download...")
+    else:
+        logging.info("\n[CICLO] ── FASE 0: Metadata — SALTATO (--skip-metadata)")
 
     # ------------------------------------------------------------------
     # FASE 1: Download
