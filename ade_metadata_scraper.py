@@ -29,9 +29,8 @@ try:
 except ImportError:
     HAS_WEB = False
 
+from common import get_logger, load_config
 from cinque_per_mille import (
-    setup_logging,
-    _load_config,
     _apply_config,
     HEADERS,
 )
@@ -305,10 +304,10 @@ def main():
     root_dir = os.path.abspath(args.root)
     os.makedirs(root_dir, exist_ok=True)
 
-    cfg = _load_config(root_dir)
+    cfg = load_config(root_dir)
     _apply_config(cfg)
 
-    log_file = setup_logging(root_dir)
+    _, log_file = get_logger("ade_metadata_scraper", root_dir)
 
     # Determina anni da scrapare
     if args.anni:
