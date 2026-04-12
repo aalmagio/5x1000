@@ -239,6 +239,18 @@ def aggiorna_db_sito(
                 except Exception as exc_cat:
                     logger.warning(f"db_updater: categoria_ammissioni saltato – {exc_cat}")
 
+            # 4e. Popola categoria_ripartizioni (schema esteso, 6 campi numerici, dal 2019)
+            if dati_dir and dati_dir.exists():
+                try:
+                    qa_cr = _aggiorna_categoria_ripartizioni(cur, dati_dir)
+                    logger.info(
+                        f"db_updater: categoria_ripartizioni: "
+                        f"{qa_cr['totale_righe']} righe, "
+                        f"{qa_cr['righe_scartate']} scartate"
+                    )
+                except Exception as exc_cr:
+                    logger.warning(f"db_updater: categoria_ripartizioni saltato – {exc_cr}")
+
         logger.info(f"db_updater: completato in {time.time() - t0:.1f}s")
         return True
 
@@ -295,6 +307,7 @@ def aggiorna_anno_ciclo(
             # categoria_ammissioni: solo file di questo anno
             if dati_dir and dati_dir.exists():
                 totale_cat = 0
+                totale_rip = 0
                 for cat_dir in sorted(dati_dir.iterdir()):
                     if not cat_dir.is_dir():
                         continue
@@ -302,20 +315,37 @@ def aggiorna_anno_ciclo(
                     for stato in ("ammesso", "escluso"):
                         pattern = f"{anno}_*_{'ammessi' if stato == 'ammesso' else 'esclusi'}.xlsx"
                         for xlsx in sorted(cat_dir.glob(pattern)):
-                            righe = _leggi_xlsx_ammissioni(xlsx)
-                            if not righe:
-                                continue
-                            batch = [
-                                (anno, cat_slug,
-                                 r["cf"], r["denom"], stato,
-                                 r["n_scelte"], r["importo_espresso"],
-                                 r["importo_generico"], r["importo_totale"])
-                                for r in righe
-                            ]
-                            cur.executemany(_CAT_AMM_UPSERT, batch)
-                            totale_cat += len(batch)
+                            # categoria_ammissioni
+                            righe_amm = _leggi_xlsx_ammissioni(xlsx)
+                            if righe_amm:
+                                batch_amm = [
+                                    (anno, cat_slug,
+                                     r["cf"], r["denom"], stato,
+                                     r["n_scelte"], r["importo_espresso"],
+                                     r["importo_generico"], r["importo_totale"])
+                                    for r in righe_amm
+                                ]
+                                cur.executemany(_CAT_AMM_UPSERT, batch_amm)
+                                totale_cat += len(batch_amm)
+
+                            # categoria_ripartizioni (solo dal 2019)
+                            if anno >= 2019:
+                                righe_rip, _ = _leggi_xlsx_ripartizione(xlsx)
+                                if righe_rip:
+                                    cur.execute(_DDL_CAT_RIPA)
+                                    batch_rip = [
+                                        (anno, cat_slug, r["cf"], stato,
+                                         r["numero_scelte"], r["imp_esp"], r["imp_gen"],
+                                         r["imp_ver"], r["imp_sottos"], r["imp_erog"])
+                                        for r in righe_rip
+                                    ]
+                                    cur.executemany(_UPSERT_CAT_RIPA, batch_rip)
+                                    totale_rip += len(batch_rip)
+
                 if totale_cat:
                     logger.info(f"db_updater: categoria_ammissioni anno {anno}: {totale_cat} righe")
+                if totale_rip:
+                    logger.info(f"db_updater: categoria_ripartizioni anno {anno}: {totale_rip} righe")
 
         logger.info(f"db_updater: aggiorna_anno_ciclo({anno}) completato in {time.time()-t0:.1f}s")
         return True
@@ -718,6 +748,294 @@ def _aggiorna_categoria_ammissioni(cur, dati_dir: Path) -> int:
                 )
 
     return totale
+
+
+# ---------------------------------------------------------------------------
+# Tabella categoria_ripartizioni
+# Schema esteso con 6 campi numerici per riga (ammessi e esclusi).
+# Chiave: (anno, categoria, cod_fiscale, stato_categoria)
+# ---------------------------------------------------------------------------
+
+_DDL_CAT_RIPA = """
+CREATE TABLE IF NOT EXISTS `categoria_ripartizioni` (
+  `id`                                INT           NOT NULL AUTO_INCREMENT,
+  `anno`                              SMALLINT      NOT NULL,
+  `categoria`                         VARCHAR(50)   NOT NULL,
+  `cod_fiscale`                       VARCHAR(20)   NOT NULL,
+  `stato_categoria`                   ENUM('ammesso','escluso') NOT NULL,
+  `numero_scelte`                     INT           NOT NULL DEFAULT 0,
+  `importo_scelte_espresse`           DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  `importo_scelte_generiche`          DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  `importo_verifica_totale`           DECIMAL(15,2) NOT NULL DEFAULT 0.00
+                                      COMMENT 'espresso + generico, o colonna composta se presente nel file',
+  `importo_ripartizione_sotto_soglia` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  `importo_totale_erogabile`          DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  `created_at`                        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`                        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                      ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_cat_rip`      (`anno`, `categoria`, `cod_fiscale`, `stato_categoria`),
+  KEY `idx_cr_cf`              (`cod_fiscale`),
+  KEY `idx_cr_anno_cat`        (`anno`, `categoria`),
+  KEY `idx_cr_anno_cat_stato`  (`anno`, `categoria`, `stato_categoria`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""
+
+# Alias per la quota redistribuita agli enti sotto soglia
+_IMP_SOTTOS_ALIASES = frozenset({
+    "importo ripartizione importi inferiori alla soglia",
+    "importo ripartizione importi inferiori soglia",
+    "importo ripartizione sotto soglia",
+    "ripartizione importi inferiori alla soglia",
+    "ripartizione sotto soglia",
+    "redistribuzione",
+    "ripartizione",
+    "importo redistribuzione",
+    "quota sotto soglia",
+})
+
+# Alias per importo totale erogabile (colonna finale, distinta da "importo totale")
+_IMP_EROG_ALIASES = frozenset({
+    "importo totale erogabile",
+    "totale erogabile",
+    "importo erogabile",
+    "erogabile",
+    "importo da erogare",
+    "totale da erogare",
+})
+
+# Alias per la colonna composta espresso+generico (presente in alcuni file)
+_IMP_VERIFICA_ALIASES = frozenset({
+    "importo delle scelte espresse + importo proporzionale delle scelte generiche",
+    "importo scelte espresse + importo proporzionale scelte generiche",
+    "importo espresso + generico",
+    "totale (espresso + generico)",
+    "totale espresso generico",
+    "importo totale (espresso + generico)",
+})
+
+_UPSERT_CAT_RIPA = """
+    INSERT INTO categoria_ripartizioni
+      (anno, categoria, cod_fiscale, stato_categoria,
+       numero_scelte, importo_scelte_espresse, importo_scelte_generiche,
+       importo_verifica_totale, importo_ripartizione_sotto_soglia,
+       importo_totale_erogabile)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    ON DUPLICATE KEY UPDATE
+      numero_scelte                     = VALUES(numero_scelte),
+      importo_scelte_espresse           = VALUES(importo_scelte_espresse),
+      importo_scelte_generiche          = VALUES(importo_scelte_generiche),
+      importo_verifica_totale           = VALUES(importo_verifica_totale),
+      importo_ripartizione_sotto_soglia = VALUES(importo_ripartizione_sotto_soglia),
+      importo_totale_erogabile          = VALUES(importo_totale_erogabile),
+      updated_at                        = NOW()
+"""
+
+
+def _leggi_xlsx_ripartizione(path: Path) -> tuple[list[dict], int]:
+    """
+    Legge un file xlsx categoria e restituisce (records, n_scartate).
+
+    Ogni record è un dict con:
+      cf, numero_scelte, imp_esp, imp_gen, imp_ver, imp_sottos, imp_erog
+
+    Tutti i campi numerici mancanti vengono impostati a 0.
+    importo_verifica_totale = colonna esplicita se presente, altrimenti
+    somma di espresso+generico, altrimenti 0.
+
+    Righe senza CF valido (len < 5) vengono scartate e contate.
+    CF duplicati nello stesso file vengono deduplicati sommando i valori.
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        logger.warning("db_updater: openpyxl non disponibile")
+        return [], 0
+
+    import warnings
+    import re as _re
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Workbook contains no default style", UserWarning)
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+    if not rows:
+        return [], 0
+
+    raw_header  = [str(c).strip() if c is not None else "" for c in rows[0]]
+    header_norm = [h.lower() for h in raw_header]
+
+    # Colonna CF (stesso fallback già usato in _leggi_xlsx_ammissioni)
+    cf_idx = None
+    for i, c in enumerate(header_norm):
+        if c in _CF_ALIASES:
+            cf_idx = i
+            break
+    if cf_idx is None:
+        for i, c in enumerate(header_norm):
+            if "fiscal" in c or "codice" in c:
+                cf_idx = i
+                break
+    if cf_idx is None:
+        logger.warning(
+            f"db_updater: CF non trovato in {path.name} (header: {raw_header[:6]})"
+        )
+        return [], 0
+
+    # Individua indici colonne numeriche
+    n_idx      = _find_col_idx(header_norm, _N_SCELTE_CAT_ALIASES)
+    esp_idx    = _find_col_idx(header_norm, _IMP_ESP_CAT_ALIASES)
+    gen_idx    = _find_col_idx(header_norm, _IMP_GEN_CAT_ALIASES)
+    ver_idx    = _find_col_idx(header_norm, _IMP_VERIFICA_ALIASES)
+    sottos_idx = _find_col_idx(header_norm, _IMP_SOTTOS_ALIASES)
+    erog_idx   = _find_col_idx(header_norm, _IMP_EROG_ALIASES)
+    # Fallback: se "totale erogabile" non trovato, usa alias "importo totale" generico
+    if erog_idx is None:
+        erog_idx = _find_col_idx(header_norm, _IMP_TOT_CAT_ALIASES)
+
+    seen: dict[str, dict] = {}
+    scartate = 0
+
+    for row in rows[1:]:
+        if not row or cf_idx >= len(row):
+            continue
+        cf_raw = row[cf_idx]
+        if cf_raw is None:
+            scartate += 1
+            continue
+
+        cf = _re.sub(r"\.0+$", "", str(cf_raw).strip().upper()).strip("'\"")
+        if not cf or len(cf) < 5:
+            scartate += 1
+            continue
+
+        def _get(idx):
+            return row[idx] if idx is not None and idx < len(row) else None
+
+        n_s   = _parse_num(_get(n_idx))
+        i_esp = _parse_num(_get(esp_idx))
+        i_gen = _parse_num(_get(gen_idx))
+        i_ver = _parse_num(_get(ver_idx))
+        i_sts = _parse_num(_get(sottos_idx))
+        i_ero = _parse_num(_get(erog_idx))
+
+        # importo_verifica_totale: colonna esplicita > somma derivata > 0
+        if i_ver is None:
+            if i_esp is not None and i_gen is not None:
+                i_ver = i_esp + i_gen
+            elif i_esp is not None:
+                i_ver = i_esp
+            else:
+                i_ver = 0.0
+
+        rec = {
+            "cf":            cf,
+            "numero_scelte": int(n_s) if n_s is not None else 0,
+            "imp_esp":       i_esp or 0.0,
+            "imp_gen":       i_gen or 0.0,
+            "imp_ver":       i_ver or 0.0,
+            "imp_sottos":    i_sts or 0.0,
+            "imp_erog":      i_ero or 0.0,
+        }
+
+        if cf not in seen:
+            seen[cf] = rec
+        else:
+            e = seen[cf]
+            e["numero_scelte"] += rec["numero_scelte"]
+            for k in ("imp_esp", "imp_gen", "imp_ver", "imp_sottos", "imp_erog"):
+                e[k] += rec[k]
+
+    return list(seen.values()), scartate
+
+
+def _aggiorna_categoria_ripartizioni(cur, dati_dir: Path) -> dict:
+    """
+    Popola la tabella `categoria_ripartizioni` dai file *_ammessi.xlsx e
+    *_esclusi.xlsx in ogni sottocartella di dati_dir, dal 2019 in avanti.
+
+    - Crea la tabella se non esiste (DDL idempotente).
+    - UPSERT su (anno, categoria, cod_fiscale, stato_categoria): rieseguire
+      l'import non produce duplicati.
+    - Restituisce un dict di QA con conteggi e somme per controllo qualità.
+    """
+    cur.execute(_DDL_CAT_RIPA)
+
+    qa: dict = {
+        "totale_righe":   0,
+        "righe_scartate": 0,
+        "per_anno_cat":   {},
+    }
+
+    for cat_dir in sorted(dati_dir.iterdir()):
+        if not cat_dir.is_dir():
+            continue
+        cat_slug = _CAT_SLUG.get(cat_dir.name.upper(), cat_dir.name.lower())
+
+        for stato in ("ammesso", "escluso"):
+            pattern = f"*_{'ammessi' if stato == 'ammesso' else 'esclusi'}.xlsx"
+            for xlsx in sorted(cat_dir.glob(pattern)):
+                try:
+                    anno = int(xlsx.stem.split("_")[0])
+                except (IndexError, ValueError):
+                    logger.warning(
+                        f"db_updater: impossibile estrarre anno da {xlsx.name}"
+                    )
+                    continue
+                if anno < 2019:
+                    continue
+
+                righe, scartate = _leggi_xlsx_ripartizione(xlsx)
+                qa["righe_scartate"] += scartate
+                if not righe:
+                    continue
+
+                batch = [
+                    (anno, cat_slug, r["cf"], stato,
+                     r["numero_scelte"], r["imp_esp"], r["imp_gen"],
+                     r["imp_ver"], r["imp_sottos"], r["imp_erog"])
+                    for r in righe
+                ]
+                cur.executemany(_UPSERT_CAT_RIPA, batch)
+                n = len(batch)
+                qa["totale_righe"] += n
+
+                # Accumula statistiche QA per (anno, categoria)
+                key = (anno, cat_slug)
+                if key not in qa["per_anno_cat"]:
+                    qa["per_anno_cat"][key] = {
+                        "ammessi": 0, "esclusi": 0,
+                        "sum_scelte": 0, "sum_erogabile": 0.0, "sum_espresso": 0.0,
+                    }
+                s = qa["per_anno_cat"][key]
+                stato_k = "ammessi" if stato == "ammesso" else "esclusi"
+                s[stato_k]         += n
+                s["sum_scelte"]    += sum(r["numero_scelte"] for r in righe)
+                s["sum_erogabile"] += sum(r["imp_erog"]  for r in righe)
+                s["sum_espresso"]  += sum(r["imp_esp"]   for r in righe)
+
+                logger.info(
+                    f"db_updater: categoria_ripartizioni – {cat_slug}/{anno} "
+                    f"{stato}: {n} righe ({scartate} scartate)"
+                )
+
+    # Report QA finale
+    logger.info(
+        f"db_updater: categoria_ripartizioni – "
+        f"totale {qa['totale_righe']} righe, {qa['righe_scartate']} scartate"
+    )
+    for (anno, cat), s in sorted(qa["per_anno_cat"].items()):
+        logger.info(
+            f"  QA {anno} {cat:25s}: "
+            f"ammessi={s['ammessi']:6}, esclusi={s['esclusi']:5}, "
+            f"scelte={s['sum_scelte']:8}, "
+            f"erogabile={s['sum_erogabile']:>14,.2f}, "
+            f"espresso={s['sum_espresso']:>14,.2f}"
+        )
+
+    return qa
 
 
 # ---------------------------------------------------------------------------
