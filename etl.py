@@ -35,6 +35,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from common import load_config, apply_excel_config, get_logger, EXCEL_CONFIG
+
 # ============================================================================
 # CONFIGURAZIONE DEFAULT
 # ============================================================================
@@ -44,100 +46,18 @@ DEFAULT_DATI = DEFAULT_ROOT / "Dati"
 DEFAULT_RUNTS = DEFAULT_ROOT / "Runts"
 DEFAULT_OUT = DEFAULT_ROOT / "Dati"
 
-# Configurazione Excel (sovrascritta da config.yaml)
-EXCEL_CONFIG = {
-    "header_font": "Arial",
-    "header_size": 10,
-    "header_bg": "#2F5496",
-    "header_fg": "#FFFFFF",
-    "data_font": "Arial",
-    "data_size": 9,
-    "alt_row_bg": "#EEF2FF",
-    "border_color": "#D9D9D9",
-    "max_col_width": 40,
-}
-
 # Configurazione ETL
 ETL_CONFIG = {
     "chunk_size": 50_000,
 }
 
 
-def _load_config(root: Path) -> dict:
-    """
-    Carica config.yaml dalla root del progetto.
-    Restituisce un dict vuoto se il file non esiste o PyYAML non e' installato.
-    """
-    config_path = root / "config.yaml"
-    if not config_path.is_file():
-        return {}
-    try:
-        import yaml
-    except ImportError:
-        logging.warning(
-            "PyYAML non installato: config.yaml ignorato. "
-            "Installa con: pip install pyyaml"
-        )
-        return {}
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
-        return cfg
-    except Exception as e:
-        logging.warning(f"Errore nel leggere config.yaml: {e}")
-        return {}
-
-
 def _apply_config(cfg: dict) -> None:
     """Applica i valori di config.yaml a EXCEL_CONFIG e ETL_CONFIG."""
-    # Excel
-    excel_cfg = cfg.get("excel", {})
-    if excel_cfg:
-        mapping = {
-            "header_font": "header_font",
-            "header_size": "header_size",
-            "header_bg": "header_bg",
-            "header_fg": "header_fg",
-            "data_font": "data_font",
-            "data_size_etl": "data_size",
-            "alt_row_bg": "alt_row_bg",
-            "border_color": "border_color",
-            "max_col_width": "max_col_width",
-        }
-        for yaml_key, config_key in mapping.items():
-            if yaml_key in excel_cfg:
-                val = excel_cfg[yaml_key]
-                # Normalizza colori: assicura '#' iniziale
-                if config_key in ("header_bg", "header_fg", "alt_row_bg", "border_color"):
-                    val = str(val)
-                    if not val.startswith("#"):
-                        val = f"#{val}"
-                EXCEL_CONFIG[config_key] = val
-
-    # ETL
+    apply_excel_config(cfg)
     etl_cfg = cfg.get("etl", {})
     if etl_cfg.get("chunk_size"):
         ETL_CONFIG["chunk_size"] = int(etl_cfg["chunk_size"])
-
-# ============================================================================
-# LOGGING
-# ============================================================================
-
-def setup_logging(root: Path) -> None:
-    log_dir = root / "log"
-    log_dir.mkdir(exist_ok=True)
-    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = log_dir / f"etl_{stamp}.log"
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-    logging.info(f"Log: {log_file}")
 
 
 # ============================================================================
@@ -1062,10 +982,10 @@ def main():
 
     root = args.root
 
-    setup_logging(root)
+    get_logger("etl", root)  # configura root logger
 
     # Carica configurazione esterna (se presente)
-    cfg = _load_config(root)
+    cfg = load_config(root)
     _apply_config(cfg)
     if cfg:
         logging.info("Configurazione caricata da config.yaml")

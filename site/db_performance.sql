@@ -40,7 +40,10 @@ ALTER TABLE enti
 -- ------------------------------------------------------------
 -- 5. FULLTEXT — ricerca denominazione (LIKE '%testo%' non usa indici B-tree)
 --    Permette MATCH(denominazione) AGAINST(? IN BOOLEAN MODE) → 10-50x più veloce
---    ATTENZIONE: richiede anche una modifica a api.php (vedi sotto)
+--    api.php usa già MATCH...AGAINST per query ≥3 caratteri (con fallback LIKE).
+--    Eseguire solo se l'indice non esiste già:
+--      SELECT COUNT(*) FROM information_schema.STATISTICS
+--      WHERE table_schema=DATABASE() AND table_name='enti' AND index_name='ft_enti_denom';
 -- ------------------------------------------------------------
 ALTER TABLE enti  ADD FULLTEXT INDEX ft_enti_denom  (denominazione);
 ALTER TABLE runts ADD FULLTEXT INDEX ft_runts_denom (denominazione);

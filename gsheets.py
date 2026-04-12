@@ -36,6 +36,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from common import get_logger, load_dotenv
+
 # ============================================================================
 # CONFIGURAZIONE
 # ============================================================================
@@ -49,18 +51,6 @@ ROWS_PER_SHEET = 300_000
 
 # Nome del file Google Sheets (viene creato se non esiste)
 DEFAULT_SHEET_TITLE = "5x1000 - Dati Normalizzati"
-
-# ============================================================================
-# LOGGING
-# ============================================================================
-
-def setup_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
 
 
 # ============================================================================
@@ -183,7 +173,8 @@ def format_sheet_header(worksheet, n_cols: int) -> None:
 # ============================================================================
 
 def main():
-    setup_logging()
+    root_dir = Path(__file__).parent
+    get_logger("gsheets", root_dir)  # configura root logger
 
     parser = argparse.ArgumentParser(
         description="Carica i dati 5x1000 normalizzati su Google Sheets"

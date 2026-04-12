@@ -32,20 +32,22 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from db import get_connection, db_available
+
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Configurazione DB (env vars con fallback)
-# ---------------------------------------------------------------------------
 
 def _db_config(override: dict | None = None) -> dict:
-    """Restituisce il dict di connessione pymysql."""
+    """Compatibilità retroattiva: restituisce params DB da env vars.
+    Preferire get_connection() / db_available() da db.py per nuovo codice.
+    """
+    import os as _os
     cfg = {
-        "host":     os.getenv("SITE_DB_HOST", "localhost"),
-        "port":     int(os.getenv("SITE_DB_PORT", "3306")),
-        "user":     os.getenv("SITE_DB_USER", ""),
-        "password": os.getenv("SITE_DB_PASSWORD", ""),
-        "database": os.getenv("SITE_DB_NAME", ""),
+        "host":     _os.getenv("SITE_DB_HOST", "localhost"),
+        "port":     int(_os.getenv("SITE_DB_PORT", "3306")),
+        "user":     _os.getenv("SITE_DB_USER", ""),
+        "password": _os.getenv("SITE_DB_PASSWORD", ""),
+        "database": _os.getenv("SITE_DB_NAME", ""),
         "charset":  "utf8mb4",
         "autocommit": True,
     }

@@ -171,13 +171,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { fetchAnni, fetchCategorie, fetchRegioni, fetchClassifica } from '@/api/client'
+import { fetchClassifica } from '@/api/client'
+import { useMetaStore } from '@/stores/meta'
 
-const anni      = ref([])
-const categorie = ref([])
-const regioni   = ref([])
+const meta      = useMetaStore()
+const anni      = computed(() => meta.anni)
+const categorie = computed(() => meta.categorie)
+const regioni   = computed(() => meta.regioni)
 
 const anno      = ref(null)
 const categoria = ref('')
@@ -221,11 +223,8 @@ async function load() {
 }
 
 onMounted(async () => {
-  const [aRes, cRes, rRes] = await Promise.all([fetchAnni(), fetchCategorie(), fetchRegioni()])
-  anni.value      = aRes.data
-  categorie.value = cRes.data
-  regioni.value   = rRes.data
-  anno.value      = anni.value[0] ?? null
+  await meta.ensure()
+  anno.value = anni.value[0] ?? null
   await load()
 })
 

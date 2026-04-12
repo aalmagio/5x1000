@@ -212,11 +212,13 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { fetchEnti, fetchAnni, fetchCategorie, fetchRegioni } from '@/api/client'
+import { fetchEnti } from '@/api/client'
+import { useMetaStore } from '@/stores/meta'
 
-const anni      = ref([])
-const categorie = ref([])
-const regioni   = ref([])
+const meta      = useMetaStore()
+const anni      = computed(() => meta.anni)
+const categorie = computed(() => meta.categorie)
+const regioni   = computed(() => meta.regioni)
 const result    = ref(null)
 const loading   = ref(false)
 const error     = ref(false)
@@ -308,10 +310,7 @@ function reset() {
 function goPage(p) { search(p) }
 
 onMounted(async () => {
-  const [aRes, cRes, rRes] = await Promise.all([fetchAnni(), fetchCategorie(), fetchRegioni()])
-  anni.value      = aRes.data
-  categorie.value = cRes.data
-  regioni.value   = rRes.data
+  await meta.ensure()
   await search()
 })
 </script>

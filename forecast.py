@@ -22,23 +22,10 @@ import sys
 import numpy as np
 import pandas as pd
 
+from common import get_logger, load_dotenv
+from db import get_connection, db_available
+
 log = logging.getLogger("forecast")
-
-
-def load_env(root: pathlib.Path) -> None:
-    env_file = root / ".env"
-    if not env_file.is_file():
-        return
-    with open(env_file, encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            k = k.strip()
-            v = v.strip().strip("\"'")
-            if k and not os.environ.get(k):
-                os.environ[k] = v
 
 
 def load_data_csv(csv_path: pathlib.Path) -> pd.DataFrame:
@@ -48,16 +35,7 @@ def load_data_csv(csv_path: pathlib.Path) -> pd.DataFrame:
 
 def load_data_db() -> pd.DataFrame:
     log.info("Carico dati da DB MySQL")
-    import pymysql  # noqa: PLC0415
-
-    conn = pymysql.connect(
-        host=os.getenv("SITE_DB_HOST", "localhost"),
-        port=int(os.getenv("SITE_DB_PORT", "3306")),
-        db=os.getenv("SITE_DB_NAME", ""),
-        user=os.getenv("SITE_DB_USER", ""),
-        passwd=os.getenv("SITE_DB_PASSWORD", ""),
-        charset="utf8mb4",
-    )
+    conn = get_connection()
     df = pd.read_sql(
         "SELECT anno, categoria_principale, n_scelte, importo_totale FROM enti",
         conn,
@@ -201,11 +179,9 @@ def run(root: pathlib.Path, csv_path: pathlib.Path | None = None, n_future: int 
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
+    root = pathlib.Path(__file__).parent
+    load_dotenv(root)
+    get_logger("forecast", root)  # configura root logger
 
     ap = argparse.ArgumentParser(description="Genera proiezioni trend 5×1000 via regressione lineare")
     ap.add_argument("--anni", type=int, default=2, help="Anni da proiettare (default: 2)")
@@ -214,9 +190,6 @@ if __name__ == "__main__":
     ap.add_argument("--csv", default=None, help="Percorso CSV normalizzato (default: Dati/enti_5x1000_norm.csv)")
     ap.add_argument("--out", default=None, help="File output JSON (default: site/public/data/forecast.json)")
     args = ap.parse_args()
-
-    root = pathlib.Path(__file__).parent
-    load_env(root)
 
     csv_path = pathlib.Path(args.csv) if args.csv else None
     log.info("Avvio forecast 5×1000 (proiezione %d anni)", args.anni)

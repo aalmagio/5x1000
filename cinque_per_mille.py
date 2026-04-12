@@ -29,6 +29,8 @@ from io import StringIO
 from urllib.parse import urljoin, urlparse, unquote
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+from common import load_config, get_logger, ask_yes_no
 from openpyxl.utils import get_column_letter
 
 try:
@@ -41,31 +43,6 @@ except ImportError:
 # ============================================================================
 # CONFIGURAZIONE
 # ============================================================================
-
-def _load_config(root_dir):
-    """
-    Carica config.yaml dalla root del progetto.
-    Restituisce un dict vuoto se il file non esiste o PyYAML non e' installato.
-    """
-    config_path = os.path.join(root_dir, "config.yaml")
-    if not os.path.isfile(config_path):
-        return {}
-    try:
-        import yaml
-    except ImportError:
-        logging.warning(
-            "PyYAML non installato: config.yaml ignorato. "
-            "Installa con: pip install pyyaml"
-        )
-        return {}
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
-        return cfg
-    except Exception as e:
-        logging.warning(f"Errore nel leggere config.yaml: {e}")
-        return {}
-
 
 def _apply_config(cfg):
     """
@@ -121,27 +98,6 @@ HEADERS = {
 
 TIMEOUT_PAGE = 60       # Secondi di attesa per le pagine web
 TIMEOUT_FILE = 120      # Secondi di attesa per il download file
-
-# ============================================================================
-# LOGGING
-# ============================================================================
-
-def setup_logging(root_dir):
-    """Configura il logging su file e console."""
-    log_dir = os.path.join(root_dir, "log")
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"cinque_per_mille_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-    logging.info(f"Log salvato in: {log_file}")
-    return log_file
 
 # ============================================================================
 # DOWNLOAD
@@ -679,20 +635,6 @@ def process_folder_csv(folder_path, year):
 # INTERFACCIA INTERATTIVA
 # ============================================================================
 
-def ask_yes_no(prompt, default="s"):
-    """Chiede una conferma si/no."""
-    suffix = " [S/n]: " if default == "s" else " [s/N]: "
-    while True:
-        answer = input(prompt + suffix).strip().lower()
-        if answer == "":
-            return default == "s"
-        if answer in ("s", "si", "sì", "y", "yes"):
-            return True
-        if answer in ("n", "no"):
-            return False
-        print("  Rispondi s o n.")
-
-
 def ask_years(available_years, label="Aggiorna"):
     """Chiede quali anni elaborare."""
     print(f"\nAnni disponibili: {min(available_years)}-{max(available_years)}")
@@ -790,11 +732,11 @@ def main():
     os.makedirs(root_dir, exist_ok=True)
 
     # Carica configurazione esterna (se presente)
-    cfg = _load_config(root_dir)
+    cfg = load_config(root_dir)
     _apply_config(cfg)
     _apply_excel_config(cfg)
 
-    log_file = setup_logging(root_dir)
+    get_logger("cinque_per_mille", root_dir)  # configura root logger
     logging.info(f"Directory root: {root_dir}")
     logging.info(f"Python: {sys.version}")
     if cfg:

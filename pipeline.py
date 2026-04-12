@@ -30,37 +30,18 @@ import logging
 import datetime
 import shutil
 
+from common import load_config, get_logger, ask_yes_no, load_dotenv
+from db import get_connection, db_available
 
-# ============================================================================
-# Carica variabili d'ambiente da .env (se presente)
-# ============================================================================
-
-def _load_dotenv(root_dir):
-    env_path = os.path.join(root_dir, ".env")
-    if not os.path.isfile(env_path):
-        return
-    with open(env_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            # Rimuove eventuale prefisso 'export '
-            if line.startswith("export "):
-                line = line[7:]
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
-
-_load_dotenv(os.path.dirname(os.path.abspath(__file__)))
+_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(_ROOT_DIR)
 
 
 # ============================================================================
 # CONFIGURAZIONE
 # ============================================================================
 
-STEPS_ALL = ["metadata", "download", "categorie", "etl", "report", "gsheets"]
+STEPS_ALL = ["metadata", "download", "categorie", "etl", "report", "gsheets", "forecast"]
 
 DEFAULT_INPUT = "categorie.xlsx"
 
@@ -76,59 +57,12 @@ PYTHON = sys.executable or shutil.which("python3") or shutil.which("python") or 
 
 def _load_pipeline_config(root_dir):
     """Carica la sezione 'pipeline' da config.yaml."""
-    config_path = os.path.join(root_dir, "config.yaml")
-    if not os.path.isfile(config_path):
-        return {}
-    try:
-        import yaml
-    except ImportError:
-        return {}
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f) or {}
-        return cfg.get("pipeline", {})
-    except Exception:
-        return {}
-
-
-# ============================================================================
-# LOGGING
-# ============================================================================
-
-def setup_logging(root_dir):
-    """Configura logging su file e console."""
-    log_dir = os.path.join(root_dir, "log")
-    os.makedirs(log_dir, exist_ok=True)
-    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(log_dir, f"pipeline_{stamp}.log")
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-    return log_file
+    return load_config(root_dir).get("pipeline", {})
 
 
 # ============================================================================
 # DOMANDE INTERATTIVE
 # ============================================================================
-
-def ask_yes_no(prompt, default="s"):
-    """Chiede una conferma si/no."""
-    suffix = " [S/n]: " if default == "s" else " [s/N]: "
-    while True:
-        resp = input(prompt + suffix).strip().lower()
-        if not resp:
-            return default == "s"
-        if resp in ("s", "si", "y", "yes"):
-            return True
-        if resp in ("n", "no"):
-            return False
 
 
 def ask_choice(prompt, choices, default=None):
@@ -398,39 +332,23 @@ def reset_tutto(root_dir: str, solo_db: bool = False, force: bool = False) -> bo
         print("✓ Cartella Dati/ svuotata.")
 
     # ── 2. DB ─────────────────────────────────────────────────────────────────
-    try:
-        import pymysql
-    except ImportError:
-        msg = "pymysql non installato — reset DB saltato."
+    if not db_available():
+        msg = "pymysql non installato o credenziali DB mancanti — reset DB saltato."
         reset_logger.warning(msg)
         print(f"⚠  {msg}")
     else:
-        db_cfg = {
-            "host":     os.getenv("SITE_DB_HOST", "localhost"),
-            "port":     int(os.getenv("SITE_DB_PORT", "3306")),
-            "user":     os.getenv("SITE_DB_USER", ""),
-            "password": os.getenv("SITE_DB_PASSWORD", ""),
-            "database": os.getenv("SITE_DB_NAME", ""),
-            "charset":  "utf8mb4",
-            "autocommit": True,
-        }
-        if not db_cfg["user"] or not db_cfg["database"]:
-            msg = "Credenziali DB non configurate (SITE_DB_USER/SITE_DB_NAME) — reset DB saltato."
-            reset_logger.warning(msg)
-            print(f"⚠  {msg}")
-        else:
-            try:
-                conn = pymysql.connect(**db_cfg)
-                with conn:
-                    cur = conn.cursor()
-                    for tabella in ("enti", "dataset_files", "pipeline_runs"):
-                        cur.execute(f"DELETE FROM `{tabella}`")
-                        n = cur.rowcount
-                        reset_logger.info(f"DELETE FROM {tabella}: {n} righe cancellate.")
-                        print(f"✓ Tabella {tabella}: {n} righe cancellate.")
-            except Exception as exc:
-                reset_logger.error(f"Errore reset DB: {exc}")
-                print(f"✗ Errore reset DB: {exc}")
+        try:
+            conn = get_connection()
+            with conn:
+                cur = conn.cursor()
+                for tabella in ("enti", "dataset_files", "pipeline_runs"):
+                    cur.execute(f"DELETE FROM `{tabella}`")
+                    n = cur.rowcount
+                    reset_logger.info(f"DELETE FROM {tabella}: {n} righe cancellate.")
+                    print(f"✓ Tabella {tabella}: {n} righe cancellate.")
+        except Exception as exc:
+            reset_logger.error(f"Errore reset DB: {exc}")
+            print(f"✗ Errore reset DB: {exc}")
 
     reset_logger.info("Reset completato.")
     print(f"\n✓ Reset completato. Log: {log_path}\n")
@@ -581,6 +499,10 @@ def _build_step_cmds(
         if anni:
             cmd += ["--anni", anni]
         cmds["gsheets"] = ("Upload Google Sheets", cmd, _timeout_fn("gsheets"))
+
+    if "forecast" in steps:
+        cmd = [PYTHON, "forecast.py"]
+        cmds["forecast"] = ("Forecast / analisi predittiva", cmd, _timeout_fn("forecast"))
 
     return cmds
 
@@ -1089,7 +1011,7 @@ def main():
     if args.report_only and not args.only:
         args.only = "report"
 
-    log_file = setup_logging(root_dir)
+    _, log_file = get_logger("pipeline", root_dir)
 
     # Carica config pipeline
     pcfg = _load_pipeline_config(root_dir)

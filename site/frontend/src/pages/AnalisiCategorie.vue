@@ -259,7 +259,8 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { fetchAnni, fetchAnalisiCategorie } from '@/api/client'
+import { fetchAnalisiCategorie } from '@/api/client'
+import { useMetaStore } from '@/stores/meta'
 
 const router = useRouter()
 
@@ -272,7 +273,8 @@ const PRESETS = [
   { label: 'Volontariato / ETS',  keywords: ['volontariato', 'ets', 'onlus'] },
 ]
 
-const anniDisponibili  = ref([])
+const meta             = useMetaStore()
+const anniDisponibili  = computed(() => meta.anni)
 const annoSelezionato  = ref(null)
 const metrica          = ref('importo_ammessi')
 const data             = ref(null)
@@ -375,8 +377,7 @@ async function loadData() {
 watch(annoSelezionato, loadData)
 
 onMounted(async () => {
-  const res = await fetchAnni()
-  anniDisponibili.value = res.data
+  await meta.ensure()
   await loadData()
 })
 </script>

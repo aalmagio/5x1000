@@ -21,13 +21,14 @@ define('ENV_FILE',     __DIR__ . '/.env');
 define('PID_FILE',     LOG_DIR . '/.pipeline.pid');
 define('ANNI_MIN',     2006);
 define('ANNI_MAX',     (int) date('Y'));
-define('STEPS_ALL',    ['download', 'categorie', 'etl', 'report', 'gsheets']);
+define('STEPS_ALL',    ['download', 'categorie', 'etl', 'report', 'gsheets', 'forecast']);
 define('STEP_LABELS',  [
     'download'  => 'Download AdE',
     'categorie' => 'Categorie',
     'etl'       => 'ETL / Normalizza',
     'report'    => 'Report Excel',
     'gsheets'   => 'Google Sheets',
+    'forecast'  => 'Forecast / Proiezioni',
 ]);
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -180,12 +180,15 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { fetchAnni, fetchCategorie, fetchGeo } from '@/api/client'
+import { fetchGeo } from '@/api/client'
 import RegionTileMap from '@/components/RegionTileMap.vue'
+import { useMetaStore } from '@/stores/meta'
+
+const meta = useMetaStore()
 
 // ── Stato filtri ──────────────────────────────────────────────────────────────
-const anni      = ref([])
-const categorie = ref([])
+const anni      = computed(() => [...meta.anni].reverse())
+const categorie = computed(() => meta.categorie)
 const annoSel      = ref(null)
 const categoriaSel = ref('')
 
@@ -310,9 +313,7 @@ function formatEurShort(v) {
 
 // ── Inizializzazione ──────────────────────────────────────────────────────────
 onMounted(async () => {
-  const [resAnni, resCat] = await Promise.all([fetchAnni(), fetchCategorie()])
-  anni.value = (resAnni.data ?? []).slice().reverse()
-  categorie.value = resCat.data ?? []
+  await meta.ensure()
   annoSel.value = anni.value[0] ?? new Date().getFullYear() - 1
   await loadRegioni()
 })
