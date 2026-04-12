@@ -913,7 +913,7 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
         if _is_done(root_dir, anno, "download"):
             logging.info(f"[CICLO] {anno}/download → già fatto, skip")
         else:
-            cmd = [PYTHON, "cinque_per_mille.py", "--source", source_eff, "--anni", str(anno)]
+            cmd = [PYTHON, "cinque_per_mille.py", "--source", source_eff, "--anni", str(anno), "--yes"]
             ok, dur = run_step(f"Download elenco {anno}", cmd, root_dir,
                                timeout=_timeout_fn("download"))
             results[f"download_{anno}"] = (ok, dur)

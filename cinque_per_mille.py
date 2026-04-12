@@ -775,6 +775,11 @@ Esempi:
         "--no-convert", action="store_true",
         help="Salta la fase di conversione in Excel",
     )
+    parser.add_argument(
+        "--yes", action="store_true",
+        help="Risponde automaticamente Sì a tutte le domande interattive "
+             "(download, conversione). Utile per uso da pipeline o cron.",
+    )
     return parser.parse_args()
 
 
@@ -824,6 +829,9 @@ def main():
         print("   pip install requests beautifulsoup4")
         print("   Procedo solo con la conversione dei file gia' presenti.\n")
         do_download = False
+    elif args.yes:
+        logging.info("Download confermato automaticamente (--yes)")
+        do_download = True
     else:
         do_download = ask_yes_no("\nVuoi aggiornare i file scaricandoli dal sito dell'Agenzia delle Entrate?")
 
