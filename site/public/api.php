@@ -328,22 +328,28 @@ function action_statistiche(): void {
     }
 
     $stmt = $pdo->prepare(
-        "SELECT anno, categoria_principale,
-                COUNT(*) AS n_enti,
-                SUM(n_scelte) AS totale_scelte,
-                SUM(importo_totale) AS totale_importo
-         FROM enti
-         WHERE anno = ? AND categoria_principale IS NOT NULL
-         GROUP BY anno, categoria_principale
-         ORDER BY totale_importo DESC"
+        "SELECT anno, categoria,
+                SUM(stato = 'ammesso')                      AS n_enti_ammessi,
+                SUM(stato = 'escluso')                      AS n_enti_esclusi,
+                COUNT(*)                                    AS n_enti_iscritti,
+                SUM(IF(stato='ammesso', n_scelte, 0))       AS scelte_ammessi,
+                SUM(IF(stato='ammesso', importo_totale, 0)) AS importo_ammessi,
+                SUM(IF(stato='escluso', importo_totale, 0)) AS importo_esclusi
+         FROM categoria_ammissioni
+         WHERE anno = ?
+         GROUP BY anno, categoria
+         ORDER BY importo_ammessi DESC"
     );
     $stmt->execute([$anno]);
     $rows = $stmt->fetchAll();
 
     foreach ($rows as &$r) {
-        $r['n_enti']         = (int)$r['n_enti'];
-        $r['totale_scelte']  = (int)$r['totale_scelte'];
-        $r['totale_importo'] = (float)$r['totale_importo'];
+        $r['n_enti_ammessi']  = (int)$r['n_enti_ammessi'];
+        $r['n_enti_esclusi']  = (int)$r['n_enti_esclusi'];
+        $r['n_enti_iscritti'] = (int)$r['n_enti_iscritti'];
+        $r['scelte_ammessi']  = (int)$r['scelte_ammessi'];
+        $r['importo_ammessi'] = (float)$r['importo_ammessi'];
+        $r['importo_esclusi'] = (float)$r['importo_esclusi'];
     }
 
     json_out(['anno' => $anno, 'per_categoria' => $rows]);
@@ -704,49 +710,21 @@ function action_analisi_categorie(): void {
         $anni_param = [$anno];
     }
 
-    // Statistiche per categoria per anno
-    $stmt = $pdo->prepare(
-        "SELECT anno, categoria_principale,
-                COUNT(*) AS n_enti,
-                SUM(n_scelte) AS totale_scelte,
-                SUM(importo_totale) AS totale_importo,
-                AVG(importo_totale) AS media_importo,
-                MAX(importo_totale) AS max_importo
-         FROM enti
-         $anni_sql
-         WHERE categoria_principale IS NOT NULL
-         GROUP BY anno, categoria_principale
-         ORDER BY anno ASC, totale_importo DESC"
-    );
+    // Statistiche per categoria per anno (fonte: categoria_ammissioni, con ammessi/esclusi)
+    $sql = "SELECT anno, categoria,
+                   SUM(stato = 'ammesso')                      AS n_enti_ammessi,
+                   SUM(stato = 'escluso')                      AS n_enti_esclusi,
+                   COUNT(*)                                    AS n_enti_iscritti,
+                   SUM(IF(stato='ammesso', n_scelte, 0))       AS scelte_ammessi,
+                   SUM(IF(stato='ammesso', importo_totale, 0)) AS importo_ammessi,
+                   SUM(IF(stato='escluso', importo_totale, 0)) AS importo_esclusi
+            FROM categoria_ammissioni";
 
-    // Riscrive la WHERE se anno è specificato (tabella ha già anno nella condizione)
     if ($anno) {
-        $stmt = $pdo->prepare(
-            "SELECT anno, categoria_principale,
-                    COUNT(*) AS n_enti,
-                    SUM(n_scelte) AS totale_scelte,
-                    SUM(importo_totale) AS totale_importo,
-                    AVG(importo_totale) AS media_importo,
-                    MAX(importo_totale) AS max_importo
-             FROM enti
-             WHERE anno = ? AND categoria_principale IS NOT NULL
-             GROUP BY anno, categoria_principale
-             ORDER BY anno ASC, totale_importo DESC"
-        );
+        $stmt = $pdo->prepare($sql . " WHERE anno = ? GROUP BY anno, categoria ORDER BY anno ASC, importo_ammessi DESC");
         $stmt->execute([$anno]);
     } else {
-        $stmt = $pdo->query(
-            "SELECT anno, categoria_principale,
-                    COUNT(*) AS n_enti,
-                    SUM(n_scelte) AS totale_scelte,
-                    SUM(importo_totale) AS totale_importo,
-                    AVG(importo_totale) AS media_importo,
-                    MAX(importo_totale) AS max_importo
-             FROM enti
-             WHERE categoria_principale IS NOT NULL
-             GROUP BY anno, categoria_principale
-             ORDER BY anno ASC, totale_importo DESC"
-        );
+        $stmt = $pdo->query($sql . " GROUP BY anno, categoria ORDER BY anno ASC, importo_ammessi DESC");
     }
 
     $rows = $stmt->fetchAll();
@@ -758,15 +736,16 @@ function action_analisi_categorie(): void {
 
     foreach ($rows as $r) {
         $a = (int)$r['anno'];
-        $c = $r['categoria_principale'];
+        $c = $r['categoria'];
         $anni_set[$a] = true;
         $cat_set[$c]  = true;
         $per_anno[$a][$c] = [
-            'n_enti'         => (int)$r['n_enti'],
-            'totale_scelte'  => (int)$r['totale_scelte'],
-            'totale_importo' => (float)$r['totale_importo'],
-            'media_importo'  => round((float)$r['media_importo'], 2),
-            'max_importo'    => (float)$r['max_importo'],
+            'n_enti_ammessi'  => (int)$r['n_enti_ammessi'],
+            'n_enti_esclusi'  => (int)$r['n_enti_esclusi'],
+            'n_enti_iscritti' => (int)$r['n_enti_iscritti'],
+            'scelte_ammessi'  => (int)$r['scelte_ammessi'],
+            'importo_ammessi' => (float)$r['importo_ammessi'],
+            'importo_esclusi' => (float)$r['importo_esclusi'],
         ];
     }
 

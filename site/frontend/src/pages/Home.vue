@@ -103,13 +103,13 @@
         <div class="space-y-3">
           <div
             v-for="(cat, i) in statsSorted"
-            :key="cat.categoria_principale"
+            :key="cat.categoria"
             class="flex items-center gap-3"
           >
             <!-- Label -->
             <div class="w-40 text-right flex-shrink-0">
-              <p class="text-sm font-medium text-gray-700 truncate">{{ cat.categoria_principale }}</p>
-              <p class="text-xs text-gray-400">{{ formatNum(cat.n_enti) }} enti</p>
+              <p class="text-sm font-medium text-gray-700 truncate capitalize">{{ cat.categoria?.replace(/_/g, ' ') }}</p>
+              <p class="text-xs text-gray-400">{{ formatNum(cat.n_enti_ammessi) }} ammessi · {{ formatNum(cat.n_enti_esclusi) }} esclusi</p>
             </div>
 
             <!-- Bar track -->
@@ -117,20 +117,20 @@
               <div
                 class="h-full rounded-lg transition-all duration-700 ease-out flex items-center justify-end pr-3"
                 :style="{
-                  width: animated ? `${(cat.totale_importo / maxImporto * 100).toFixed(1)}%` : '0%',
+                  width: animated ? `${(cat.importo_ammessi / maxImporto * 100).toFixed(1)}%` : '0%',
                   backgroundColor: CAT_COLORS[i % CAT_COLORS.length],
                 }"
               >
-                <span v-if="cat.totale_importo / maxImporto > 0.15" class="text-xs font-semibold text-white whitespace-nowrap">
-                  {{ formatEur(cat.totale_importo) }}
+                <span v-if="cat.importo_ammessi / maxImporto > 0.15" class="text-xs font-semibold text-white whitespace-nowrap">
+                  {{ formatEur(cat.importo_ammessi) }}
                 </span>
               </div>
             </div>
 
             <!-- Importo fuori dalla barra (barre corte) -->
             <div class="w-28 flex-shrink-0 text-xs font-semibold text-gray-700">
-              <span v-if="cat.totale_importo / maxImporto <= 0.15">
-                {{ formatEur(cat.totale_importo) }}
+              <span v-if="cat.importo_ammessi / maxImporto <= 0.15">
+                {{ formatEur(cat.importo_ammessi) }}
               </span>
             </div>
           </div>
@@ -185,11 +185,11 @@ const CAT_COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#ef4444', '#f59e0b', '#06b
 
 const statsSorted = computed(() => {
   if (!stats.value?.per_categoria) return []
-  return [...stats.value.per_categoria].sort((a, b) => b.totale_importo - a.totale_importo)
+  return [...stats.value.per_categoria].sort((a, b) => b.importo_ammessi - a.importo_ammessi)
 })
 
 const maxImporto = computed(() =>
-  statsSorted.value.length ? statsSorted.value[0].totale_importo : 1
+  statsSorted.value.length ? statsSorted.value[0].importo_ammessi : 1
 )
 
 const formatNum  = (n) => n != null ? Number(n).toLocaleString('it-IT') : '…'

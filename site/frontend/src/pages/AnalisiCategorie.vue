@@ -18,9 +18,10 @@
         <div class="flex-1 min-w-48">
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Visualizza</label>
           <select v-model="metrica" class="input-field">
-            <option value="totale_importo">Importo totale (€)</option>
-            <option value="totale_scelte">Numero di scelte</option>
-            <option value="n_enti">Numero di enti</option>
+            <option value="importo_ammessi">Importo ammessi (€)</option>
+            <option value="scelte_ammessi">Numero di scelte (ammessi)</option>
+            <option value="n_enti_ammessi">Enti ammessi</option>
+            <option value="n_enti_iscritti">Enti iscritti (ammessi + esclusi)</option>
           </select>
         </div>
       </div>
@@ -87,7 +88,7 @@
             >
               <div class="w-44 text-right flex-shrink-0">
                 <p class="text-sm font-medium text-gray-700 capitalize truncate">{{ row.cat.replace(/_/g, ' ') }}</p>
-                <p class="text-xs text-gray-400">{{ formatNum(row.data.n_enti) }} enti</p>
+                <p class="text-xs text-gray-400">{{ formatNum(row.data.n_enti_ammessi) }} ammessi · {{ formatNum(row.data.n_enti_esclusi) }} esclusi</p>
               </div>
               <div class="flex-1 h-10 bg-gray-100 rounded-lg overflow-hidden">
                 <div
@@ -122,11 +123,12 @@
               <thead>
                 <tr>
                   <th>Categoria</th>
-                  <th class="text-right">Enti</th>
-                  <th class="text-right">Scelte</th>
-                  <th class="text-right">Importo totale</th>
-                  <th class="text-right hidden sm:table-cell">Media per ente</th>
-                  <th class="text-right hidden lg:table-cell">Massimo</th>
+                  <th class="text-right">Ammessi</th>
+                  <th class="text-right hidden sm:table-cell">Esclusi</th>
+                  <th class="text-right hidden md:table-cell">Iscritti</th>
+                  <th class="text-right">Scelte (ammessi)</th>
+                  <th class="text-right">Importo ammessi</th>
+                  <th class="text-right hidden lg:table-cell text-red-600">Importo esclusi</th>
                 </tr>
               </thead>
               <tbody>
@@ -142,11 +144,12 @@
                       <span class="capitalize">{{ row.cat.replace(/_/g, ' ') }}</span>
                     </span>
                   </td>
-                  <td class="text-right tabular-nums">{{ formatNum(row.data.n_enti) }}</td>
-                  <td class="text-right tabular-nums">{{ formatNum(row.data.totale_scelte) }}</td>
-                  <td class="text-right tabular-nums font-semibold text-brand-700">{{ formatEur(row.data.totale_importo) }}</td>
-                  <td class="text-right tabular-nums hidden sm:table-cell text-gray-500">{{ formatEur(row.data.media_importo) }}</td>
-                  <td class="text-right tabular-nums hidden lg:table-cell text-gray-500">{{ formatEur(row.data.max_importo) }}</td>
+                  <td class="text-right tabular-nums">{{ formatNum(row.data.n_enti_ammessi) }}</td>
+                  <td class="text-right tabular-nums hidden sm:table-cell text-orange-600">{{ formatNum(row.data.n_enti_esclusi) }}</td>
+                  <td class="text-right tabular-nums hidden md:table-cell text-gray-500">{{ formatNum(row.data.n_enti_iscritti) }}</td>
+                  <td class="text-right tabular-nums">{{ formatNum(row.data.scelte_ammessi) }}</td>
+                  <td class="text-right tabular-nums font-semibold text-brand-700">{{ formatEur(row.data.importo_ammessi) }}</td>
+                  <td class="text-right tabular-nums hidden lg:table-cell text-red-500">{{ formatEur(row.data.importo_esclusi) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -271,7 +274,7 @@ const PRESETS = [
 
 const anniDisponibili  = ref([])
 const annoSelezionato  = ref(null)
-const metrica          = ref('totale_importo')
+const metrica          = ref('importo_ammessi')
 const data             = ref(null)
 const loading          = ref(false)
 const error            = ref(false)
@@ -294,9 +297,10 @@ function applyPreset(preset) {
 }
 
 const metricaLabel = computed(() => ({
-  totale_importo: 'Importo totale',
-  totale_scelte:  'Numero di scelte',
-  n_enti:         'Numero di enti',
+  importo_ammessi:  'Importo ammessi',
+  scelte_ammessi:   'Scelte (ammessi)',
+  n_enti_ammessi:   'Enti ammessi',
+  n_enti_iscritti:  'Enti iscritti',
 })[metrica.value])
 
 const categorieOrdinate = computed(() => {
@@ -337,7 +341,7 @@ const formatEur = (n) => n != null
   : '–'
 const formatMetrica = (v) => {
   if (v == null) return '–'
-  if (metrica.value === 'totale_importo' || metrica.value === 'media_importo') return formatEur(v)
+  if (metrica.value === 'importo_ammessi' || metrica.value === 'importo_esclusi') return formatEur(v)
   return formatNum(v)
 }
 
