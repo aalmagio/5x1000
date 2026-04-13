@@ -153,6 +153,30 @@ def normalize_regione(val) -> str:
 # UTILITY: NORMALIZZAZIONE NOMI COLONNA
 # ============================================================================
 
+# Valori provincia da trattare come "non disponibile" → stringa vuota
+_PROV_NULL_VALUES = {"N/D", "ND", "RIF", "N.D.", "//", "/", "-", "NA", "XX", "?", "???"}
+
+
+def normalize_provincia(raw: str) -> str:
+    """
+    Normalizza la sigla provincia:
+    - Uppercase, strip spazi interni
+    - Valori non validi (N/D, RIF, ecc.) → stringa vuota
+    - Lunghezza > 2 → prende le prime 2 lettere se sono tutte alpha, altrimenti vuoto
+    - Risultato finale: 2 caratteri alpha oppure stringa vuota
+    """
+    v = str(raw).strip().upper()
+    v = re.sub(r"\s+", "", v)          # "M I" → "MI"
+    if v in ("", "NAN", "NONE"):
+        return ""
+    if v in _PROV_NULL_VALUES:
+        return ""
+    if len(v) > 2:
+        candidate = v[:2]
+        return candidate if candidate.isalpha() else ""
+    return v if v.isalpha() else ""
+
+
 def ncol(col: str) -> str:
     """
     Normalizza il nome di una colonna:
@@ -421,8 +445,7 @@ def normalize_year(df: pd.DataFrame, anno: int) -> pd.DataFrame:
         df[reg_col].astype(str).str.strip().apply(normalize_regione) if reg_col else ""
     )
     out["PROVINCIA"] = (
-        df[prov_col].astype(str).str.strip().str.upper()
-        .str.replace(r"\s+", "", regex=True)  # rimuove spazi interni (es. "M I" → "MI")
+        df[prov_col].astype(str).apply(normalize_provincia)
         if prov_col else ""
     )
     out["COMUNE"] = (
@@ -677,6 +700,10 @@ def load_runts(runts_dir: Path) -> pd.DataFrame | None:
     # Seleziona solo le colonne utili
     keep = ["COD_FISCALE"] + [c for c in df.columns if c.startswith("RUNTS_")]
     df = df[[c for c in keep if c in df.columns]].copy()
+
+    # Normalizza RUNTS_SEDE_PROV come le province AdE
+    if "RUNTS_SEDE_PROV" in df.columns:
+        df["RUNTS_SEDE_PROV"] = df["RUNTS_SEDE_PROV"].apply(normalize_provincia)
 
     # Normalizza RUNTS_5X1000 in booleano leggibile
     if "RUNTS_5X1000" in df.columns:
