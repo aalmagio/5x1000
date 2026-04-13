@@ -421,7 +421,7 @@ function action_enti(): void {
         // MATCH...AGAINST in boolean mode usa gli indici FULLTEXT su enti.denominazione
         // e runts.denominazione → 10-50x più veloce di LIKE su tabelle grandi.
         // Fallback a LIKE per cod_fiscale (non ha indice FULLTEXT) e query corte.
-        if (strlen($q) >= 3 && !ctype_alnum($q) === false) {
+        if (strlen($q) >= 3) {
             // Modalità fulltext: * per prefix match (es. "volont*")
             $ft_q = '+' . implode('* +', preg_split('/\s+/', trim($q))) . '*';
             $where[] = '(MATCH(e.denominazione) AGAINST(? IN BOOLEAN MODE)'
