@@ -176,47 +176,22 @@ CREATE TABLE IF NOT EXISTS `categoria_ammissioni` (
   `cod_fiscale`   VARCHAR(20)   NOT NULL,
   `denominazione` VARCHAR(500)           DEFAULT NULL,
   `stato`              ENUM('ammesso','escluso') NOT NULL,
-  -- Metriche per gli enti ammessi (NULL per esclusi se non presenti nel file)
-  `n_scelte`           INT           DEFAULT NULL,
-  `importo_espresso`   DECIMAL(15,2) DEFAULT NULL,
-  `importo_generico`   DECIMAL(15,2) DEFAULT NULL,
-  `importo_totale`     DECIMAL(15,2) DEFAULT NULL,
+  -- Metriche (NULL per esclusi o anni precedenti al 2019)
+  `n_scelte`                          INT           DEFAULT NULL,
+  `importo_espresso`                  DECIMAL(15,2) DEFAULT NULL,
+  `importo_generico`                  DECIMAL(15,2) DEFAULT NULL,
+  `importo_totale`                    DECIMAL(15,2) DEFAULT NULL
+                                      COMMENT 'espresso + generico (= importo_verifica_totale nei file AdE)',
+  `importo_ripartizione_sotto_soglia` DECIMAL(15,2) DEFAULT NULL
+                                      COMMENT 'quota redistribuita agli enti sotto-soglia (dal 2019)',
+  `importo_totale_erogabile`          DECIMAL(15,2) DEFAULT NULL
+                                      COMMENT 'importo effettivamente erogabile inclusa redistribuzione (dal 2019)',
   `aggiornato_il`      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_cat_amm`       (`anno`, `categoria`, `cod_fiscale`),
   KEY `idx_ca_cf`               (`cod_fiscale`),
   KEY `idx_ca_anno_cat_stato`   (`anno`, `categoria`, `stato`),
   KEY `idx_ca_cf_anno_stato`    (`cod_fiscale`, `anno`, `stato`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ------------------------------------------------------------
--- 8. Ripartizioni dettagliate per categoria (dal 2019)
---    Una riga per (anno, categoria, cod_fiscale, stato_categoria).
---    A differenza di categoria_ammissioni (schema ridotto), contiene
---    6 campi numerici inclusi redistribuzione sotto-soglia e totale erogabile.
---    La chiave include stato_categoria per tenere separati ammessi ed esclusi.
--- ------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `categoria_ripartizioni` (
-  `id`                                INT           NOT NULL AUTO_INCREMENT,
-  `anno`                              SMALLINT      NOT NULL,
-  `categoria`                         VARCHAR(50)   NOT NULL,
-  `cod_fiscale`                       VARCHAR(20)   NOT NULL,
-  `stato_categoria`                   ENUM('ammesso','escluso') NOT NULL,
-  `numero_scelte`                     INT           NOT NULL DEFAULT 0,
-  `importo_scelte_espresse`           DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-  `importo_scelte_generiche`          DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-  `importo_verifica_totale`           DECIMAL(15,2) NOT NULL DEFAULT 0.00
-                                      COMMENT 'espresso+generico, o colonna composta se presente nel file',
-  `importo_ripartizione_sotto_soglia` DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-  `importo_totale_erogabile`          DECIMAL(15,2) NOT NULL DEFAULT 0.00,
-  `created_at`                        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at`                        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                      ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_cat_rip`       (`anno`, `categoria`, `cod_fiscale`, `stato_categoria`),
-  KEY `idx_cr_cf`               (`cod_fiscale`),
-  KEY `idx_cr_anno_cat`         (`anno`, `categoria`),
-  KEY `idx_cr_anno_cat_stato`   (`anno`, `categoria`, `stato_categoria`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
