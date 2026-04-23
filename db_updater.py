@@ -1307,19 +1307,20 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int], upsert: bool = Fals
     cols_db  = list(_COL_MAP.values())
     ph_row   = "(" + ",".join(["%s"] * len(cols_db)) + ")"
 
+    # Sempre upsert: gestisce duplicati nel CSV sia in modalità ciclo
+    # (nessun DELETE) sia in reimport (dopo DELETE, l'ultima riga vince).
+    update_cols = [c for c in cols_db if c not in ("anno", "cod_fiscale")]
+    update_clause = ", ".join(f"{c} = VALUES({c})" for c in update_cols)
+    insert_sql = (
+        f"INSERT INTO enti ({','.join(cols_db)}) VALUES {ph_row} "
+        f"ON DUPLICATE KEY UPDATE {update_clause}"
+    )
     if upsert:
-        update_cols = [c for c in cols_db if c not in ("anno", "cod_fiscale")]
-        update_clause = ", ".join(f"{c} = VALUES({c})" for c in update_cols)
-        insert_sql = (
-            f"INSERT INTO enti ({','.join(cols_db)}) VALUES {ph_row} "
-            f"ON DUPLICATE KEY UPDATE {update_clause}"
-        )
         logger.info(
             f"db_updater: UPSERT enti anni "
             f"{'tutti' if tutti else anni_int} (sito attivo, nessun DELETE)"
         )
     else:
-        insert_sql = f"INSERT INTO enti ({','.join(cols_db)}) VALUES {ph_row}"
         if tutti:
             cur.execute("DELETE FROM enti")
             logger.info("db_updater: cancellate TUTTE le righe da tabella enti (reimport completo)")
