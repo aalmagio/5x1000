@@ -1351,6 +1351,18 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int], upsert: bool = Fals
         if chunk.empty:
             continue
 
+        # Deduplicazione difensiva: il CSV può avere duplicati (anno, CF)
+        # se l'ETL è stato eseguito più volte in append o se un ente compare
+        # in più categorie con righe separate. Tieni l'ultima occorrenza.
+        if "anno" in chunk.columns and "cod_fiscale" in chunk.columns:
+            before = len(chunk)
+            chunk = chunk.drop_duplicates(subset=["anno", "cod_fiscale"], keep="last")
+            dropped = before - len(chunk)
+            if dropped:
+                logger.warning(
+                    f"db_updater: rimossi {dropped} duplicati (anno, cod_fiscale) nel chunk"
+                )
+
         # Assicura che ci siano tutte le colonne (riempi mancanti con None)
         for col in cols_db:
             if col not in chunk.columns:
