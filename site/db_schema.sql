@@ -128,11 +128,13 @@ CREATE TABLE IF NOT EXISTS `ripartizioni` (
   `categoria`        VARCHAR(50)   NOT NULL,
   `regione`          VARCHAR(100)           DEFAULT NULL
                      COMMENT 'NULL = totale nazionale',
-  `n_enti`           INT           NOT NULL DEFAULT 0
-                     COMMENT 'nr. enti beneficiari',
-  `n_contribuenti`   INT           NOT NULL DEFAULT 0
-                     COMMENT 'firme (scelte espresse)',
-  `importo_espresso` DECIMAL(15,2)          DEFAULT NULL,
+  `n_enti`               INT           NOT NULL DEFAULT 0
+                         COMMENT 'nr. enti beneficiari',
+  `n_contribuenti`       INT           NOT NULL DEFAULT 0
+                         COMMENT 'firme (scelte espresse)',
+  `n_scelte_generiche`   INT                    DEFAULT NULL
+                         COMMENT 'contribuenti che hanno scelto la categoria senza indicare un ente (solo riga nazionale)',
+  `importo_espresso`     DECIMAL(15,2)          DEFAULT NULL,
   `importo_generico` DECIMAL(15,2)          DEFAULT NULL,
   `importo_totale`   DECIMAL(15,2)          DEFAULT NULL,
   `aggiornato_il`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP

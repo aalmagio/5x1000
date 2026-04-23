@@ -703,9 +703,15 @@ def _aggiorna_categoria_ammissioni(cur, dati_dir: Path) -> int:
     - Anno >= 2019: usa _leggi_xlsx_ripartizione (6 campi, include denom).
       importo_totale = importo_verifica_totale (espresso+generico).
 
+    Aggiorna anche ripartizioni.n_scelte_generiche (totale nazionale per
+    categoria/anno) estraendolo dal footer dei file *_ammessi.xlsx 2019+.
+
     Ritorna il numero totale di righe inserite/aggiornate.
     """
     totale = 0
+    # (anno, cat_slug) → n_scelte_generiche estratto dal footer AdE
+    gen_data: dict[tuple[int, str], int] = {}
+
     for cat_dir in sorted(dati_dir.iterdir()):
         if not cat_dir.is_dir():
             continue
@@ -721,7 +727,7 @@ def _aggiorna_categoria_ammissioni(cur, dati_dir: Path) -> int:
                     continue
 
                 if anno >= 2019:
-                    righe, scartate = _leggi_xlsx_ripartizione(xlsx)
+                    righe, scartate, n_gen = _leggi_xlsx_ripartizione(xlsx)
                     if not righe:
                         continue
                     batch = [
@@ -733,6 +739,12 @@ def _aggiorna_categoria_ammissioni(cur, dati_dir: Path) -> int:
                     ]
                     if scartate:
                         logger.debug(f"db_updater: {xlsx.name}: {scartate} righe scartate")
+                    # raccoglie n_scelte_generiche solo dal file ammessi (ha il footer)
+                    if stato == "ammesso" and n_gen is not None:
+                        gen_data[(anno, cat_slug)] = n_gen
+                        logger.debug(
+                            f"db_updater: {xlsx.name}: n_scelte_generiche={n_gen:,}"
+                        )
                 else:
                     righe = _leggi_xlsx_ammissioni(xlsx)
                     if not righe:
@@ -752,6 +764,20 @@ def _aggiorna_categoria_ammissioni(cur, dati_dir: Path) -> int:
                     f"db_updater: categoria_ammissioni – {cat_slug}/{anno} "
                     f"{stato}: {len(batch)} righe"
                 )
+
+    # Aggiorna n_scelte_generiche nella riga nazionale di ripartizioni
+    if gen_data:
+        for (anno, cat), n_gen in gen_data.items():
+            cur.execute(
+                """UPDATE ripartizioni
+                   SET n_scelte_generiche = %s
+                   WHERE anno = %s AND categoria = %s AND regione IS NULL""",
+                (n_gen, anno, cat),
+            )
+        logger.info(
+            f"db_updater: n_scelte_generiche aggiornato per "
+            f"{len(gen_data)} coppie (anno, categoria)"
+        )
 
     return totale
 
@@ -794,12 +820,15 @@ _IMP_VERIFICA_ALIASES = frozenset({
 
 
 
-def _leggi_xlsx_ripartizione(path: Path) -> tuple[list[dict], int]:
+def _leggi_xlsx_ripartizione(path: Path) -> tuple[list[dict], int, int | None]:
     """
-    Legge un file xlsx categoria e restituisce (records, n_scartate).
+    Legge un file xlsx categoria e restituisce (records, n_scartate, n_scelte_generiche).
 
     Ogni record è un dict con:
       cf, numero_scelte, imp_esp, imp_gen, imp_ver, imp_sottos, imp_erog
+
+    n_scelte_generiche: contribuenti che hanno scelto la categoria senza indicare
+    un ente specifico (riga "Voti generici" nel footer AdE). None se non trovata.
 
     Tutti i campi numerici mancanti vengono impostati a 0.
     importo_verifica_totale = colonna esplicita se presente, altrimenti
@@ -824,7 +853,7 @@ def _leggi_xlsx_ripartizione(path: Path) -> tuple[list[dict], int]:
     rows = list(ws.iter_rows(values_only=True))
     wb.close()
     if not rows:
-        return [], 0
+        return [], 0, None
 
     raw_header  = [str(c).strip() if c is not None else "" for c in rows[0]]
     header_norm = [h.lower() for h in raw_header]
@@ -844,7 +873,7 @@ def _leggi_xlsx_ripartizione(path: Path) -> tuple[list[dict], int]:
         logger.warning(
             f"db_updater: CF non trovato in {path.name} (header: {raw_header[:6]})"
         )
-        return [], 0
+        return [], 0, None
 
     # Denominazione (opzionale — usata quando il file viene letto per categoria_ammissioni)
     denom_idx = None
@@ -866,17 +895,28 @@ def _leggi_xlsx_ripartizione(path: Path) -> tuple[list[dict], int]:
 
     seen: dict[str, dict] = {}
     scartate = 0
+    n_scelte_generiche: int | None = None
+
+    def _check_footer_gen(row) -> None:
+        nonlocal n_scelte_generiche
+        label = str(row[0]).strip().lower() if row and row[0] is not None else ""
+        if "voti generici" in label or "scelte generiche" in label:
+            val = _parse_num(row[n_idx] if n_idx is not None and n_idx < len(row) else None)
+            if val is not None:
+                n_scelte_generiche = int(val)
 
     for row in rows[1:]:
         if not row or cf_idx >= len(row):
             continue
         cf_raw = row[cf_idx]
         if cf_raw is None:
+            _check_footer_gen(row)
             scartate += 1
             continue
 
         cf = _re.sub(r"\.0+$", "", str(cf_raw).strip().upper()).strip("'\"")
         if not cf or len(cf) < 5:
+            _check_footer_gen(row)
             scartate += 1
             continue
 
@@ -921,7 +961,7 @@ def _leggi_xlsx_ripartizione(path: Path) -> tuple[list[dict], int]:
             for k in ("imp_esp", "imp_gen", "imp_ver", "imp_sottos", "imp_erog"):
                 e[k] += rec[k]
 
-    return list(seen.values()), scartate
+    return list(seen.values()), scartate, n_scelte_generiche
 
 
 # ---------------------------------------------------------------------------
@@ -1348,25 +1388,35 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int], upsert: bool = Fals
 
 _DDL_RIPARTIZIONI = """
 CREATE TABLE IF NOT EXISTS `ripartizioni` (
-  `id`               INT           NOT NULL AUTO_INCREMENT,
-  `anno`             SMALLINT      NOT NULL,
-  `categoria`        VARCHAR(50)   NOT NULL,
-  `regione`          VARCHAR(100)           DEFAULT NULL
-                     COMMENT 'NULL = totale nazionale',
-  `n_enti`           INT           NOT NULL DEFAULT 0
-                     COMMENT 'nr. enti beneficiari',
-  `n_contribuenti`   INT           NOT NULL DEFAULT 0
-                     COMMENT 'firme (scelte espresse)',
-  `importo_espresso` DECIMAL(15,2)          DEFAULT NULL,
-  `importo_generico` DECIMAL(15,2)          DEFAULT NULL,
-  `importo_totale`   DECIMAL(15,2)          DEFAULT NULL,
-  `aggiornato_il`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
-                     ON UPDATE CURRENT_TIMESTAMP,
+  `id`                   INT           NOT NULL AUTO_INCREMENT,
+  `anno`                 SMALLINT      NOT NULL,
+  `categoria`            VARCHAR(50)   NOT NULL,
+  `regione`              VARCHAR(100)           DEFAULT NULL
+                         COMMENT 'NULL = totale nazionale',
+  `n_enti`               INT           NOT NULL DEFAULT 0
+                         COMMENT 'nr. enti beneficiari',
+  `n_contribuenti`       INT           NOT NULL DEFAULT 0
+                         COMMENT 'firme (scelte espresse)',
+  `n_scelte_generiche`   INT                    DEFAULT NULL
+                         COMMENT 'contribuenti che hanno scelto la categoria senza indicare un ente (solo riga nazionale)',
+  `importo_espresso`     DECIMAL(15,2)          DEFAULT NULL,
+  `importo_generico`     DECIMAL(15,2)          DEFAULT NULL,
+  `importo_totale`       DECIMAL(15,2)          DEFAULT NULL,
+  `aggiornato_il`        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP
+                         ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_rip` (`anno`, `categoria`, `regione`),
   KEY `idx_rip_anno` (`anno`),
   KEY `idx_rip_cat`  (`anno`, `categoria`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+"""
+
+# Migration idempotente per DB già esistenti
+_ALTER_RIPARTIZIONI_N_GEN = """
+ALTER TABLE `ripartizioni`
+  ADD COLUMN IF NOT EXISTS `n_scelte_generiche` INT DEFAULT NULL
+    COMMENT 'contribuenti che hanno scelto la categoria senza indicare un ente (solo riga nazionale)'
+    AFTER `n_contribuenti`
 """
 
 _UPSERT_RIP = """
@@ -1393,6 +1443,7 @@ def _aggiorna_ripartizioni(cur, anni: list[int]) -> None:
     Va chiamata DOPO _aggiorna_enti().
     """
     cur.execute(_DDL_RIPARTIZIONI)
+    cur.execute(_ALTER_RIPARTIZIONI_N_GEN)
 
     anni_int = [int(a) for a in anni]
     tutti    = len(anni_int) == 0
