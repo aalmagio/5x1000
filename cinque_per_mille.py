@@ -736,7 +736,7 @@ def main():
     _apply_config(cfg)
     _apply_excel_config(cfg)
 
-    get_logger("cinque_per_mille", root_dir)  # configura root logger
+    _, log_file = get_logger("cinque_per_mille", root_dir)  # configura root logger
     logging.info(f"Directory root: {root_dir}")
     logging.info(f"Python: {sys.version}")
     if cfg:
