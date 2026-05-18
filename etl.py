@@ -1111,7 +1111,7 @@ def main():
                 "autocommit": True,
             }
             if _db_cfg["user"] and _db_cfg["database"]:
-                from db_updater import _COL_MAP
+                from db_updater import _COL_MAP, _parse_date_ita, _bool_to_int, _BOOL_COLS
                 def _make_db_callback(db_cfg, col_map):
                     def _cb(anno: int, df: "pd.DataFrame") -> None:
                         import pymysql as _pm
@@ -1132,6 +1132,13 @@ def main():
                                 for col in cols_db:
                                     if col not in df_ins.columns:
                                         df_ins[col] = None
+                                # Converti booleani stringa → 0/1
+                                for col in _BOOL_COLS:
+                                    if col in df_ins.columns:
+                                        df_ins[col] = df_ins[col].apply(_bool_to_int)
+                                # Converti date dd/mm/yyyy → yyyy-mm-dd per MySQL
+                                if "runts_data_iscrizione" in df_ins.columns:
+                                    df_ins["runts_data_iscrizione"] = df_ins["runts_data_iscrizione"].apply(_parse_date_ita)
                                 rows = [
                                     tuple(_to_none(row[c]) for c in cols_db)
                                     for _, row in df_ins.iterrows()
