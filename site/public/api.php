@@ -968,7 +968,10 @@ function action_download(): void {
         header('Content-Disposition: attachment; filename="scelte_categorie.xlsx"');
         header('Content-Length: ' . filesize($real_path));
         header('Cache-Control: no-store');
-        readfile($real_path);
+        while (ob_get_level()) ob_end_clean();
+        $fh = fopen($real_path, 'rb');
+        fpassthru($fh);
+        fclose($fh);
         exit;
     }
 
@@ -991,7 +994,8 @@ function action_download(): void {
         header('Content-Type: text/csv; charset=utf-8');
         header("Content-Disposition: attachment; filename=\"dati_{$anno_int}.csv\"");
         header('Cache-Control: no-store');
-        header('X-Accel-Buffering: no');  // disabilita buffering nginx per lo streaming
+        header('X-Accel-Buffering: no');
+        while (ob_get_level()) ob_end_clean();
 
         $fh = fopen($row['percorso'], 'r');
         echo fgets($fh);  // riga intestazione
@@ -1052,7 +1056,10 @@ function action_download(): void {
     header('Content-Disposition: attachment; filename="' . basename($row['nome_file']) . '"');
     header('Content-Length: ' . filesize($real_path));
     header('Cache-Control: no-store');
-    readfile($real_path);
+    while (ob_get_level()) ob_end_clean();
+    $fh = fopen($real_path, 'rb');
+    fpassthru($fh);
+    fclose($fh);
     exit;
 }
 
