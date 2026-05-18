@@ -1049,10 +1049,10 @@ function action_download(): void {
         : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
     header('Content-Type: ' . $mime);
-    header('Content-Disposition: attachment; filename="' . basename($path) . '"');
-    header('Content-Length: ' . filesize($path));
+    header('Content-Disposition: attachment; filename="' . basename($row['nome_file']) . '"');
+    header('Content-Length: ' . filesize($real_path));
     header('Cache-Control: no-store');
-    readfile($path);
+    readfile($real_path);
     exit;
 }
 
