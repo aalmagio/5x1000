@@ -763,7 +763,7 @@ def strip_anni_from_csv(csv_path: Path, anni: "list[int]") -> int:
 
     try:
         reader = pd.read_csv(csv_path, dtype=str, chunksize=ETL_CONFIG["chunk_size"],
-                             encoding="utf-8-sig")
+                             encoding="utf-8-sig", on_bad_lines="warn")
         first = True
         for chunk in reader:
             mask = ~chunk["ANNO"].isin(anni_str)
@@ -905,7 +905,7 @@ def export_excel_from_csv(csv_path: Path, out_path: Path) -> None:
     CHUNK_SIZE = ETL_CONFIG.get("chunk_size", 50_000)
 
     # --- Prima passata: colonne e larghezze ---
-    sample = pd.read_csv(csv_path, dtype=str, nrows=200)
+    sample = pd.read_csv(csv_path, dtype=str, nrows=200, on_bad_lines="warn")
     cols = list(sample.columns)
     n_cols = len(cols)
     col_widths = _compute_col_widths(cols, sample)
@@ -939,7 +939,7 @@ def export_excel_from_csv(csv_path: Path, out_path: Path) -> None:
     start_new_sheet()
 
     # --- Seconda passata: scrivi dati in streaming ---
-    reader = pd.read_csv(csv_path, dtype=str, chunksize=CHUNK_SIZE)
+    reader = pd.read_csv(csv_path, dtype=str, chunksize=CHUNK_SIZE, on_bad_lines="warn")
 
     for chunk in reader:
         values = chunk.values
