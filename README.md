@@ -15,6 +15,7 @@ Produce un dataset normalizzato di circa **1 milione di righe** arricchito con i
 | `scarica_categorie.py` | Scarica e converte i dati **per categoria** (ammessi/esclusi separati) |
 | `etl.py` | Normalizza tutti i dati annuali in uno schema unificato e fa il join con il RUNTS |
 | `report.py` | Genera un report Excel multi-foglio stile ASSIF/Bedogni con classifiche, confronto YoY e aggregazioni regionali |
+| `estrai_scelte_categorie.py` | Pivot Excel con scelte espresse e generiche per categoria e anno (dal 2019) |
 | `gsheets.py` | Carica il dataset normalizzato su Google Sheets per Looker Studio |
 | `db_updater.py` | Aggiorna il database MySQL del sito web al termine della pipeline |
 | `forecast.py` | Genera proiezioni trend via regressione lineare; output JSON per il sito |
@@ -97,6 +98,8 @@ python pipeline.py --ciclo --source pdf --anni 2022,2023,2024
 I default vengono salvati in `ciclo_defaults.yaml` nella root del progetto.
 I file sentinella `.done` in `Dati/.stato/` tracciano i passi completati.
 
+> **Nota**: in modalità `--ciclo` l'ETL usa internamente il flag `--replace`: prima di scrivere il CSV normalizzato rimuove le righe dell'anno in lavorazione, poi le riscrive. Questo garantisce che il dataset storico `enti_5x1000_norm.csv` rimanga integro anche in caso di ri-elaborazione di un anno già presente.
+
 ---
 
 ### 3 — Aggiorna un anno specifico
@@ -161,6 +164,11 @@ python gsheets.py --sheet-id TUO_SHEET_ID
 
 # Verifica cosa verrebbe rieseguito in smart mode (dry run)
 python pipeline_checker.py
+
+# Genera il pivot scelte per categoria (standalone)
+python estrai_scelte_categorie.py
+# con output personalizzato
+python estrai_scelte_categorie.py --dati Dati --output Dati/scelte_categorie.xlsx --anno-min 2019
 ```
 
 ---
@@ -207,7 +215,7 @@ python pipeline.py --sheet-id 1ABC... --anni 2024
 | `--skip-download` | | Salta il download in tutti gli script |
 | `--skip-gsheets` | | Salta l'upload su Google Sheets |
 | `--sheet-id` | da config | ID del Google Sheet |
-| `--only` | tutti | Step specifici: `download,categorie,etl,report,gsheets` |
+| `--only` | tutti | Step specifici: `download,categorie,etl,report,estrai_scelte,gsheets` |
 | `--no-runts` | | Salta il merge RUNTS in etl.py |
 | `--no-excel-etl` | | Non genera il file Excel in etl.py (solo CSV) |
 | `--anno-confronto` | anno-1 | Anno per il confronto YoY nel report |
@@ -215,7 +223,7 @@ python pipeline.py --sheet-id 1ABC... --anni 2024
 | `--skip-report` | | Salta la generazione del report |
 | `--smart` | | Salta automaticamente step/anni già aggiornati |
 
-La pipeline esegue in ordine: **download** → **categorie** → **etl** → **report** → **gsheets** → **db** (aggiornamento sito).
+La pipeline esegue in ordine: **download** → **categorie** → **etl** → **report** → **estrai_scelte** → **gsheets** → **db** (aggiornamento sito).
 
 ### 1. Scaricare i dati dall'Agenzia delle Entrate
 
@@ -296,6 +304,26 @@ python report.py --anno 2024 --output mio_report.xlsx
 
 Output: `Dati/report_{anno}.xlsx`
 
+### 3b. Pivot scelte per categoria
+
+```bash
+# Genera il pivot con i valori di default (Dati/ → Dati/scelte_categorie.xlsx)
+python estrai_scelte_categorie.py
+
+# Anni dal 2021 in poi, output personalizzato
+python estrai_scelte_categorie.py --anno-min 2021 --output /tmp/scelte.xlsx
+```
+
+Output: `Dati/scelte_categorie.xlsx` — foglio pivot con scelte espresse, generiche e scelte degli esclusi per ogni categoria (Ricerca scientifica, Ricerca sanitaria, ETS ONLUS, ecc.) e anno. Disponibile anche per il download dal sito.
+
+| Flag | Default | Descrizione |
+|---|---|---|
+| `--dati` | `Dati` | Cartella con i file per categoria |
+| `--output` | `Dati/scelte_categorie.xlsx` | File Excel di output |
+| `--anno-min` | `2019` | Anno minimo da includere |
+
+---
+
 ### 4. Caricare su Google Sheets (per Looker Studio)
 
 Prima di tutto, [crea le credenziali GCP](#setup-google-sheets):
@@ -350,16 +378,17 @@ Priorità: **flag CLI > config.yaml > default nel codice**
 
 ```
 5x1000/
-├── pipeline.py           # Orchestratore
-├── cinque_per_mille.py   # Download + conversione PDF/CSV → Excel
-├── scarica_categorie.py  # Download + conversione per categoria
-├── etl.py                # ETL: normalizzazione + merge RUNTS
-├── report.py             # Report Excel multi-foglio
-├── gsheets.py            # Export su Google Sheets
-├── db_updater.py         # Aggiornamento DB sito web
-├── forecast.py           # Proiezioni trend via regressione lineare
-├── pipeline_checker.py   # Analisi smart mode
-├── config.yaml           # Configurazione esterna
+├── pipeline.py                  # Orchestratore
+├── cinque_per_mille.py          # Download + conversione PDF/CSV → Excel
+├── scarica_categorie.py         # Download + conversione per categoria
+├── etl.py                       # ETL: normalizzazione + merge RUNTS
+├── report.py                    # Report Excel multi-foglio
+├── estrai_scelte_categorie.py   # Pivot scelte per categoria e anno
+├── gsheets.py                   # Export su Google Sheets
+├── db_updater.py                # Aggiornamento DB sito web
+├── forecast.py                  # Proiezioni trend via regressione lineare
+├── pipeline_checker.py          # Analisi smart mode
+├── config.yaml                  # Configurazione esterna
 ├── requirements.txt
 │
 ├── site/                 # Sito web (5x1000.almagioni.com)
@@ -380,8 +409,9 @@ Priorità: **flag CLI > config.yaml > default nel codice**
 │
 ├── Dati/                 # Output finale (non in repo)
 │   ├── dati_2006.xlsx ... dati_2024.xlsx
-│   ├── enti_5x1000_norm.csv      # ← output principale di etl.py
-│   └── report_2024.xlsx          # ← output di report.py
+│   ├── enti_5x1000_norm.csv      # ← output principale di etl.py (~210 MB, ~1M righe)
+│   ├── report_2024.xlsx          # ← output di report.py
+│   └── scelte_categorie.xlsx     # ← output di estrai_scelte_categorie.py
 │
 ├── Runts/                # File RUNTS (da scaricare manualmente, non in repo)
 ├── 2006/ ... /           # File grezzi AdE per anno (non in repo)
@@ -483,4 +513,4 @@ I **dati** scaricati dall'Agenzia delle Entrate e dal RUNTS sono soggetti alle r
 
 ### Lead generation
 
-- [ ] **Email gate prima del download**: form leggero (nome + email) da completare prima di scaricare CSV/Excel; i dati vengono salvati per attività di lead nurturing
+- [x] **Email gate prima del download**: form leggero (nome + email) opzionale prima del download; i dati vengono salvati per attività di lead nurturing
