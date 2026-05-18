@@ -27,6 +27,7 @@ Requisiti:
 import os
 import re
 import sys
+import csv
 import math
 import argparse
 import logging
@@ -591,7 +592,8 @@ def process_streaming(
             # Scrivi nel CSV (append)
             mode = "w" if first_write else "a"
             header = first_write
-            df_norm.to_csv(out_csv, mode=mode, header=header, index=False, encoding="utf-8-sig")
+            df_norm.to_csv(out_csv, mode=mode, header=header, index=False, encoding="utf-8-sig",
+                           quoting=csv.QUOTE_NONNUMERIC)
             first_write = False
 
             # Aggiorna stats
@@ -742,7 +744,7 @@ def merge_runts(df_5x: pd.DataFrame, df_runts: pd.DataFrame) -> pd.DataFrame:
 # ============================================================================
 
 def export_csv(df: pd.DataFrame, out_path: Path) -> None:
-    df.to_csv(out_path, index=False, encoding="utf-8-sig")
+    df.to_csv(out_path, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_NONNUMERIC)
     size_mb = out_path.stat().st_size / 1_048_576
     logging.info(f"CSV salvato: {out_path} ({size_mb:.1f} MB, {len(df):,} righe)")
 
@@ -763,13 +765,14 @@ def strip_anni_from_csv(csv_path: Path, anni: "list[int]") -> int:
 
     try:
         reader = pd.read_csv(csv_path, dtype=str, chunksize=ETL_CONFIG["chunk_size"],
-                             encoding="utf-8-sig")
+                             encoding="utf-8-sig", on_bad_lines="warn")
         first = True
         for chunk in reader:
             mask = ~chunk["ANNO"].isin(anni_str)
             removed += (~mask).sum()
             chunk[mask].to_csv(tmp_path, mode="w" if first else "a",
-                               header=first, index=False, encoding="utf-8-sig")
+                               header=first, index=False, encoding="utf-8-sig",
+                               quoting=csv.QUOTE_NONNUMERIC)
             first = False
 
         # Se il file era vuoto o tutte le righe erano degli anni rimossi,
@@ -905,7 +908,7 @@ def export_excel_from_csv(csv_path: Path, out_path: Path) -> None:
     CHUNK_SIZE = ETL_CONFIG.get("chunk_size", 50_000)
 
     # --- Prima passata: colonne e larghezze ---
-    sample = pd.read_csv(csv_path, dtype=str, nrows=200)
+    sample = pd.read_csv(csv_path, dtype=str, nrows=200, on_bad_lines="warn")
     cols = list(sample.columns)
     n_cols = len(cols)
     col_widths = _compute_col_widths(cols, sample)
@@ -939,7 +942,7 @@ def export_excel_from_csv(csv_path: Path, out_path: Path) -> None:
     start_new_sheet()
 
     # --- Seconda passata: scrivi dati in streaming ---
-    reader = pd.read_csv(csv_path, dtype=str, chunksize=CHUNK_SIZE)
+    reader = pd.read_csv(csv_path, dtype=str, chunksize=CHUNK_SIZE, on_bad_lines="warn")
 
     for chunk in reader:
         values = chunk.values
