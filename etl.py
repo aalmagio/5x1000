@@ -537,6 +537,7 @@ def process_streaming(
     df_runts: "pd.DataFrame | None",
     anni_filter: "list[int] | None" = None,
     on_anno_done: "callable | None" = None,
+    append: bool = False,
 ) -> dict:
     """
     Processa i file anno per anno in modalità streaming (dal più recente al più vecchio):
@@ -544,6 +545,7 @@ def process_streaming(
     Questo evita di tenere tutto il dataset in RAM simultaneamente.
 
     on_anno_done(anno, df_norm): callback opzionale chiamato dopo ogni anno.
+    append=True: se il CSV esiste già, scrive in append senza header (usato con --replace).
     Restituisce statistiche aggregate.
     """
     files = sorted(dati_dir.glob("dati_[0-9][0-9][0-9][0-9].xlsx"), reverse=True)
@@ -559,7 +561,9 @@ def process_streaming(
         "runts_matches": 0,
     }
 
-    first_write = True
+    # append=True (usato con --replace): il CSV esiste già con gli altri anni,
+    # si fa append senza header. Altrimenti si ricrea da zero.
+    first_write = not (append and out_csv.exists())
 
     for f in files:
         anno = int(f.stem.split("_")[1])
@@ -741,6 +745,46 @@ def export_csv(df: pd.DataFrame, out_path: Path) -> None:
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
     size_mb = out_path.stat().st_size / 1_048_576
     logging.info(f"CSV salvato: {out_path} ({size_mb:.1f} MB, {len(df):,} righe)")
+
+
+def strip_anni_from_csv(csv_path: Path, anni: "list[int]") -> int:
+    """
+    Rimuove dal CSV esistente tutte le righe degli anni indicati,
+    riscrivendo il file in streaming (chunk per chunk) per contenere l'uso RAM.
+    Restituisce il numero di righe rimosse.
+    Operazione no-op se il file non esiste.
+    """
+    if not csv_path.exists():
+        return 0
+
+    anni_str = {str(a) for a in anni}
+    tmp_path = csv_path.with_suffix(".tmp")
+    removed = 0
+
+    try:
+        reader = pd.read_csv(csv_path, dtype=str, chunksize=ETL_CONFIG["chunk_size"],
+                             encoding="utf-8-sig")
+        first = True
+        for chunk in reader:
+            mask = ~chunk["ANNO"].isin(anni_str)
+            removed += (~mask).sum()
+            chunk[mask].to_csv(tmp_path, mode="w" if first else "a",
+                               header=first, index=False, encoding="utf-8-sig")
+            first = False
+
+        # Se il file era vuoto o tutte le righe erano degli anni rimossi,
+        # tmp_path potrebbe non essere stato creato.
+        if tmp_path.exists():
+            tmp_path.replace(csv_path)
+        else:
+            csv_path.unlink()
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise
+
+    logging.info(f"[replace] Rimosse {removed:,} righe per anni {anni} dal CSV esistente.")
+    return removed
 
 
 # ============================================================================
@@ -998,6 +1042,12 @@ def main():
         help="Anni da processare, separati da virgola (es. 2020,2021,2022)"
     )
     parser.add_argument(
+        "--replace", action="store_true",
+        help="Prima di scrivere, rimuove dal CSV esistente le righe degli anni "
+             "indicati con --anni (utile in modalità ciclo per aggiornare un anno "
+             "senza ricostruire tutto il dataset)."
+    )
+    parser.add_argument(
         "--aggiorna-db", action="store_true",
         help=(
             "Aggiorna il DB del sito dopo ogni anno elaborato "
@@ -1100,7 +1150,15 @@ def main():
         except ImportError as _ie:
             logging.warning(f"--aggiorna-db: dipendenza mancante ({_ie}) – saltato.")
 
-    stats = process_streaming(dati_dir, csv_path, df_runts, anni_filter, _db_anno_callback)
+    replace_mode = getattr(args, "replace", False)
+    if replace_mode:
+        if not anni_filter:
+            logging.error("--replace richiede --anni: specifica gli anni da sostituire.")
+            sys.exit(1)
+        strip_anni_from_csv(csv_path, anni_filter)
+
+    stats = process_streaming(dati_dir, csv_path, df_runts, anni_filter, _db_anno_callback,
+                              append=replace_mode)
 
     # --- Stats riassuntive ---
     logging.info("\n" + "=" * 60)

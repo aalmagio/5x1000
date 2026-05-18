@@ -878,7 +878,9 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
             continue
 
         # ETL per questo anno (--aggiorna-db NON usato qui: usiamo UPSERT custom)
-        cmd = [PYTHON, "etl.py", "--anni", str(anno)]
+        # --replace: rimuove le righe dell'anno dal CSV prima di scrivere,
+        # così il dataset storico rimane integro anche in caso di ri-elaborazione.
+        cmd = [PYTHON, "etl.py", "--anni", str(anno), "--replace"]
         if getattr(args, "no_runts", False):
             cmd.append("--no-runts")
         if getattr(args, "no_excel_etl", False):
