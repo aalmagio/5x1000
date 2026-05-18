@@ -936,14 +936,41 @@ function action_categoria_dettaglio(): void {
 function action_download(): void {
     set_time_limit(0);
 
-    $tipo = str_param('tipo');  // csv | xlsx | report
+    $tipo = str_param('tipo');  // csv | xlsx | report | scelte
     $anno = str_param('anno');  // anno numerico oppure 'completo'
 
-    if (!in_array($tipo, ['csv', 'xlsx', 'report'], true)) {
+    if (!in_array($tipo, ['csv', 'xlsx', 'report', 'scelte'], true)) {
         err('Tipo non valido', 400);
     }
 
     $pdo = db();
+
+    // ── Pivot scelte per categoria (file multi-anno) ────────────────────────
+    if ($tipo === 'scelte') {
+        $stmt = $pdo->prepare(
+            "SELECT percorso, nome_file FROM dataset_files
+             WHERE anno IS NULL AND tipo = 'scelte' AND formato = 'xlsx' LIMIT 1"
+        );
+        $stmt->execute();
+        $row = $stmt->fetch();
+        if (!$row) err('File scelte_categorie non disponibile nel catalogo', 404);
+
+        $path = $row['percorso'];
+        $allowed_base = realpath(__DIR__ . '/../../Dati');
+        $real_path    = realpath($path);
+        if ($real_path === false || $allowed_base === false ||
+            strncmp($real_path, $allowed_base, strlen($allowed_base)) !== 0) {
+            err('File non disponibile sul server', 404);
+        }
+        if (!is_readable($real_path)) err('File non leggibile sul server', 500);
+
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="scelte_categorie.xlsx"');
+        header('Content-Length: ' . filesize($real_path));
+        header('Cache-Control: no-store');
+        readfile($real_path);
+        exit;
+    }
 
     // ── CSV per anno: streaming filtrato dal file completo ──────────────────
     if ($tipo === 'csv' && $anno !== 'completo') {

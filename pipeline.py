@@ -41,7 +41,7 @@ load_dotenv(_ROOT_DIR)
 # CONFIGURAZIONE
 # ============================================================================
 
-STEPS_ALL = ["metadata", "download", "categorie", "etl", "report", "gsheets", "forecast"]
+STEPS_ALL = ["metadata", "download", "categorie", "etl", "report", "estrai_scelte", "gsheets", "forecast"]
 
 DEFAULT_INPUT = "categorie.xlsx"
 
@@ -156,7 +156,7 @@ Esempi:
   %(prog)s --skip-download --skip-gsheets       # solo estrazione + ETL
   %(prog)s --only categorie,etl,report          # solo step specifici
 
-Step disponibili: download, categorie, etl, report, gsheets
+Step disponibili: download, categorie, etl, report, estrai_scelte, gsheets
 """,
     )
     parser.add_argument(
@@ -492,6 +492,10 @@ def _build_step_cmds(
             cmd.append("--no-confronto")
         cmds["report"] = ("Report Excel (stile ASSIF)", cmd, _timeout_fn("report"))
 
+    if "estrai_scelte" in steps:
+        cmd = [PYTHON, "estrai_scelte_categorie.py"]
+        cmds["estrai_scelte"] = ("Estrai scelte per categoria (pivot Excel)", cmd, _timeout_fn("report"))
+
     if "gsheets" in steps:
         cmd = [PYTHON, "gsheets.py"]
         if sheet_id:
@@ -717,12 +721,14 @@ def _chiedi_e_salva_ciclo_defaults(root_dir: str, source_cli: str) -> dict:
     no_confront = False
     if do_report:
         no_confront = not ask_yes_no("Includere confronto con anno precedente?", default="s")
+    do_estrai_scelte = ask_yes_no("\nGenerare pivot scelte per categoria al termine del ciclo?", default="n")
 
     cfg = {
-        "anni":         anni_def,
-        "source":       source_def,
-        "report":       do_report,
-        "no_confronto": no_confront,
+        "anni":             anni_def,
+        "source":           source_def,
+        "report":           do_report,
+        "no_confronto":     no_confront,
+        "estrai_scelte":    do_estrai_scelte,
     }
     _salva_ciclo_defaults(root_dir, cfg)
     return cfg
@@ -782,17 +788,18 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
                 "Uso default built-in (tutti gli anni, source=pdf, no report). "
                 f"Per configurare: lancia 'python pipeline.py --ciclo' in modo interattivo."
             )
-            defaults = {"anni": None, "source": "pdf", "report": False, "no_confronto": False}
+            defaults = {"anni": None, "source": "pdf", "report": False, "no_confronto": False, "estrai_scelte": False}
 
     # CLI args espliciti hanno sempre la precedenza sui defaults salvati
     anni_eff   = anni   if anni   is not None else defaults.get("anni")
     source_eff = source if source != "pdf"    else defaults.get("source", "pdf")
-    do_report  = bool(defaults.get("report", False))
-    no_confront = bool(defaults.get("no_confronto", False))
+    do_report        = bool(defaults.get("report", False))
+    no_confront      = bool(defaults.get("no_confronto", False))
+    do_estrai_scelte = bool(defaults.get("estrai_scelte", False))
 
     logging.info(
         f"[CICLO] Config: anni={anni_eff or 'tutti'}  source={source_eff}  "
-        f"report={do_report}  no_confronto={no_confront}"
+        f"report={do_report}  no_confronto={no_confront}  estrai_scelte={do_estrai_scelte}"
     )
 
     anni_iter   = _anni_ciclo(root_dir, anni_eff)
@@ -955,6 +962,13 @@ def _esegui_ciclo(args, root_dir: str, anni: str | None, source: str,
         ok, dur = run_step(f"Report {report_anno_str}", cmd, root_dir,
                            timeout=_timeout_fn("report"))
         results[f"report_{report_anno_str}"] = (ok, dur)
+
+    # Pivot scelte per categoria (opzionale, una sola volta)
+    if do_estrai_scelte:
+        ok, dur = run_step("Estrai scelte per categoria",
+                           [PYTHON, "estrai_scelte_categorie.py"],
+                           root_dir, timeout=_timeout_fn("report"))
+        results["estrai_scelte"] = (ok, dur)
 
     # ------------------------------------------------------------------
     # Riepilogo

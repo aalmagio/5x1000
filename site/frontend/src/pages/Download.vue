@@ -57,6 +57,54 @@
       </div>
     </section>
 
+    <!-- Pivot scelte per categoria -->
+    <section class="mb-10">
+      <h2 class="mb-4">Scelte per categoria</h2>
+
+      <div v-if="loadingFiles" class="card animate-pulse">
+        <div class="flex items-center gap-4">
+          <div class="w-14 h-14 bg-gray-200 rounded-xl flex-shrink-0"></div>
+          <div class="flex-1 space-y-2">
+            <div class="h-5 bg-gray-200 rounded w-56"></div>
+            <div class="h-4 bg-gray-100 rounded w-80"></div>
+            <div class="h-3 bg-gray-100 rounded w-40"></div>
+          </div>
+          <div class="w-28 h-9 bg-gray-200 rounded-lg flex-shrink-0"></div>
+        </div>
+      </div>
+
+      <div v-else-if="scelteFile" class="card">
+        <div class="flex flex-col sm:flex-row sm:items-center gap-5">
+          <div class="flex-shrink-0 w-14 h-14 bg-violet-50 rounded-xl flex items-center justify-center border border-violet-100">
+            <svg class="w-7 h-7 text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M3 10h18M3 14h18M10 3v18"/>
+            </svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex flex-wrap items-center gap-2 mb-1">
+              <p class="font-semibold text-gray-800 font-mono text-sm">scelte_categorie.xlsx</p>
+              <span class="badge bg-violet-100 text-violet-700">Excel</span>
+              <span class="badge bg-gray-100 text-gray-600">pivot</span>
+            </div>
+            <p class="text-sm text-gray-500">Scelte espresse e generiche per categoria e anno (dal 2019). Formato pivot multi-foglio.</p>
+            <p v-if="scelteFile" class="text-xs text-gray-400 mt-1">
+              {{ scelteFile.dimensione_mb }} MB &bull; Aggiornato il {{ formatDate(scelteFile.aggiornato_il) }}
+            </p>
+          </div>
+          <button
+            class="btn-primary whitespace-nowrap flex-shrink-0 inline-flex items-center gap-2"
+            @click="requestDownload({ tipo: 'scelte', anno: 'completo', href: '/download/scelte/' })"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+            Scarica Excel
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- Per anno -->
     <section class="mb-10">
       <h2 class="mb-4">Download per anno</h2>
@@ -357,6 +405,10 @@ function triggerDownload(href) {
 // ── Files ─────────────────────────────────────────────────────────────────────
 const completo = computed(() =>
   files.value.find(f => f.tipo === 'completo' && f.formato === 'csv')
+)
+
+const scelteFile = computed(() =>
+  files.value.find(f => f.tipo === 'scelte' && f.formato === 'xlsx')
 )
 
 const filesPerAnno = computed(() => {

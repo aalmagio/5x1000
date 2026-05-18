@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS `pipeline_runs` (
 CREATE TABLE IF NOT EXISTS `dataset_files` (
   `id`               INT           NOT NULL AUTO_INCREMENT,
   `anno`             SMALLINT               DEFAULT NULL COMMENT 'NULL = file multi-anno (es. dataset completo)',
-  `tipo`             ENUM('completo','normalizzato','report','categoria') NOT NULL,
+  `tipo`             ENUM('completo','normalizzato','report','categoria','scelte') NOT NULL,
   `categoria`        VARCHAR(50)            DEFAULT NULL COMMENT 'NULL se tipo != categoria',
   `formato`          ENUM('csv','xlsx')     NOT NULL,
   `percorso`         VARCHAR(500)  NOT NULL COMMENT 'path assoluto sul server',
@@ -264,3 +264,11 @@ FROM `enti`
 WHERE categoria_principale IS NOT NULL
 GROUP BY anno, categoria_principale
 ORDER BY anno DESC, totale_importo DESC;
+
+-- ------------------------------------------------------------
+-- Migration: aggiunge il tipo 'scelte' all'ENUM dataset_files
+-- Da eseguire una volta su DB già esistenti:
+-- ------------------------------------------------------------
+-- ALTER TABLE `dataset_files`
+--   MODIFY COLUMN `tipo`
+--     ENUM('completo','normalizzato','report','categoria','scelte') NOT NULL;
