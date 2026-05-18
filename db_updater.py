@@ -494,6 +494,9 @@ def _aggiorna_files(cur, dati_dir: Path) -> None:
             continue
         _upsert_file(cur, anno, "report", None, "xlsx", f)
 
+    # Pivot scelte per categoria (multi-anno)
+    _upsert_file(cur, None, "scelte", None, "xlsx", dati_dir / "scelte_categorie.xlsx")
+
     # File per categoria + anno
     for cat_dir in sorted(dati_dir.iterdir()):
         if not cat_dir.is_dir():
