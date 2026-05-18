@@ -43,13 +43,12 @@ from cinque_per_mille import (
     extract_header_from_pdf,
     extract_data_from_pdf,
     create_excel,
-    _load_config,
     _apply_config,
     _apply_excel_config,
     HEADERS,
 )
 
-from common import get_logger
+from common import get_logger, load_config
 
 try:
     import requests
@@ -576,7 +575,7 @@ def main():
     os.makedirs(root_dir, exist_ok=True)
 
     # Configurazione
-    cfg = _load_config(root_dir)
+    cfg = load_config(root_dir)
     _apply_config(cfg)
     _apply_excel_config(cfg)
 
