@@ -43,12 +43,13 @@ from cinque_per_mille import (
     extract_header_from_pdf,
     extract_data_from_pdf,
     create_excel,
-    setup_logging,
     _load_config,
     _apply_config,
     _apply_excel_config,
     HEADERS,
 )
+
+from common import get_logger
 
 try:
     import requests
@@ -579,7 +580,7 @@ def main():
     _apply_config(cfg)
     _apply_excel_config(cfg)
 
-    log_file = setup_logging(root_dir)
+    _, log_file = get_logger("scarica_categorie", root_dir)
     logging.info(f"Directory root: {root_dir}")
 
     if cfg:
