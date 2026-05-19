@@ -32,9 +32,6 @@ token*.json
 2024/
 2025/
 
-# --- File dati del RUNTS (da scaricare manualmente, non in repo) ---
-Runts/
-
 # --- Output ETL e categorie (file generati, troppo grandi per GitHub) ---
 Dati/
 enti_5x1000.csv
