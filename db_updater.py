@@ -1332,7 +1332,7 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int], upsert: bool = Fals
             cur.execute(f"DELETE FROM enti WHERE anno IN ({placeholders})", anni_int)
             logger.info(f"db_updater: cancellate righe anni {anni_int} da tabella enti")
 
-    anni_set  = set(anni_int)
+    anni_str  = {str(a) for a in anni_int}
     total_ins = 0
 
     for chunk in pd.read_csv(
@@ -1340,18 +1340,14 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int], upsert: bool = Fals
         dtype=str,
         chunksize=_CHUNK_SIZE,
         low_memory=False,
+        on_bad_lines="warn",
     ):
         # Rinomina colonne CSV → DB
         chunk = chunk.rename(columns=_COL_MAP)
 
-        # Filtra solo gli anni richiesti (se non è reimport completo)
+        # Filtra solo gli anni richiesti (CSV letto con dtype=str → confronto stringa)
         if not tutti and "anno" in chunk.columns:
-            chunk = chunk[
-                chunk["anno"].fillna("").str.extract(r"(\d{4})")[0]
-                .astype(float, errors="ignore")
-                .astype("Int64", errors="ignore")
-                .isin(anni_set)
-            ]
+            chunk = chunk[chunk["anno"].isin(anni_str)]
         if chunk.empty:
             continue
 
@@ -1383,15 +1379,12 @@ def _aggiorna_enti(cur, csv_path: Path, pd, anni: list[int], upsert: bool = Fals
         if "runts_data_iscrizione" in chunk.columns:
             chunk["runts_data_iscrizione"] = chunk["runts_data_iscrizione"].apply(_parse_date_ita)
 
-        # Sostituisci NaN con None (→ NULL in MySQL).
-        def _to_none(v):
-            if v is None:
-                return None
-            if isinstance(v, float) and v != v:   # NaN != NaN è sempre True
-                return None
-            return v
+        # Converti NaN → None ed estrai righe come tuple senza iterrows().
+        # to_numpy(dtype=object) è ~50x più veloce di iterrows() su 1M righe.
 
-        rows = [tuple(_to_none(row[c]) for c in cols_db) for _, row in chunk.iterrows()]
+        arr = chunk[cols_db].to_numpy(dtype=object)
+        arr[pd.isna(chunk[cols_db]).to_numpy()] = None
+        rows = list(map(tuple, arr))
         cur.executemany(insert_sql, rows)
         total_ins += len(rows)
 
