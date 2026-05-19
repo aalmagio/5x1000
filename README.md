@@ -56,7 +56,7 @@ Il file `Dati/enti_5x1000_norm.csv` prodotto da `etl.py` ha queste colonne:
 | `RUNTS_5X1000` | bool | Iscritto al 5x1000 nel RUNTS |
 | `RUNTS_DATA_ISCRIZIONE` | str | Data iscrizione al RUNTS |
 
-> **Nota sul RUNTS**: il file degli iscritti al RUNTS va scaricato manualmente da [registroterzosettore.it](https://www.registroterzoettore.gov.it) e salvato nella cartella `Runts/`. Il join avviene su `COD_FISCALE`. Il match attuale è circa il 55% delle righe (gli enti più vecchi non sono ancora nel RUNTS).
+> **Nota sul RUNTS**: il file degli iscritti al RUNTS va scaricato manualmente da [registroterzosettore.gov.it](https://www.registroterzosettore.gov.it) e salvato nella cartella `Runts/` (qualsiasi nome `.xlsx`; se ce ne sono più di uno viene usato l'ultimo in ordine alfabetico). Il join avviene su `COD_FISCALE`; le colonne rilevanti (sezione, sede, data iscrizione, abilitazione 5x1000) vengono riconosciute automaticamente per nome. Il match attuale è circa il 55% delle righe (gli enti più vecchi non sono ancora nel RUNTS). Per saltare il merge: `python etl.py --no-runts`.
 
 ---
 
@@ -413,7 +413,7 @@ Priorità: **flag CLI > config.yaml > default nel codice**
 │   ├── report_2024.xlsx          # ← output di report.py
 │   └── scelte_categorie.xlsx     # ← output di estrai_scelte_categorie.py
 │
-├── Runts/                # File RUNTS (da scaricare manualmente, non in repo)
+├── Runts/                # File RUNTS .xlsx (da scaricare manualmente da registroterzosettore.gov.it, non in repo)
 ├── 2006/ ... /           # File grezzi AdE per anno (non in repo)
 ├── _EXAMPLE/             # File di esempio per testing
 └── log/                  # Log esecuzioni (non in repo)
