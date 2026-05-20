@@ -1452,7 +1452,13 @@ def _aggiorna_ripartizioni(cur, anni: list[int]) -> None:
     Va chiamata DOPO _aggiorna_enti().
     """
     cur.execute(_DDL_RIPARTIZIONI)
-    cur.execute(_ALTER_RIPARTIZIONI_N_GEN)
+    try:
+        cur.execute(_ALTER_RIPARTIZIONI_N_GEN)
+    except Exception as e:
+        # MySQL < 8.0.3 non supporta ADD COLUMN IF NOT EXISTS;
+        # errore 1060 = colonna già esistente → ignorabile
+        if "1060" not in str(e) and "Duplicate column" not in str(e):
+            raise
 
     anni_int = [int(a) for a in anni]
     tutti    = len(anni_int) == 0
