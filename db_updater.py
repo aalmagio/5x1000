@@ -1555,6 +1555,7 @@ if __name__ == "__main__":
 
     # ── Modalità --solo-categorie: aggiorna categoria_ammissioni e ripartizioni ──
     if args.solo_categorie:
+        import pymysql
         cfg = _db_config()
         if not cfg["user"] or not cfg["database"]:
             logger.error("SITE_DB_* non configurati — imposta le variabili d'ambiente")
