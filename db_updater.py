@@ -1544,11 +1544,46 @@ if __name__ == "__main__":
     ap.add_argument("--runts", default=None, metavar="FILE.xlsx",
                     help="Aggiorna solo i dati RUNTS da un file Excel standalone "
                          "(aggiorna tabelle runts ed enti, salta tutto il resto)")
+    ap.add_argument("--solo-categorie", action="store_true",
+                    help="Aggiorna solo categoria_ammissioni e ripartizioni "
+                         "(salta il reimport del CSV, veloce)")
     args = ap.parse_args()
 
     root = pathlib.Path(__file__).parent
     dati_dir = pathlib.Path(args.dati_dir) if args.dati_dir else root / "Dati"
     csv_path = pathlib.Path(args.csv) if args.csv else dati_dir / "enti_5x1000_norm.csv"
+
+    # ── Modalità --solo-categorie: aggiorna categoria_ammissioni e ripartizioni ──
+    if args.solo_categorie:
+        cfg = _db_config()
+        if not cfg["user"] or not cfg["database"]:
+            logger.error("SITE_DB_* non configurati — imposta le variabili d'ambiente")
+            sys.exit(1)
+        try:
+            conn = pymysql.connect(**{**cfg, "autocommit": False})
+        except Exception as e:
+            logger.error(f"Impossibile connettersi al DB: {e}")
+            sys.exit(1)
+        try:
+            with conn:
+                cur = conn.cursor()
+                n_cat = _aggiorna_categoria_ammissioni(cur, dati_dir)
+                logger.info(f"db_updater: categoria_ammissioni: {n_cat} righe aggiornate")
+                anni_list = []
+                if args.anni:
+                    try:
+                        anni_list = [int(a.strip()) for a in args.anni.split(",") if a.strip()]
+                    except ValueError:
+                        logger.error("--anni deve contenere numeri, es. 2023,2024")
+                        sys.exit(1)
+                _aggiorna_ripartizioni(cur, anni_list)
+                logger.info("db_updater: ripartizioni aggiornate")
+        except Exception as e:
+            logger.error(f"db_updater: errore – {e}", exc_info=True)
+            conn.close()
+            sys.exit(1)
+        conn.close()
+        sys.exit(0)
 
     # ── Modalità --runts: aggiorna solo dati RUNTS ───────────────────────────
     if args.runts:
