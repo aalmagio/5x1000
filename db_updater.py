@@ -1423,7 +1423,7 @@ CREATE TABLE IF NOT EXISTS `ripartizioni` (
 # Migration idempotente per DB già esistenti
 _ALTER_RIPARTIZIONI_N_GEN = """
 ALTER TABLE `ripartizioni`
-  ADD COLUMN IF NOT EXISTS `n_scelte_generiche` INT DEFAULT NULL
+  ADD COLUMN `n_scelte_generiche` INT DEFAULT NULL
     COMMENT 'contribuenti che hanno scelto la categoria senza indicare un ente (solo riga nazionale)'
     AFTER `n_contribuenti`
 """
@@ -1455,8 +1455,7 @@ def _aggiorna_ripartizioni(cur, anni: list[int]) -> None:
     try:
         cur.execute(_ALTER_RIPARTIZIONI_N_GEN)
     except Exception as e:
-        # MySQL < 8.0.3 non supporta ADD COLUMN IF NOT EXISTS;
-        # errore 1060 = colonna già esistente → ignorabile
+        # 1060 = Duplicate column name: colonna già presente → ignorabile
         if "1060" not in str(e) and "Duplicate column" not in str(e):
             raise
 
