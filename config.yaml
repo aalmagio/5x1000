@@ -22,6 +22,7 @@ download:
 # Ogni anno punta alla pagina ufficiale con i link ai file PDF/CSV.
 # Aggiungere nuovi anni qui quando l'AdE li pubblica.
 url_anni:
+  2025: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-degli-enti-ammessi-in-una-o-pi%C3%B9-categorie-di-beneficiari1"
   2024: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-dei-beneficiari"
   2023: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-dei-beneficiari-2023"
   2022: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-degli-enti-ammessi-in-una-o-piu-categorie-di-beneficiari"
