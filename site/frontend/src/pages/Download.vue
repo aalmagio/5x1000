@@ -94,7 +94,7 @@
           </div>
           <button
             class="btn-primary whitespace-nowrap flex-shrink-0 inline-flex items-center gap-2"
-            @click="requestDownload({ tipo: 'scelte', anno: 'completo', href: '/download/scelte/' })"
+            @click="requestDownload({ tipo: 'scelte', anno: 'completo', href: '/download/scelte/completo' })"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
