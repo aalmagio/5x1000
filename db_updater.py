@@ -1586,9 +1586,7 @@ if __name__ == "__main__":
                 logger.info("db_updater: ripartizioni aggiornate")
         except Exception as e:
             logger.error(f"db_updater: errore – {e}", exc_info=True)
-            conn.close()
             sys.exit(1)
-        conn.close()
         sys.exit(0)
 
     # ── Modalità --runts: aggiorna solo dati RUNTS ───────────────────────────
