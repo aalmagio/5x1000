@@ -37,10 +37,9 @@ from etl import (
     normalize_cf,
     normalize_regione,
     EXCEL_CONFIG,
-    _load_config,
     _apply_config,
 )
-from cinque_per_mille import setup_logging
+from common import load_config, get_logger
 
 
 # ============================================================================
@@ -1042,9 +1041,9 @@ def main():
     root_dir = Path(args.root).resolve()
 
     # Config e logging
-    cfg = _load_config(root_dir)
+    cfg = load_config(root_dir)
     _apply_config(cfg)
-    log_file = setup_logging(root_dir)
+    _, log_file = get_logger("report", root_dir)
     logging.info(f"=== Report 5xMille - Anno {args.anno} ===")
     logging.info(f"Directory root: {root_dir}")
 
