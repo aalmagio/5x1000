@@ -1094,6 +1094,13 @@ def main():
     if args.anni:
         anni_filter = [int(a.strip()) for a in args.anni.split(",")]
         logging.info(f"Filtro anni: {anni_filter}")
+        if not getattr(args, "replace", False) and csv_path.exists():
+            logging.warning(
+                "ATTENZIONE: stai usando --anni senza --replace. "
+                "Il CSV esistente verrà SOVRASCRITTO con i soli anni specificati, "
+                "perdendo tutta la serie storica. "
+                "Usa --replace per aggiornare solo gli anni indicati preservando gli altri."
+            )
 
     # --- Processing streaming: anno per anno → CSV ---
     csv_path = out_dir / "enti_5x1000_norm.csv"
