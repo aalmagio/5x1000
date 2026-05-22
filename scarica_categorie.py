@@ -383,7 +383,7 @@ def extract_csv_group(csv_files, output_path, sheet_name):
     if not csv_files:
         return 0
 
-    all_rows = []
+     = []
     master_header = None
 
     for csv_path in csv_files:
@@ -403,14 +403,20 @@ def extract_csv_group(csv_files, output_path, sheet_name):
                 del row[target_cols:]
 
         logging.info(f"    {csv_name}: {len(rows)} righe")
-        all_rows.extend(rows)
+        .extend(rows)
 
-    if not master_header or not all_rows:
+    if not master_header or not :
         return 0
 
     # Filtra righe con prima cella vuota
     before = len(all_rows)
-    all_rows = [r for r in all_rows if r[0].strip()]
+    # Prima (generico, colonna 1):
+    # all_rows = [r for r in all_rows if r[0].strip()]
+    # Dopo (ETS: colonna 2; tutte le altre: colonna 1):
+    is_ets = "ets" in output_path.lower() or "terzo_settore" in output_path.lower()
+    col_idx = 1 if is_ets else 0
+    all_rows = [r for r in all_rows if len(r) > col_idx and r[col_idx].strip()]
+    
     dropped = before - len(all_rows)
     if dropped:
         logging.info(f"    Rimosse {dropped} righe con prima cella vuota")
