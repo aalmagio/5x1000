@@ -53,6 +53,15 @@ ELENCO_URLS = {
 
 # URL categorie per anno
 CATEGORIE_URLS = {
+    2025: {
+        "ETS_ONLUS": "https://www.agenziaentrate.gov.it/portale/enti-del-terzo-settore",
+        "Ricerca_scientifica": "https://www.agenziaentrate.gov.it/portale/ricerca-scientifica2",
+        "Ricerca_sanitaria": "https://www.agenziaentrate.gov.it/portale/elenchi-ammessi-ed-esclusi2#:~:text=Ricerca%20scientifica-,Ricerca%20sanitaria,-Attivit%C3%A0%20svolte%20dai",
+        "Comuni": "https://www.agenziaentrate.gov.it/portale/elenchi-ammessi-ed-esclusi2#:~:text=Attivit%C3%A0%20svolte%20dai%20comuni",
+        "ASD": "https://www.agenziaentrate.gov.it/portale/associazioni-sportive-dilettantistiche1",
+        "Beni_culturali": "https://www.agenziaentrate.gov.it/portale/enti-dei-beni-culturali-e-paesaggistici",
+        "Aree_protette": "https://www.agenziaentrate.gov.it/portale/enti-gestori-delle-aree-protette",
+    },
     2024: {
         "ETS_ONLUS": "https://www.agenziaentrate.gov.it/portale/enti-del-terzo-settore-e-onlus-2024",
         "Ricerca_scientifica": "https://www.agenziaentrate.gov.it/portale/ricerca-scientifica-2024",
