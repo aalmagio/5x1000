@@ -42,6 +42,7 @@ from cinque_per_mille import (
 
 # URL elenco complessivo per anno (da config.yaml)
 ELENCO_URLS = {
+    2025: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-degli-enti-ammessi-in-una-o-pi%C3%B9-categorie-di-beneficiari1",
     2024: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-dei-beneficiari",
     2023: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-dei-beneficiari-2023",
     2022: "https://www.agenziaentrate.gov.it/portale/elenco-complessivo-degli-enti-ammessi-in-una-o-piu-categorie-di-beneficiari",
@@ -306,6 +307,10 @@ def main():
 
     cfg = load_config(root_dir)
     _apply_config(cfg)
+    # Aggiorna ELENCO_URLS con url_anni da config.yaml
+    url_anni_cfg = cfg.get("url_anni", {}) if cfg else {}
+    for _anno, _url in url_anni_cfg.items():
+        ELENCO_URLS[int(_anno)] = str(_url)
 
     _, log_file = get_logger("ade_metadata_scraper", root_dir)
 
