@@ -1,0 +1,9 @@
+# Forza LF per tutti i file di testo (evita problemi CRLF su Windows)
+* text=auto eol=lf
+
+# Binari espliciti
+*.xlsx binary
+*.pdf  binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
