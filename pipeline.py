@@ -741,6 +741,16 @@ def _anni_ciclo(root_dir: str, anni_arg: str | None) -> list[int]:
             [int(a.strip()) for a in anni_arg.split(",") if a.strip()],
             reverse=True,
         )
+    # Leggi anni da config.yaml se disponibile, altrimenti fallback a ANNI_DISPONIBILI
+    try:
+        from common import load_config
+        from pipeline_checker import ANNI_DISPONIBILI
+        cfg = load_config(root_dir) or {}
+        url_anni = cfg.get("url_anni", {})
+        if url_anni:
+            return sorted((int(a) for a in url_anni.keys()), reverse=True)
+    except Exception:
+        pass
     from pipeline_checker import ANNI_DISPONIBILI
     return sorted(ANNI_DISPONIBILI, reverse=True)
 
@@ -1262,8 +1272,8 @@ def main():
                     reverse=True,
                 )
                 if not anni_iter:
-                    logging.warning("[PER-ANNO] Nessun dati_YYYY.xlsx trovato; uso anni 2006-2024")
-                    anni_iter = sorted(range(2006, 2025), reverse=True)
+                    logging.warning("[PER-ANNO] Nessun dati_YYYY.xlsx trovato; uso anni da config.yaml")
+                    anni_iter = _anni_ciclo(root_dir, None)
 
             logging.info(f"\n[PER-ANNO] Anni da elaborare ({len(anni_iter)}): {anni_iter}")
 
