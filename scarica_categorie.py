@@ -409,12 +409,26 @@ def extract_csv_group(csv_files, output_path, sheet_name, filter_col=0):
     if not master_header or not all_rows:
         return 0
 
-    # Filtra righe con cella di riferimento vuota
+    # Determina la colonna di filtro: se filter_col > 0 è stato specificato esplicitamente,
+    # altrimenti cerca la colonna codice fiscale per nome (più robusta di un indice fisso)
+    if filter_col > 0:
+        col_idx = filter_col
+        col_label = f"colonna {filter_col}"
+    else:
+        cf_aliases = {'codice fiscale', 'codice_fiscale', 'cf', 'cod. fiscale',
+                      'codfiscale', 'fiscal code', 'partita iva', 'piva', 'p.iva'}
+        col_idx = 0
+        for i, h in enumerate(master_header):
+            if h.strip().lower() in cf_aliases:
+                col_idx = i
+                break
+        col_label = master_header[col_idx] if col_idx < len(master_header) else f"colonna {col_idx}"
+
     before = len(all_rows)
-    all_rows = [r for r in all_rows if len(r) > filter_col and r[filter_col].strip()]
+    all_rows = [r for r in all_rows if len(r) > col_idx and str(r[col_idx]).strip()]
     dropped = before - len(all_rows)
     if dropped:
-        logging.info(f"    Rimosse {dropped} righe con colonna {filter_col} vuota")
+        logging.info(f"    Rimosse {dropped} righe con '{col_label}' vuota")
 
     create_excel(master_header, all_rows, output_path, sheet_name)
     logging.info(f"    => {os.path.basename(output_path)}: {len(all_rows)} righe")
@@ -452,12 +466,24 @@ def extract_pdf_group(pdf_files, output_path, sheet_name, filter_col=0):
     if not all_rows:
         return 0
 
-    # Filtra righe con cella di riferimento vuota
+    if filter_col > 0:
+        col_idx = filter_col
+        col_label = f"colonna {filter_col}"
+    else:
+        cf_aliases = {'codice fiscale', 'codice_fiscale', 'cf', 'cod. fiscale',
+                      'codfiscale', 'fiscal code', 'partita iva', 'piva', 'p.iva'}
+        col_idx = 0
+        for i, h in enumerate(header):
+            if h.strip().lower() in cf_aliases:
+                col_idx = i
+                break
+        col_label = header[col_idx] if col_idx < len(header) else f"colonna {col_idx}"
+
     before = len(all_rows)
-    all_rows = [r for r in all_rows if len(r) > filter_col and r[filter_col].strip()]
+    all_rows = [r for r in all_rows if len(r) > col_idx and str(r[col_idx]).strip()]
     dropped = before - len(all_rows)
     if dropped:
-        logging.info(f"    Rimosse {dropped} righe con colonna {filter_col} vuota")
+        logging.info(f"    Rimosse {dropped} righe con '{col_label}' vuota")
 
     create_excel(header, all_rows, output_path, sheet_name)
     logging.info(f"    => {os.path.basename(output_path)}: {len(all_rows)} righe")
@@ -491,9 +517,8 @@ def extract_category(anno, slug, root_dir, source="csv"):
 
         rows_extracted = 0
 
-        # ETS ammessi dal 2025: la prima colonna è stata aggiunta (numerazione),
-        # il codice fiscale è in colonna 2 → filtra su colonna 1 (indice 1)
-        filter_col = 1 if (slug == "ETS_ONLUS" and tipo == "ammessi" and anno >= 2025) else 0
+        # filter_col=0: le funzioni rilevano automaticamente la colonna CF dall'header
+        filter_col = 0
 
         if source == "csv" and use_csv:
             logging.info(f"  [{tipo}] Estrazione da {len(use_csv)} CSV")
