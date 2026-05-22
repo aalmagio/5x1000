@@ -384,7 +384,7 @@ def extract_csv_group(csv_files, output_path, sheet_name, filter_col=0):
     if not csv_files:
         return 0
 
-    all_rows = []
+     = []
     master_header = None
 
     for csv_path in csv_files:
@@ -404,9 +404,9 @@ def extract_csv_group(csv_files, output_path, sheet_name, filter_col=0):
                 del row[target_cols:]
 
         logging.info(f"    {csv_name}: {len(rows)} righe")
-        all_rows.extend(rows)
+        .extend(rows)
 
-    if not master_header or not all_rows:
+    if not master_header or not :
         return 0
 
     # Filtra righe con cella di riferimento vuota
