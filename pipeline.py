@@ -545,7 +545,10 @@ def _controlla_aggiornamento_elenco(root_dir: str, anno: int) -> bool:
         import requests as _req
         from cinque_per_mille import (
             find_download_links, sanitize_filename, YEAR_URLS, HEADERS,
+            _apply_config as _cpm_apply,
         )
+        from common import load_config as _load_cfg
+        _cpm_apply(_load_cfg(root_dir) or {})
     except ImportError as e:
         logging.debug(f"[CICLO] check_elenco({anno}): import fallito ({e})")
         return False
@@ -744,7 +747,6 @@ def _anni_ciclo(root_dir: str, anni_arg: str | None) -> list[int]:
     # Leggi anni da config.yaml se disponibile, altrimenti fallback a ANNI_DISPONIBILI
     try:
         from common import load_config
-        from pipeline_checker import ANNI_DISPONIBILI
         cfg = load_config(root_dir) or {}
         url_anni = cfg.get("url_anni", {})
         if url_anni:
