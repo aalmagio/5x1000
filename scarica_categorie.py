@@ -375,9 +375,10 @@ def classify_files(folder, ext="csv"):
 # ESTRAZIONE DATI → EXCEL
 # ============================================================================
 
-def extract_csv_group(csv_files, output_path, sheet_name):
+def extract_csv_group(csv_files, output_path, sheet_name, filter_col=0):
     """
     Legge e unisce piu' file CSV, poi crea un Excel formattato.
+    filter_col: indice della colonna usata per filtrare righe vuote (default 0).
     Restituisce il numero di righe estratte, o 0 se fallisce.
     """
     if not csv_files:
@@ -408,27 +409,22 @@ def extract_csv_group(csv_files, output_path, sheet_name):
     if not master_header or not :
         return 0
 
-    # Filtra righe con prima cella vuota
+    # Filtra righe con cella di riferimento vuota
     before = len(all_rows)
-    # Prima (generico, colonna 1):
-    # all_rows = [r for r in all_rows if r[0].strip()]
-    # Dopo (ETS: colonna 2; tutte le altre: colonna 1):
-    is_ets = "ets" in output_path.lower() or "terzo_settore" in output_path.lower()
-    col_idx = 1 if is_ets else 0
-    all_rows = [r for r in all_rows if len(r) > col_idx and r[col_idx].strip()]
-    
+    all_rows = [r for r in all_rows if len(r) > filter_col and r[filter_col].strip()]
     dropped = before - len(all_rows)
     if dropped:
-        logging.info(f"    Rimosse {dropped} righe con prima cella vuota")
+        logging.info(f"    Rimosse {dropped} righe con colonna {filter_col} vuota")
 
     create_excel(master_header, all_rows, output_path, sheet_name)
     logging.info(f"    => {os.path.basename(output_path)}: {len(all_rows)} righe")
     return len(all_rows)
 
 
-def extract_pdf_group(pdf_files, output_path, sheet_name):
+def extract_pdf_group(pdf_files, output_path, sheet_name, filter_col=0):
     """
     Legge e unisce piu' file PDF, poi crea un Excel formattato.
+    filter_col: indice della colonna usata per filtrare righe vuote (default 0).
     Restituisce il numero di righe estratte, o 0 se fallisce.
     """
     if not pdf_files:
@@ -456,12 +452,12 @@ def extract_pdf_group(pdf_files, output_path, sheet_name):
     if not all_rows:
         return 0
 
-    # Filtra righe con prima cella vuota
+    # Filtra righe con cella di riferimento vuota
     before = len(all_rows)
-    all_rows = [r for r in all_rows if r[0].strip()]
+    all_rows = [r for r in all_rows if len(r) > filter_col and r[filter_col].strip()]
     dropped = before - len(all_rows)
     if dropped:
-        logging.info(f"    Rimosse {dropped} righe con prima cella vuota")
+        logging.info(f"    Rimosse {dropped} righe con colonna {filter_col} vuota")
 
     create_excel(header, all_rows, output_path, sheet_name)
     logging.info(f"    => {os.path.basename(output_path)}: {len(all_rows)} righe")
@@ -495,20 +491,24 @@ def extract_category(anno, slug, root_dir, source="csv"):
 
         rows_extracted = 0
 
+        # ETS ammessi dal 2025: la prima colonna è stata aggiunta (numerazione),
+        # il codice fiscale è in colonna 2 → filtra su colonna 1 (indice 1)
+        filter_col = 1 if (slug == "ETS_ONLUS" and tipo == "ammessi" and anno >= 2025) else 0
+
         if source == "csv" and use_csv:
             logging.info(f"  [{tipo}] Estrazione da {len(use_csv)} CSV")
-            rows_extracted = extract_csv_group(use_csv, output_path, sheet_name)
+            rows_extracted = extract_csv_group(use_csv, output_path, sheet_name, filter_col=filter_col)
         elif source == "csv" and not use_csv and pdf_groups[tipo]:
             # Fallback PDF
             logging.info(f"  [{tipo}] Nessun CSV, fallback su {len(pdf_groups[tipo])} PDF")
-            rows_extracted = extract_pdf_group(pdf_groups[tipo], output_path, sheet_name)
+            rows_extracted = extract_pdf_group(pdf_groups[tipo], output_path, sheet_name, filter_col=filter_col)
         elif source == "pdf" and use_pdf:
             logging.info(f"  [{tipo}] Estrazione da {len(use_pdf)} PDF")
-            rows_extracted = extract_pdf_group(use_pdf, output_path, sheet_name)
+            rows_extracted = extract_pdf_group(use_pdf, output_path, sheet_name, filter_col=filter_col)
         elif source == "pdf" and not use_pdf and csv_groups[tipo]:
             # Fallback CSV
             logging.info(f"  [{tipo}] Nessun PDF, fallback su {len(csv_groups[tipo])} CSV")
-            rows_extracted = extract_csv_group(csv_groups[tipo], output_path, sheet_name)
+            rows_extracted = extract_csv_group(csv_groups[tipo], output_path, sheet_name, filter_col=filter_col)
         else:
             logging.info(f"  [{tipo}] Nessun file da estrarre")
 
