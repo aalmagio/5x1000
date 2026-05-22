@@ -21,8 +21,8 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
-# Anni per i quali esiste un URL sull'AdE (2006–2024)
-ANNI_DISPONIBILI = list(range(2006, 2025))
+# Anni per i quali esiste un URL sull'AdE — fallback se config.yaml non è disponibile
+ANNI_DISPONIBILI = list(range(2006, 2026))
 
 # Slug canonici delle categorie (valori di SLUG_NORMALIZE in scarica_categorie.py)
 CANONICAL_SLUGS = [
@@ -75,7 +75,7 @@ def scan_download(dati_dir: pathlib.Path, anni: Optional[list[int]] = None) -> d
     """
     Scansiona i file dati_ANNO.xlsx in dati_dir.
 
-    Se anni è None controlla tutti gli anni per cui esiste un URL (2006-2024).
+    Se anni è None controlla tutti gli anni per cui esiste un URL (da config.yaml o fallback).
     Restituisce: { anno: { "status": "ok"|"mancante", ... } }
     """
     anni_da_verificare = sorted(anni) if anni else ANNI_DISPONIBILI
@@ -214,8 +214,15 @@ def full_analysis(
     cfg = _load_pipeline_cfg(root)
     dati_dir = _resolve_dati_dir(root, cfg)
 
-    dl_scan  = scan_download(dati_dir, anni)
-    cat_scan = scan_categorie(dati_dir, anni)
+    # Anni disponibili: da config.yaml se presente, altrimenti fallback ANNI_DISPONIBILI
+    if anni is None:
+        url_anni = cfg.get("url_anni", {})
+        anni_default = sorted(int(a) for a in url_anni.keys()) if url_anni else ANNI_DISPONIBILI
+    else:
+        anni_default = anni
+
+    dl_scan  = scan_download(dati_dir, anni_default)
+    cat_scan = scan_categorie(dati_dir, anni_default)
     etl_info = check_etl(dati_dir)
 
     anni_mancanti_dl  = missing_anni_download(dl_scan)
