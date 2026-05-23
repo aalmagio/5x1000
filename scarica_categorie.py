@@ -375,6 +375,18 @@ def classify_files(folder, ext="csv"):
 # ESTRAZIONE DATI → EXCEL
 # ============================================================================
 
+_FOOTER_KEYWORDS = frozenset({
+    "totale scelte espresse", "totale", "sub totale", "subtotale",
+    "voti generici", "voti generiche", "generici", "generiche",
+    "importo erogato", "importo totale erogabile",
+})
+
+
+def _is_footer_row(row) -> bool:
+    """Ritorna True se la riga è un footer di totale (non va filtrata per CF vuota)."""
+    first = str(row[0]).strip().lower() if row else ""
+    return any(kw in first for kw in _FOOTER_KEYWORDS)
+
 def extract_csv_group(csv_files, output_path, sheet_name, filter_col=0):
     """
     Legge e unisce piu' file CSV, poi crea un Excel formattato.
@@ -425,7 +437,8 @@ def extract_csv_group(csv_files, output_path, sheet_name, filter_col=0):
         col_label = master_header[col_idx] if col_idx < len(master_header) else f"colonna {col_idx}"
 
     before = len(all_rows)
-    all_rows = [r for r in all_rows if len(r) > col_idx and str(r[col_idx]).strip()]
+    all_rows = [r for r in all_rows
+                if _is_footer_row(r) or (len(r) > col_idx and str(r[col_idx]).strip())]
     dropped = before - len(all_rows)
     if dropped:
         logging.info(f"    Rimosse {dropped} righe con '{col_label}' vuota")
@@ -480,7 +493,8 @@ def extract_pdf_group(pdf_files, output_path, sheet_name, filter_col=0):
         col_label = header[col_idx] if col_idx < len(header) else f"colonna {col_idx}"
 
     before = len(all_rows)
-    all_rows = [r for r in all_rows if len(r) > col_idx and str(r[col_idx]).strip()]
+    all_rows = [r for r in all_rows
+                if _is_footer_row(r) or (len(r) > col_idx and str(r[col_idx]).strip())]
     dropped = before - len(all_rows)
     if dropped:
         logging.info(f"    Rimosse {dropped} righe con '{col_label}' vuota")
