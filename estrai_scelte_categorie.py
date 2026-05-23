@@ -265,7 +265,9 @@ def scrivi_excel(result: dict, anni: list[int], output: Path) -> None:
 
     # ── Righe dati ─────────────────────────────────────────────────────────
     row_idx = 2
-    totals  = {a: 0 for a in anni}   # somma scelte espresse ammessi per anno
+    tot_esp = {a: 0 for a in anni}
+    tot_gen = {a: 0 for a in anni}
+    tot_esc = {a: 0 for a in anni}
 
     for cat_key, cat_label in CAT_ORDER:
         cat_data = result.get(cat_key, {})
@@ -285,20 +287,51 @@ def scrivi_excel(result: dict, anni: list[int], output: Path) -> None:
                 val = cat_data.get(anno, {}).get(field, 0)
                 _cell(row_idx, col, val if val else None,
                       font=NUM_FONT, fill=fill, align=right, num_fmt=NUM_FMT)
-                if field == "esp_amm" and val:
-                    totals[anno] += val
+                if val:
+                    if field == "esp_amm": tot_esp[anno] += val
+                    if field == "gen_amm": tot_gen[anno] += val
+                    if field == "esp_esc": tot_esc[anno] += val
 
             row_idx += 1
 
-    # ── Riga totale ────────────────────────────────────────────────────────
-    _cell(row_idx, 1, "TOTALE scelte espresse ammessi",
-          font=TOTAL_FONT, fill=TOTAL_FILL, align=left)
-    _cell(row_idx, 2, "",  font=TOTAL_FONT, fill=TOTAL_FILL)
-    _cell(row_idx, 3, "",  font=TOTAL_FONT, fill=TOTAL_FILL)
+    # ── Righe totali ────────────────────────────────────────────────────────
+    TOTAL_FILL2 = PatternFill("solid", fgColor="F2DCDB")
+    TOTAL_FILL3 = PatternFill("solid", fgColor="E2EFDA")
+    GRAND_FILL  = PatternFill("solid", fgColor="D6DCE4")
+    YOY_FILL    = PatternFill("solid", fgColor="EDEDED")
+
+    def _total_row(label, src, fill, fmt=NUM_FMT):
+        nonlocal row_idx
+        _cell(row_idx, 1, label, font=TOTAL_FONT, fill=fill, align=left)
+        _cell(row_idx, 2, None,  font=TOTAL_FONT, fill=fill)
+        _cell(row_idx, 3, None,  font=TOTAL_FONT, fill=fill)
+        for col, anno in enumerate(anni, 4):
+            val = src.get(anno, 0)
+            _cell(row_idx, col, val if val else None,
+                  font=TOTAL_FONT, fill=fill, align=right, num_fmt=fmt)
+        row_idx += 1
+
+    _total_row("TOTALE scelte espresse ammessi", tot_esp, TOTAL_FILL)
+    _total_row("TOTALE scelte generiche",        tot_gen, TOTAL_FILL2)
+    _total_row("TOTALE scelte esclusi",          tot_esc, TOTAL_FILL3)
+
+    tot_valide = {a: tot_esp[a] + tot_gen[a] for a in anni}
+    tot_firme  = {a: tot_esp[a] + tot_gen[a] + tot_esc[a] for a in anni}
+    _total_row("Totale firme valide", tot_valide, GRAND_FILL)
+    _total_row("Totale firme",        tot_firme,  GRAND_FILL)
+
+    # Crescita YoY su Totale firme
+    _cell(row_idx, 1, "Crescita YoY", font=TOTAL_FONT, fill=YOY_FILL, align=left)
+    _cell(row_idx, 2, None, font=TOTAL_FONT, fill=YOY_FILL)
+    _cell(row_idx, 3, None, font=TOTAL_FONT, fill=YOY_FILL)
     for col, anno in enumerate(anni, 4):
-        val = totals[anno]
-        _cell(row_idx, col, val if val else None,
-              font=TOTAL_FONT, fill=TOTAL_FILL, align=right, num_fmt=NUM_FMT)
+        idx = anni.index(anno)
+        prev = tot_firme.get(anni[idx - 1], 0) if idx > 0 else 0
+        curr = tot_firme.get(anno, 0)
+        yoy  = (curr - prev) / prev if (idx > 0 and prev) else None
+        _cell(row_idx, col, yoy, font=TOTAL_FONT, fill=YOY_FILL,
+              align=right, num_fmt="0.0%")
+    row_idx += 1
 
     # ── Larghezze colonne ───────────────────────────────────────────────────
     ws.column_dimensions["A"].width = 22
