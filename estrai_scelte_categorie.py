@@ -120,12 +120,13 @@ def _leggi_footer(path: Path) -> tuple[int, int]:
     generiche = 0
     found_esp = False
 
-    # Scansiona le ultime 10 righe (i footer sono sempre in fondo)
-    for row in rows[-10:]:
+    # Scansiona le ultime 20 righe (i footer sono sempre in fondo)
+    for row in rows[-20:]:
         if not row or row[0].value is None:
             continue
         label = str(row[0].value).strip().lower()
         val   = _val_footer(row, n_col)
+        logger.debug(f"  footer scan [{path.name}] label={label!r:50s} val={val!r}")
 
         if "totale scelte espresse" in label:
             espresse  = _parse_num_it(val)
@@ -134,7 +135,7 @@ def _leggi_footer(path: Path) -> tuple[int, int]:
             # Schema 2019: "SUB TOTALE" contiene le scelte espresse
             espresse  = _parse_num_it(val)
             found_esp = True
-        elif "generici" in label or "generiche" in label:
+        elif "generici" in label or "generiche" in label or "generico" in label:
             generiche = _parse_num_it(val)
         elif label == "totale" and not found_esp:
             # Schema Comuni: TOTALE contiene le scelte espresse
