@@ -37,10 +37,31 @@ from db import get_connection, db_available
 logger = logging.getLogger(__name__)
 
 
+def _load_dotenv() -> None:
+    """Carica .env dalla root del progetto se le variabili DB non sono già impostate."""
+    import pathlib as _pl
+    if os.environ.get("SITE_DB_USER"):
+        return
+    env_file = _pl.Path(__file__).parent / ".env"
+    if not env_file.is_file():
+        return
+    with open(env_file, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            v = v.strip().strip("\"'")
+            if k and not os.environ.get(k):
+                os.environ[k] = v
+
+
 def _db_config(override: dict | None = None) -> dict:
     """Compatibilità retroattiva: restituisce params DB da env vars.
     Preferire get_connection() / db_available() da db.py per nuovo codice.
     """
+    _load_dotenv()
     import os as _os
     cfg = {
         "host":     _os.getenv("SITE_DB_HOST", "localhost"),
