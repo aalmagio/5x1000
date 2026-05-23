@@ -97,11 +97,14 @@ def _leggi_footer(path: Path) -> tuple[int, int]:
     """
     Legge un file xlsx di categoria e restituisce (scelte_espresse, scelte_generiche).
 
-    Individua prima la colonna N_SCELTE dal header (stessa logica di db_updater.py),
-    poi cerca nelle ultime 10 righe:
+    Prima cerca footer rows (presenti nei file estratti da PDF):
       - "TOTALE SCELTE ESPRESSE" → scelte espresse
       - "Voti generici"          → scelte generiche
       - "TOTALE" (solo se nessuna riga espresse trovata, caso Comuni) → scelte espresse
+      - "SUB TOTALE" (schema 2019) → scelte espresse
+
+    Se non trova footer rows (file estratti da CSV senza righe di totale),
+    somma direttamente la colonna N_SCELTE da tutti i dati.
     """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -137,6 +140,21 @@ def _leggi_footer(path: Path) -> tuple[int, int]:
             # Schema Comuni: TOTALE contiene le scelte espresse
             espresse  = _parse_num_it(val)
             found_esp = True
+
+    # Fallback: file da CSV senza footer rows → somma colonna N_SCELTE dai dati
+    if not found_esp and n_col is not None:
+        total = 0
+        for row in rows[1:]:  # salta l'header
+            if not row or row[0].value is None:
+                continue
+            label = str(row[0].value).strip().lower()
+            # salta eventuali righe footer (non dati)
+            if any(kw in label for kw in ("totale", "sub totale", "generici", "generiche")):
+                continue
+            v = row[n_col].value if n_col < len(row) else None
+            total += _parse_num_it(v)
+        if total > 0:
+            espresse = total
 
     return espresse, generiche
 
