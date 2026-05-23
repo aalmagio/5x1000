@@ -474,7 +474,9 @@ def _sha256(path: Path) -> str:
 
 def _upsert_file(cur, anno, tipo, categoria, formato, path: Path) -> None:
     if not path.exists():
+        logger.debug(f"_upsert_file: skip (non esiste) {path}")
         return
+    logger.info(f"_upsert_file: {tipo} anno={anno} {path.name} ({path.stat().st_size} bytes)")
     size_mb = round(path.stat().st_size / 1_048_576, 2)
     sha = _sha256(path)
     cur.execute(
