@@ -306,7 +306,7 @@ def aggiorna_anno_ciclo(
                         pattern = f"{anno}_*_{'ammessi' if stato == 'ammesso' else 'esclusi'}.xlsx"
                         for xlsx in sorted(cat_dir.glob(pattern)):
                             if anno >= 2019:
-                                righe, _ = _leggi_xlsx_ripartizione(xlsx)
+                                righe, *_ = _leggi_xlsx_ripartizione(xlsx)
                                 if not righe:
                                     continue
                                 batch = [
