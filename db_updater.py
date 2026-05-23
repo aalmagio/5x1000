@@ -1573,11 +1573,36 @@ if __name__ == "__main__":
     ap.add_argument("--solo-categorie", action="store_true",
                     help="Aggiorna solo categoria_ammissioni e ripartizioni "
                          "(salta il reimport del CSV, veloce)")
+    ap.add_argument("--solo-files", action="store_true",
+                    help="Aggiorna solo il catalogo dataset_files (report, scelte, ecc.) "
+                         "senza reimportare il CSV enti (veloce)")
     args = ap.parse_args()
 
     root = pathlib.Path(__file__).parent
     dati_dir = pathlib.Path(args.dati_dir) if args.dati_dir else root / "Dati"
     csv_path = pathlib.Path(args.csv) if args.csv else dati_dir / "enti_5x1000_norm.csv"
+
+    # ── Modalità --solo-files: aggiorna solo dataset_files ──────────────────────
+    if args.solo_files:
+        import pymysql
+        cfg = _db_config()
+        if not cfg["user"] or not cfg["database"]:
+            logger.error("SITE_DB_* non configurati — imposta le variabili d'ambiente")
+            sys.exit(1)
+        try:
+            conn = pymysql.connect(**{**cfg, "autocommit": False})
+        except Exception as e:
+            logger.error(f"Impossibile connettersi al DB: {e}")
+            sys.exit(1)
+        try:
+            with conn:
+                cur = conn.cursor()
+                _aggiorna_files(cur, dati_dir)
+                logger.info("db_updater: dataset_files aggiornati")
+        except Exception as e:
+            logger.error(f"db_updater: errore – {e}", exc_info=True)
+            sys.exit(1)
+        sys.exit(0)
 
     # ── Modalità --solo-categorie: aggiorna categoria_ammissioni e ripartizioni ──
     if args.solo_categorie:
