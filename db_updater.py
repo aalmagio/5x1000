@@ -1592,18 +1592,19 @@ if __name__ == "__main__":
             logger.error("SITE_DB_* non configurati — imposta le variabili d'ambiente")
             sys.exit(1)
         try:
-            conn = pymysql.connect(**{**cfg, "autocommit": False})
+            conn = pymysql.connect(**cfg)  # autocommit=True da _db_config
         except Exception as e:
             logger.error(f"Impossibile connettersi al DB: {e}")
             sys.exit(1)
         try:
-            with conn:
-                cur = conn.cursor()
-                _aggiorna_files(cur, dati_dir)
-                logger.info("db_updater: dataset_files aggiornati")
+            cur = conn.cursor()
+            _aggiorna_files(cur, dati_dir)
+            logger.info("db_updater: dataset_files aggiornati")
         except Exception as e:
             logger.error(f"db_updater: errore – {e}", exc_info=True)
             sys.exit(1)
+        finally:
+            conn.close()
         sys.exit(0)
 
     # ── Modalità --solo-categorie: aggiorna categoria_ammissioni e ripartizioni ──
@@ -1619,22 +1620,26 @@ if __name__ == "__main__":
             logger.error(f"Impossibile connettersi al DB: {e}")
             sys.exit(1)
         try:
-            with conn:
-                cur = conn.cursor()
-                n_cat = _aggiorna_categoria_ammissioni(cur, dati_dir)
-                logger.info(f"db_updater: categoria_ammissioni: {n_cat} righe aggiornate")
-                anni_list = []
-                if args.anni:
-                    try:
-                        anni_list = [int(a.strip()) for a in args.anni.split(",") if a.strip()]
-                    except ValueError:
-                        logger.error("--anni deve contenere numeri, es. 2023,2024")
-                        sys.exit(1)
-                _aggiorna_ripartizioni(cur, anni_list)
-                logger.info("db_updater: ripartizioni aggiornate")
+            cur = conn.cursor()
+            n_cat = _aggiorna_categoria_ammissioni(cur, dati_dir)
+            logger.info(f"db_updater: categoria_ammissioni: {n_cat} righe aggiornate")
+            anni_list = []
+            if args.anni:
+                try:
+                    anni_list = [int(a.strip()) for a in args.anni.split(",") if a.strip()]
+                except ValueError:
+                    logger.error("--anni deve contenere numeri, es. 2023,2024")
+                    conn.rollback()
+                    sys.exit(1)
+            _aggiorna_ripartizioni(cur, anni_list)
+            logger.info("db_updater: ripartizioni aggiornate")
+            conn.commit()
         except Exception as e:
+            conn.rollback()
             logger.error(f"db_updater: errore – {e}", exc_info=True)
             sys.exit(1)
+        finally:
+            conn.close()
         sys.exit(0)
 
     # ── Modalità --runts: aggiorna solo dati RUNTS ───────────────────────────
