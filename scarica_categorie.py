@@ -113,6 +113,7 @@ SLUG_NORMALIZE = {
     "Comuni": "Comuni",
     "Enti_del_volontariato": "ETS_ONLUS",
     "ETS_ONLUS": "ETS_ONLUS",
+    "Enti_del_Terzo_Settore": "ETS_ONLUS",
     "Ricerca_sanitaria": "Ricerca_sanitaria",
     "Ricerca_scientifica": "Ricerca_scientifica",
     # Vecchi nomi extra
@@ -122,6 +123,7 @@ SLUG_NORMALIZE = {
 
 CATEGORY_SLUGS = {
     "enti del terzo settore e onlus": "ETS_ONLUS",
+    "enti del terzo settore": "ETS_ONLUS",
     "ricerca scientifica": "Ricerca_scientifica",
     "ricerca sanitaria": "Ricerca_sanitaria",
     "attivita' svolte dai comuni": "Comuni",
