@@ -2,18 +2,24 @@
 """
 analizza_tracciati.py — Evoluzione dei tracciati PDF/CSV 5x1000
 
-Compara le intestazioni dei file Excel (elenco generale e per-categoria)
-negli ultimi N anni e produce un report Excel multi-foglio:
+Produce due report distinti (o uno solo, a scelta):
 
-  - Un foglio per dataset (elenco generale + ogni categoria):
-    matrice campo × anno con marcatura nuovi/rimossi/rinominati
-  - "Variazioni": riepilogo tabellare di ogni cambiamento
-  - "Confronto_Categorie": stessa categoria, stesso anno, campi a confronto
+  REPORT GENERALE  (dati_XXXX.xlsx)
+    - Foglio "Elenco_Generale": matrice campo × anno
+    - Foglio "Variazioni":      riepilogo di ogni cambiamento
+
+  REPORT CATEGORIE  (ANNO_SLUG_ammessi/esclusi.xlsx)
+    - Un foglio per ogni categoria × stato (ammessi/esclusi)
+    - Foglio "Variazioni_Cat":       cambiamenti nei file di categoria
+    - Foglio "Confronto_Ammessi":    tutte le categorie affiancate per anno
+    - Foglio "Confronto_Esclusi":    idem per esclusi
 
 Uso:
-    python analizza_tracciati.py
-    python analizza_tracciati.py --dati Dati --anni 5
-    python analizza_tracciati.py --output report_tracciati.xlsx
+    python analizza_tracciati.py                        # entrambi i report, ultimi 5 anni
+    python analizza_tracciati.py --tipo generale
+    python analizza_tracciati.py --tipo categorie
+    python analizza_tracciati.py --tipo categorie --categoria ETS_ONLUS
+    python analizza_tracciati.py --anni 3 --output-dir Dati/
 """
 
 import argparse
@@ -43,19 +49,18 @@ CATEGORIE_SLUG = [
     "Aree_protette",
 ]
 
-C_HEADER   = "2F5496"
-C_PRESENT  = "D6E4BC"
-C_ABSENT   = "F2F2F2"
-C_NEW      = "C6EFCE"
-C_REMOVED  = "FFC7CE"
-C_RENAMED  = "FFEB9C"
+C_HEADER  = "2F5496"
+C_PRESENT = "D6E4BC"
+C_ABSENT  = "F2F2F2"
+C_NEW     = "C6EFCE"
+C_REMOVED = "FFC7CE"
+C_RENAMED = "FFEB9C"
 
 # ---------------------------------------------------------------------------
 # Lettura intestazioni
 # ---------------------------------------------------------------------------
 
 def get_headers(xlsx_path: Path) -> list[str]:
-    """Legge le intestazioni (prima riga non vuota) di un file Excel."""
     try:
         import warnings
         with warnings.catch_warnings():
@@ -82,7 +87,6 @@ def similarity(a: str, b: str) -> float:
 
 
 def find_renames(removed: list[str], added: list[str], threshold: float = 0.72) -> dict[str, str]:
-    """Heuristica: accoppia campi rimossi/aggiunti con alta similarità."""
     renames: dict[str, str] = {}
     used: set[str] = set()
     for rem in removed:
@@ -100,12 +104,7 @@ def find_renames(removed: list[str], added: list[str], threshold: float = 0.72) 
 
 
 def analizza_dataset(nome: str, headers_per_anno: dict[int, list[str]], anni: list[int]) -> dict:
-    """
-    Costruisce la matrice campo×anno e calcola le variazioni tra anni consecutivi.
-    """
     anni_presenti = [a for a in anni if a in headers_per_anno]
-
-    # Tutti i campi in ordine di prima apparizione
     all_fields: list[str] = []
     seen: set[str] = set()
     for anno in sorted(anni_presenti):
@@ -113,14 +112,10 @@ def analizza_dataset(nome: str, headers_per_anno: dict[int, list[str]], anni: li
             if h not in seen:
                 all_fields.append(h)
                 seen.add(h)
-
-    # Matrice: campo → {anno: True/False}
     matrix: dict[str, dict[int, bool]] = {
         field: {anno: field in headers_per_anno.get(anno, []) for anno in anni}
         for field in all_fields
     }
-
-    # Variazioni tra anni consecutivi
     variazioni = []
     for i in range(1, len(anni_presenti)):
         ap, ac = sorted(anni_presenti)[i - 1], sorted(anni_presenti)[i]
@@ -134,14 +129,9 @@ def analizza_dataset(nome: str, headers_per_anno: dict[int, list[str]], anni: li
             "aggiunti": added, "rimossi": removed, "rinominati": renames,
             "n_da": len(hp), "n_a": len(hc),
         })
-
     return {
-        "nome": nome,
-        "anni": anni,
-        "anni_presenti": anni_presenti,
-        "all_fields": all_fields,
-        "matrix": matrix,
-        "variazioni": variazioni,
+        "nome": nome, "anni": anni, "anni_presenti": anni_presenti,
+        "all_fields": all_fields, "matrix": matrix, "variazioni": variazioni,
         "headers_per_anno": headers_per_anno,
     }
 
@@ -158,7 +148,6 @@ def _hdr_cell(ws, row, col, value):
 
 
 def write_matrix_sheet(wb, dataset: dict, anni: list[int]):
-    """Foglio matrice: righe=campi, colonne=anni."""
     title = dataset["nome"][:31]
     ws = wb.create_sheet(title=title)
 
@@ -169,27 +158,24 @@ def write_matrix_sheet(wb, dataset: dict, anni: list[int]):
     f_renamed = PatternFill("solid", fgColor=C_RENAMED)
     align_c   = Alignment(horizontal="center", vertical="center")
 
-    # Calcola mappa rinominate per colorazione
-    rename_old: dict[str, int] = {}  # campo_vecchio → anno_rimozione
-    rename_new: dict[str, int] = {}  # campo_nuovo   → anno_aggiunta
+    rename_old: dict[str, int] = {}
+    rename_new: dict[str, int] = {}
     for v in dataset["variazioni"]:
         for old, new in v["rinominati"].items():
             rename_old[old] = v["a"]
             rename_new[new] = v["a"]
 
-    # Intestazione
     _hdr_cell(ws, 1, 1, "Campo")
     ws.column_dimensions["A"].width = 42
     for j, anno in enumerate(anni, 2):
         _hdr_cell(ws, 1, j, str(anno))
         ws.column_dimensions[get_column_letter(j)].width = 9
 
-    # Righe
     for i, field in enumerate(dataset["all_fields"], 2):
         ws.cell(i, 1, field).font = Font(size=9)
         for j, anno in enumerate(anni, 2):
-            present  = dataset["matrix"][field].get(anno, False)
-            prev_idx = j - 3  # indice dell'anno precedente nella lista anni
+            present   = dataset["matrix"][field].get(anno, False)
+            prev_idx  = j - 3
             prev_anno = anni[prev_idx] if prev_idx >= 0 else None
             prev_present = dataset["matrix"][field].get(prev_anno) if prev_anno is not None else None
 
@@ -212,7 +198,6 @@ def write_matrix_sheet(wb, dataset: dict, anni: list[int]):
                 else:
                     c.value, c.fill = "", f_absent
 
-    # Conteggio campi
     row_tot = len(dataset["all_fields"]) + 2
     ws.cell(row_tot, 1, "N° campi totali").font = Font(bold=True, size=9)
     for j, anno in enumerate(anni, 2):
@@ -221,15 +206,14 @@ def write_matrix_sheet(wb, dataset: dict, anni: list[int]):
         c.font = Font(bold=True, size=9)
         c.alignment = Alignment(horizontal="center")
 
-    # Legenda
     row_leg = row_tot + 2
     ws.cell(row_leg, 1, "Legenda").font = Font(bold=True, size=9)
     for k, (label, fill) in enumerate([
-        ("✓  Presente", f_present),
-        ("+  Campo aggiunto", f_new),
-        ("−  Campo rimosso", f_removed),
-        ("R↑ / R↓  Potenziale rinomina", f_renamed),
-        ("   Assente / non disponibile", f_absent),
+        ("✓  Presente",                   f_present),
+        ("+  Campo aggiunto",              f_new),
+        ("−  Campo rimosso",               f_removed),
+        ("R↑ / R↓  Potenziale rinomina",   f_renamed),
+        ("   Assente / non disponibile",   f_absent),
     ], 1):
         c = ws.cell(row_leg + k, 1, label)
         c.fill = fill
@@ -238,11 +222,10 @@ def write_matrix_sheet(wb, dataset: dict, anni: list[int]):
     ws.freeze_panes = "B2"
 
 
-def write_variazioni_sheet(wb, all_datasets: list[dict]):
-    """Foglio riepilogo tabellare di tutte le variazioni."""
-    ws = wb.create_sheet(title="Variazioni")
-
-    cols = ["Dataset", "Da anno", "A anno", "Tipo", "Campo", "→ Rinominato in", "N° campi da", "N° campi a", "Δ"]
+def write_variazioni_sheet(wb, all_datasets: list[dict], title: str = "Variazioni"):
+    ws = wb.create_sheet(title=title)
+    cols = ["Dataset", "Da anno", "A anno", "Tipo", "Campo", "→ Rinominato in",
+            "N° campi da", "N° campi a", "Δ"]
     for j, h in enumerate(cols, 1):
         _hdr_cell(ws, 1, j, h)
 
@@ -259,79 +242,57 @@ def write_variazioni_sheet(wb, all_datasets: list[dict]):
             for campo in v["aggiunti"]:
                 if campo in renamed_new_set:
                     continue
-                ws.cell(row, 1, ds["nome"])
-                ws.cell(row, 2, v["da"])
-                ws.cell(row, 3, v["a"])
-                c = ws.cell(row, 4, "AGGIUNTO")
-                c.fill = f_new
-                c.font = Font(bold=True, size=9)
-                ws.cell(row, 5, campo)
-                ws.cell(row, 7, v["n_da"])
-                ws.cell(row, 8, v["n_a"])
-                ws.cell(row, 9, v["n_a"] - v["n_da"])
+                ws.cell(row, 1, ds["nome"]); ws.cell(row, 2, v["da"]); ws.cell(row, 3, v["a"])
+                c = ws.cell(row, 4, "AGGIUNTO"); c.fill = f_new; c.font = Font(bold=True, size=9)
+                ws.cell(row, 5, campo); ws.cell(row, 7, v["n_da"])
+                ws.cell(row, 8, v["n_a"]); ws.cell(row, 9, v["n_a"] - v["n_da"])
                 row += 1
 
             for campo in v["rimossi"]:
                 if campo in renamed_old_set:
                     continue
-                ws.cell(row, 1, ds["nome"])
-                ws.cell(row, 2, v["da"])
-                ws.cell(row, 3, v["a"])
-                c = ws.cell(row, 4, "RIMOSSO")
-                c.fill = f_removed
-                c.font = Font(bold=True, size=9)
-                ws.cell(row, 5, campo)
-                ws.cell(row, 7, v["n_da"])
-                ws.cell(row, 8, v["n_a"])
-                ws.cell(row, 9, v["n_a"] - v["n_da"])
+                ws.cell(row, 1, ds["nome"]); ws.cell(row, 2, v["da"]); ws.cell(row, 3, v["a"])
+                c = ws.cell(row, 4, "RIMOSSO"); c.fill = f_removed; c.font = Font(bold=True, size=9)
+                ws.cell(row, 5, campo); ws.cell(row, 7, v["n_da"])
+                ws.cell(row, 8, v["n_a"]); ws.cell(row, 9, v["n_a"] - v["n_da"])
                 row += 1
 
             for old, new in v["rinominati"].items():
-                ws.cell(row, 1, ds["nome"])
-                ws.cell(row, 2, v["da"])
-                ws.cell(row, 3, v["a"])
-                c = ws.cell(row, 4, "RINOMINATO?")
-                c.fill = f_renamed
-                c.font = Font(bold=True, size=9)
-                ws.cell(row, 5, old)
-                ws.cell(row, 6, new)
-                ws.cell(row, 7, v["n_da"])
-                ws.cell(row, 8, v["n_a"])
-                ws.cell(row, 9, v["n_a"] - v["n_da"])
+                ws.cell(row, 1, ds["nome"]); ws.cell(row, 2, v["da"]); ws.cell(row, 3, v["a"])
+                c = ws.cell(row, 4, "RINOMINATO?"); c.fill = f_renamed; c.font = Font(bold=True, size=9)
+                ws.cell(row, 5, old); ws.cell(row, 6, new); ws.cell(row, 7, v["n_da"])
+                ws.cell(row, 8, v["n_a"]); ws.cell(row, 9, v["n_a"] - v["n_da"])
                 row += 1
 
-    for col, w in zip("ABCDEFGHI", [22, 9, 9, 14, 40, 40, 11, 11, 6]):
+    for col, w in zip("ABCDEFGHI", [28, 9, 9, 14, 40, 40, 11, 11, 6]):
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"
 
 
-def write_confronto_categorie_sheet(wb, cat_datasets: list[dict], anni: list[int]):
-    """Per ogni anno: matrice campo × categoria (solo ammessi)."""
-    ws = wb.create_sheet(title="Confronto_Categorie")
+def write_confronto_sheet(wb, datasets: list[dict], anni: list[int], title: str):
+    """Affianca tutte le categorie per anno (stessa struttura per ammessi e esclusi)."""
+    ws = wb.create_sheet(title=title[:31])
     f_present = PatternFill("solid", fgColor=C_PRESENT)
     f_absent  = PatternFill("solid", fgColor=C_ABSENT)
     align_c   = Alignment(horizontal="center", vertical="center")
 
     row = 1
     for anno in sorted(anni, reverse=True):
-        cat_con_dati = [ds for ds in cat_datasets if ds["headers_per_anno"].get(anno)]
+        cat_con_dati = [ds for ds in datasets if ds["headers_per_anno"].get(anno)]
         if not cat_con_dati:
             continue
 
-        # Titolo anno
         c = ws.cell(row, 1, f"── Anno {anno} ──")
         c.font = Font(bold=True, size=11, color=C_HEADER)
         row += 1
 
-        # Header categorie
         _hdr_cell(ws, row, 1, "Campo")
         ws.column_dimensions["A"].width = 42
         for j, ds in enumerate(cat_con_dati, 2):
             _hdr_cell(ws, row, j, ds["nome"])
-            ws.column_dimensions[get_column_letter(j)].width = 16
+            ws.column_dimensions[get_column_letter(j)].width = 18
         row += 1
 
-        # Tutti i campi per quell'anno (ordine di prima apparizione)
         all_fields: list[str] = []
         seen: set[str] = set()
         for ds in cat_con_dati:
@@ -355,6 +316,136 @@ def write_confronto_categorie_sheet(wb, cat_datasets: list[dict], anni: list[int
 
     ws.freeze_panes = "B2"
 
+
+# ---------------------------------------------------------------------------
+# Raccolta dati
+# ---------------------------------------------------------------------------
+
+def raccogli_generale(dati_dir: Path, anni: list[int]) -> list[dict]:
+    print("=== Elenco generale ===")
+    headers: dict[int, list[str]] = {}
+    for anno in anni:
+        f = dati_dir / f"dati_{anno}.xlsx"
+        if f.exists():
+            h = get_headers(f)
+            if h:
+                headers[anno] = h
+                print(f"  {anno}: {len(h)} campi")
+            else:
+                print(f"  {anno}: vuoto/illeggibile")
+        else:
+            print(f"  {anno}: mancante")
+
+    if headers:
+        return [analizza_dataset("Elenco_Generale", headers, anni)]
+    return []
+
+
+def raccogli_categorie(dati_dir: Path, anni: list[int], slugs: list[str]) -> dict[str, dict[str, dict]]:
+    """
+    Ritorna {slug: {"ammessi": dataset, "esclusi": dataset}}.
+    """
+    print("=== Categorie ===")
+    risultati: dict[str, dict[str, dict]] = {}
+
+    for slug in slugs:
+        cat_dir = dati_dir / slug
+        if not cat_dir.exists():
+            print(f"  {slug}: cartella mancante")
+            continue
+
+        per_stato: dict[str, dict] = {}
+        for stato, pattern in [("ammessi", "*_ammessi.xlsx"), ("esclusi", "*_esclusi.xlsx")]:
+            headers: dict[int, list[str]] = {}
+            for anno in anni:
+                files = sorted(cat_dir.glob(f"{anno}_{pattern}"))
+                if files:
+                    h = get_headers(files[0])
+                    if h:
+                        headers[anno] = h
+
+            if headers:
+                nome = f"{slug}_{stato}"
+                ds = analizza_dataset(nome, headers, anni)
+                per_stato[stato] = ds
+                anni_trovati = sorted(headers.keys())
+                print(f"  {slug}/{stato}: {anni_trovati} — {[len(headers[a]) for a in anni_trovati]} campi")
+            else:
+                print(f"  {slug}/{stato}: nessun file trovato")
+
+        if per_stato:
+            risultati[slug] = per_stato
+
+    return risultati
+
+# ---------------------------------------------------------------------------
+# Costruzione report
+# ---------------------------------------------------------------------------
+
+def build_report_generale(dati_dir: Path, anni: list[int], output: Path):
+    datasets = raccogli_generale(dati_dir, anni)
+    if not datasets:
+        print("Nessun dato generale trovato.")
+        return
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    for ds in datasets:
+        write_matrix_sheet(wb, ds, anni)
+        print(f"  Foglio '{ds['nome']}': {len(ds['all_fields'])} campi unici")
+
+    write_variazioni_sheet(wb, datasets)
+    print("  Foglio 'Variazioni'")
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(output)
+    print(f"Report generale salvato: {output}")
+
+
+def build_report_categorie(dati_dir: Path, anni: list[int], output: Path, slugs: list[str]):
+    cat_data = raccogli_categorie(dati_dir, anni, slugs)
+    if not cat_data:
+        print("Nessun dato categorie trovato.")
+        return
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    all_ds: list[dict] = []
+    ammessi_ds: list[dict] = []
+    esclusi_ds: list[dict] = []
+
+    for slug in slugs:
+        if slug not in cat_data:
+            continue
+        for stato in ("ammessi", "esclusi"):
+            if stato not in cat_data[slug]:
+                continue
+            ds = cat_data[slug][stato]
+            write_matrix_sheet(wb, ds, anni)
+            print(f"  Foglio '{ds['nome']}': {len(ds['all_fields'])} campi unici")
+            all_ds.append(ds)
+            if stato == "ammessi":
+                ammessi_ds.append(ds)
+            else:
+                esclusi_ds.append(ds)
+
+    write_variazioni_sheet(wb, all_ds, title="Variazioni")
+    print("  Foglio 'Variazioni'")
+
+    if len(ammessi_ds) > 1:
+        write_confronto_sheet(wb, ammessi_ds, anni, "Confronto_Ammessi")
+        print("  Foglio 'Confronto_Ammessi'")
+
+    if len(esclusi_ds) > 1:
+        write_confronto_sheet(wb, esclusi_ds, anni, "Confronto_Esclusi")
+        print("  Foglio 'Confronto_Esclusi'")
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(output)
+    print(f"Report categorie salvato: {output}")
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -365,22 +456,54 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Esempi:
-  python analizza_tracciati.py                        # ultimi 5 anni, output in Dati/
-  python analizza_tracciati.py --anni 3               # ultimi 3 anni
-  python analizza_tracciati.py --output report.xlsx   # percorso output custom
+  python analizza_tracciati.py                              # entrambi i report, ultimi 5 anni
+  python analizza_tracciati.py --tipo generale
+  python analizza_tracciati.py --tipo categorie
+  python analizza_tracciati.py --tipo categorie --categoria ETS_ONLUS
+  python analizza_tracciati.py --anni 3 --output-dir Dati/
         """,
     )
-    ap.add_argument("--dati",   default="Dati",                        help="Cartella Dati/ (default: Dati)")
-    ap.add_argument("--anni",   type=int, default=5,                   help="Ultimi N anni da analizzare (default: 5)")
-    ap.add_argument("--output", default="Dati/report_tracciati.xlsx",  help="File Excel di output")
+    ap.add_argument("--dati",       default="Dati",
+                    help="Cartella Dati/ (default: Dati)")
+    ap.add_argument("--anni",       type=int, default=5,
+                    help="Ultimi N anni da analizzare (default: 5)")
+    ap.add_argument("--tipo",       choices=["generale", "categorie", "entrambi"],
+                    default="entrambi",
+                    help="Quale report produrre (default: entrambi)")
+    ap.add_argument("--categoria",  default="tutte",
+                    help="Slug categoria specifica o 'tutte' (default: tutte). "
+                         f"Valori: {', '.join(CATEGORIE_SLUG)}")
+    ap.add_argument("--output-dir", default=None,
+                    help="Cartella output (default: stessa di --dati)")
+    ap.add_argument("--output",     default=None,
+                    help="File output (solo per --tipo generale o categorie, "
+                         "sovrascrive --output-dir)")
     args = ap.parse_args()
 
-    dati_dir = Path(args.dati)
+    dati_dir  = Path(args.dati)
+    out_dir   = Path(args.output_dir) if args.output_dir else dati_dir
+
     if not dati_dir.exists():
         print(f"Errore: cartella non trovata: {dati_dir}")
         sys.exit(1)
 
-    # Anni disponibili dai file dati_XXXX.xlsx
+    # Risolvi categoria
+    if args.categoria.lower() == "tutte":
+        slugs = CATEGORIE_SLUG
+    else:
+        # Cerca match esatto o prefix-insensitive
+        match = next(
+            (s for s in CATEGORIE_SLUG if s.lower() == args.categoria.lower()), None
+        ) or next(
+            (s for s in CATEGORIE_SLUG if args.categoria.lower() in s.lower()), None
+        )
+        if not match:
+            print(f"Categoria non riconosciuta: {args.categoria}")
+            print(f"Disponibili: {', '.join(CATEGORIE_SLUG)}")
+            sys.exit(1)
+        slugs = [match]
+
+    # Anni disponibili
     anni_disponibili = sorted(
         int(f.stem.split("_")[1])
         for f in dati_dir.glob("dati_[0-9]*.xlsx")
@@ -394,78 +517,22 @@ Esempi:
     print(f"Anni analizzati: {anni}")
     print()
 
-    all_datasets: list[dict] = []
+    # Output paths
+    if args.output and args.tipo != "entrambi":
+        out_generale   = Path(args.output)
+        out_categorie  = Path(args.output)
+    else:
+        suffix_cat = f"_{slugs[0]}" if len(slugs) == 1 else ""
+        out_generale  = out_dir / "report_tracciati_generale.xlsx"
+        out_categorie = out_dir / f"report_tracciati_categorie{suffix_cat}.xlsx"
 
-    # --- Elenco generale ---
-    print("=== Elenco generale ===")
-    headers_generale: dict[int, list[str]] = {}
-    for anno in anni:
-        f = dati_dir / f"dati_{anno}.xlsx"
-        if f.exists():
-            h = get_headers(f)
-            if h:
-                headers_generale[anno] = h
-                print(f"  {anno}: {len(h)} campi")
-            else:
-                print(f"  {anno}: vuoto/illeggibile")
-        else:
-            print(f"  {anno}: mancante")
+    if args.tipo in ("generale", "entrambi"):
+        print()
+        build_report_generale(dati_dir, anni, out_generale)
 
-    if headers_generale:
-        all_datasets.append(analizza_dataset("Elenco_Generale", headers_generale, anni))
-
-    # --- Categorie ---
-    print()
-    print("=== Categorie ===")
-    cat_datasets: list[dict] = []
-    for slug in CATEGORIE_SLUG:
-        cat_dir = dati_dir / slug
-        if not cat_dir.exists():
-            print(f"  {slug}: cartella mancante")
-            continue
-
-        headers_cat: dict[int, list[str]] = {}
-        for anno in anni:
-            files = sorted(cat_dir.glob(f"{anno}_*_ammessi.xlsx"))
-            if files:
-                h = get_headers(files[0])
-                if h:
-                    headers_cat[anno] = h
-
-        if headers_cat:
-            anni_trovati = sorted(headers_cat.keys())
-            print(f"  {slug}: {anni_trovati} — {[len(headers_cat[a]) for a in anni_trovati]} campi")
-            ds = analizza_dataset(slug, headers_cat, anni)
-            cat_datasets.append(ds)
-            all_datasets.append(ds)
-        else:
-            print(f"  {slug}: nessun file ammessi trovato")
-
-    if not all_datasets:
-        print("\nNessun dato trovato. Verifica che Dati/ contenga i file xlsx.")
-        sys.exit(1)
-
-    # --- Output ---
-    print()
-    print(f"Scrittura report: {args.output}")
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)
-
-    for ds in all_datasets:
-        write_matrix_sheet(wb, ds, anni)
-        print(f"  Foglio '{ds['nome']}': {len(ds['all_fields'])} campi unici")
-
-    write_variazioni_sheet(wb, all_datasets)
-    print(f"  Foglio 'Variazioni'")
-
-    if cat_datasets:
-        write_confronto_categorie_sheet(wb, cat_datasets, anni)
-        print(f"  Foglio 'Confronto_Categorie'")
-
-    out = Path(args.output)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(out)
-    print(f"\nReport salvato: {out}")
+    if args.tipo in ("categorie", "entrambi"):
+        print()
+        build_report_categorie(dati_dir, anni, out_categorie, slugs)
 
 
 if __name__ == "__main__":
