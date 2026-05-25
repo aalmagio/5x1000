@@ -75,12 +75,21 @@
       <span class="text-sm text-red-700">Errore nel caricamento dati. Verifica la connessione e riprova.</span>
     </div>
 
-    <!-- Info risultati -->
-    <div v-if="result" class="mb-3 flex items-center justify-between text-sm text-gray-500">
+    <!-- Info risultati + toggle colonne -->
+    <div v-if="result" class="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-500">
       <span>
         <strong class="text-gray-800">{{ formatNum(result.totale) }}</strong> risultati
         <span v-if="hasActiveFilters" class="ml-1 text-brand-600">con filtri attivi</span>
       </span>
+      <div class="flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs">
+        <span class="px-2 text-gray-400 font-medium">Colonne:</span>
+        <button
+          v-for="col in colOpzionali" :key="col.key"
+          @click="col.visible = !col.visible"
+          class="px-2.5 py-1 rounded-md transition-colors font-medium"
+          :class="col.visible ? 'bg-white shadow text-gray-800' : 'text-gray-400 hover:text-gray-600'"
+        >{{ col.label }}</button>
+      </div>
       <span>Pagina {{ result.pagina }} di {{ result.pagine }}</span>
     </div>
 
@@ -118,6 +127,9 @@
                   </svg>
                 </span>
               </th>
+              <th v-if="showCol('importo_espresso')" class="text-right hidden xl:table-cell">Imp. espresso</th>
+              <th v-if="showCol('importo_generico')"  class="text-right hidden xl:table-cell">Imp. generico</th>
+              <th v-if="showCol('importo_medio')"     class="text-right hidden xl:table-cell">€/firma</th>
               <th class="w-16"></th>
             </tr>
           </thead>
@@ -148,6 +160,9 @@
               <td class="text-gray-500 hidden sm:table-cell">{{ e.regione ?? '–' }}</td>
               <td class="text-right tabular-nums text-gray-700">{{ formatNum(e.n_scelte) }}</td>
               <td class="text-right tabular-nums font-semibold text-brand-700">{{ formatEur(e.importo_totale) }}</td>
+              <td v-if="showCol('importo_espresso')" class="text-right tabular-nums text-gray-500 hidden xl:table-cell">{{ formatEur(e.importo_espresso) }}</td>
+              <td v-if="showCol('importo_generico')"  class="text-right tabular-nums text-gray-500 hidden xl:table-cell">{{ formatEur(e.importo_generico) }}</td>
+              <td v-if="showCol('importo_medio')"     class="text-right tabular-nums text-gray-500 hidden xl:table-cell">{{ formatEur2(importoMedio(e)) }}</td>
               <td>
                 <RouterLink
                   v-if="e.cod_fiscale"
@@ -248,9 +263,21 @@ const sortedData = computed(() => {
   })
 })
 
-const formatNum = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
-const formatEur = (n) => n != null
+// Colonne opzionali
+const colOpzionali = ref([
+  { key: 'importo_espresso', label: 'Imp. espresso', visible: false },
+  { key: 'importo_generico',  label: 'Imp. generico',  visible: false },
+  { key: 'importo_medio',     label: '€/firma',        visible: false },
+])
+const showCol   = (key) => colOpzionali.value.find(c => c.key === key)?.visible ?? false
+const importoMedio = (e) => (e.importo_espresso && e.n_scelte) ? e.importo_espresso / e.n_scelte : null
+
+const formatNum  = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
+const formatEur  = (n) => n != null
   ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
+  : '–'
+const formatEur2 = (n) => n != null
+  ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(n)
   : '–'
 
 const CAT_COLORS = {

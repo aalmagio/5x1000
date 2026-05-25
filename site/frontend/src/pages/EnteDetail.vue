@@ -202,8 +202,9 @@
                 <th>Anno</th>
                 <th v-if="categorieMultiple" class="hidden sm:table-cell">Categoria</th>
                 <th class="text-right">Scelte</th>
-                <th class="text-right hidden sm:table-cell">Importo espresso</th>
-                <th class="text-right hidden sm:table-cell">Importo generico</th>
+                <th class="text-right hidden sm:table-cell">Imp. espresso</th>
+                <th class="text-right hidden sm:table-cell">Imp. generico</th>
+                <th class="text-right hidden lg:table-cell">€/firma</th>
                 <th class="text-right">Totale</th>
               </tr>
             </thead>
@@ -223,6 +224,7 @@
                   <td class="text-right tabular-nums">{{ formatNum(r.n_scelte) }}</td>
                   <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(r.importo_espresso) }}</td>
                   <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(r.importo_generico) }}</td>
+                  <td class="text-right tabular-nums hidden lg:table-cell text-gray-500">{{ formatEur2(importoMedioFirma(r)) }}</td>
                   <td class="text-right font-semibold text-brand-700 tabular-nums">{{ formatEur(r.importo_totale) }}</td>
                 </tr>
                 <!-- Sub-righe per categoria (solo anni con più categorie) -->
@@ -243,6 +245,7 @@
                     <td class="text-right tabular-nums">{{ formatNum(cb.n_scelte) }}</td>
                     <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(cb.importo_espresso) }}</td>
                     <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(cb.importo_generico) }}</td>
+                    <td class="text-right tabular-nums hidden lg:table-cell text-gray-500">{{ formatEur2(importoMedioFirma(cb)) }}</td>
                     <td class="text-right tabular-nums text-gray-700">{{ formatEur(cb.importo_totale) }}</td>
                   </tr>
                 </template>
@@ -418,6 +421,14 @@ const categorieMultiple = computed(() =>
   (ente.value?.categorie?.length ?? 0) > 1 ||
   hasCatBreakdown.value
 )
+
+// ── Importo medio per firma ───────────────────────────────────────────────────
+const importoMedioFirma = (r) =>
+  (r?.importo_espresso && r?.n_scelte) ? r.importo_espresso / r.n_scelte : null
+
+const formatEur2 = (n) => n != null
+  ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(n)
+  : '–'
 
 // ── Reddito medio stimato ─────────────────────────────────────────────────────
 const irpefMedio = computed(() => {
