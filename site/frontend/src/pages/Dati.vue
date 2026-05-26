@@ -270,7 +270,11 @@ const colOpzionali = ref([
   { key: 'importo_medio',     label: '€/firma',        visible: false },
 ])
 const showCol   = (key) => colOpzionali.value.find(c => c.key === key)?.visible ?? false
-const importoMedio = (e) => (e.importo_espresso && e.n_scelte) ? e.importo_espresso / e.n_scelte : null
+const importoMedio = (e) => {
+  if (!e?.n_scelte) return null
+  const base = e.importo_espresso || e.importo_totale
+  return base ? base / e.n_scelte : null
+}
 
 const formatNum  = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
 const formatEur  = (n) => n != null
