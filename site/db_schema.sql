@@ -272,3 +272,30 @@ ORDER BY anno DESC, totale_importo DESC;
 -- ALTER TABLE `dataset_files`
 --   MODIFY COLUMN `tipo`
 --     ENUM('completo','normalizzato','report','categoria','scelte') NOT NULL;
+
+-- ------------------------------------------------------------
+-- Migration NLQ: tabelle per cache e rate limiting
+-- Da eseguire una volta sul DB di produzione:
+--   SOURCE /path/to/db_schema.sql;
+-- oppure copiare e incollare solo questa sezione.
+-- ------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `nlq_cache` (
+  `query_hash`    CHAR(32)      NOT NULL COMMENT 'MD5 della domanda normalizzata',
+  `query_text`    TEXT          NOT NULL,
+  `sql_generated` TEXT                   DEFAULT NULL,
+  `result_json`   MEDIUMTEXT             DEFAULT NULL,
+  `hits`          INT           NOT NULL DEFAULT 1,
+  `created_at`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at`    DATETIME      NOT NULL,
+  PRIMARY KEY (`query_hash`),
+  KEY `idx_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `nlq_rate_limit` (
+  `id`      INT           NOT NULL AUTO_INCREMENT,
+  `ip_hash` CHAR(64)      NOT NULL COMMENT 'SHA-256 dell\'IP',
+  `ts`      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_ip_ts` (`ip_hash`, `ts`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

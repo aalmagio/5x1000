@@ -69,6 +69,14 @@ export const fetchProvince = (regione) => get('province', regione ? { regione } 
 // Geo: aggregati erogato per regione / provincia / comune
 export const fetchGeo = (params) => get('geo', params ?? {})
 
+// NLQ: Natural Language Query (semi-protetto con token HMAC giornaliero)
+export const nlqToken = () => get('nlq_token')
+export const nlqQuery = (token, q) =>
+  api.post('', { token, q }, {
+    params: { action: 'nlq' },
+    headers: { 'Content-Type': 'application/json' },
+  })
+
 // Lead generation: salva email prima del download
 export const salvaLead = ({ email, nome, tipo, anno, vuole_newsletter } = {}) =>
   api.post('', new URLSearchParams({

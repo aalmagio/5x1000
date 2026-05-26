@@ -102,6 +102,7 @@
               <li><RouterLink to="/inoptato"   class="hover:text-white transition-colors">Inoptato</RouterLink></li>
               <li><RouterLink to="/forecast"   class="hover:text-white transition-colors">Proiezioni trend</RouterLink></li>
               <li><RouterLink to="/download"   class="hover:text-white transition-colors">Download dataset</RouterLink></li>
+              <li><RouterLink to="/ricerca"   class="hover:text-white transition-colors">Ricerca AI</RouterLink></li>
             </ul>
           </div>
           <!-- ASSIF -->

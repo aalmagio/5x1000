@@ -18,6 +18,7 @@ const Inoptato           = () => import('./pages/Inoptato.vue')
 const Forecast           = () => import('./pages/Forecast.vue')
 const Classifica         = () => import('./pages/Classifica.vue')
 const Geo                = () => import('./pages/Geo.vue')
+const Ricerca            = () => import('./pages/Ricerca.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -35,6 +36,7 @@ const router = createRouter({
     { path: '/classifica',                    component: Classifica,       name: 'classifica' },
     { path: '/ente/:cf',                      component: EnteDetail,       name: 'ente' },
     { path: '/geo',                           component: Geo,              name: 'geo' },
+    { path: '/ricerca',                       component: Ricerca,          name: 'ricerca' },
   ],
   scrollBehavior: () => ({ top: 0 }),
 })
