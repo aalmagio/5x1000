@@ -238,7 +238,7 @@ const result    = ref(null)
 const loading   = ref(false)
 const error     = ref(false)
 const page      = ref(1)
-const sortBy    = ref('importo_totale')
+const sortBy    = ref('anno')
 const sortAsc   = ref(false)
 
 const filters = ref({
@@ -259,7 +259,12 @@ const sortedData = computed(() => {
   return [...result.value.data].sort((a, b) => {
     const av = a[col] ?? 0
     const bv = b[col] ?? 0
-    return sortAsc.value ? av - bv : bv - av
+    const primary = sortAsc.value ? av - bv : bv - av
+    if (primary !== 0) return primary
+    // secondario: anno desc → n_scelte desc; n_scelte desc → anno desc
+    if (col === 'anno') return (b.n_scelte ?? 0) - (a.n_scelte ?? 0)
+    if (col === 'n_scelte') return (b.anno ?? 0) - (a.anno ?? 0)
+    return 0
   })
 })
 
