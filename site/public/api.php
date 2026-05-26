@@ -1850,6 +1850,309 @@ function action_geo(): void {
 }
 
 
+// ─── NLQ: Natural Language Query ─────────────────────────────────────────────
+//
+// Endpoint semi-protetto: richiede un token HMAC giornaliero (da nlq_token)
+// + rate limiting per IP. La domanda in italiano viene tradotta in SQL da
+// Ollama (modello locale, porta 11434) ed eseguita in sola lettura sul DB.
+//
+// Configurazione nel .env:
+//   NLQ_SECRET=<stringa-segreta>        obbligatorio per abilitare NLQ
+//   OLLAMA_URL=http://127.0.0.1:11434   default
+//   OLLAMA_MODEL=qwen2.5-coder:7b       default
+//   NLQ_MAX_PER_HOUR=20                 default
+//   NLQ_CACHE_TTL=86400                 secondi (default 24h)
+
+function _nlq_secret(): string {
+    $s = getenv('NLQ_SECRET') ?: '';
+    if ($s === '') throw new \RuntimeException('NLQ_SECRET non configurato nel .env');
+    return $s;
+}
+
+function _nlq_token_today(): string {
+    return hash_hmac('sha256', date('Y-m-d'), _nlq_secret());
+}
+
+function action_nlq_token(): void {
+    try {
+        $token = _nlq_token_today();
+    } catch (\RuntimeException) {
+        err('NLQ non abilitato su questo server (NLQ_SECRET mancante nel .env)', 503);
+    }
+    json_out([
+        'token'       => $token,
+        'valid_until' => date('Y-m-d') . ' 23:59:59',
+    ]);
+}
+
+function _nlq_check_rate_limit(string $ip_hash): void {
+    $max = (int)(getenv('NLQ_MAX_PER_HOUR') ?: 20);
+    $pdo = db();
+
+    if (mt_rand(1, 100) === 1) {
+        try {
+            $pdo->exec("DELETE FROM nlq_rate_limit WHERE ts < DATE_SUB(NOW(), INTERVAL 2 HOUR)");
+        } catch (\Throwable) {}
+    }
+
+    $stmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM nlq_rate_limit
+         WHERE ip_hash = ? AND ts > DATE_SUB(NOW(), INTERVAL 1 HOUR)"
+    );
+    $stmt->execute([$ip_hash]);
+    if ((int)$stmt->fetchColumn() >= $max) {
+        err("Limite raggiunto: massimo $max query/ora per IP. Riprova tra poco.", 429);
+    }
+
+    $pdo->prepare("INSERT INTO nlq_rate_limit (ip_hash) VALUES (?)")->execute([$ip_hash]);
+}
+
+function _nlq_cache_get(string $hash): ?array {
+    try {
+        $stmt = db()->prepare(
+            "SELECT result_json FROM nlq_cache WHERE query_hash = ? AND expires_at > NOW()"
+        );
+        $stmt->execute([$hash]);
+        $row = $stmt->fetch();
+        if (!$row) return null;
+        db()->prepare("UPDATE nlq_cache SET hits = hits + 1 WHERE query_hash = ?")
+             ->execute([$hash]);
+        return json_decode($row['result_json'], true);
+    } catch (\Throwable) {
+        return null;
+    }
+}
+
+function _nlq_cache_set(string $hash, string $domanda, string $sql, array $result): void {
+    $ttl = (int)(getenv('NLQ_CACHE_TTL') ?: 86400);
+    try {
+        db()->prepare(
+            "INSERT INTO nlq_cache (query_hash, query_text, sql_generated, result_json, expires_at)
+             VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))
+             ON DUPLICATE KEY UPDATE
+               result_json   = VALUES(result_json),
+               sql_generated = VALUES(sql_generated),
+               expires_at    = VALUES(expires_at),
+               hits          = hits + 1"
+        )->execute([$hash, $domanda, $sql, json_encode($result, JSON_UNESCAPED_UNICODE), $ttl]);
+    } catch (\Throwable) {}
+}
+
+function _nlq_call_ollama(string $domanda): string {
+    $base  = rtrim(getenv('OLLAMA_URL') ?: 'http://127.0.0.1:11434', '/');
+    $model = getenv('OLLAMA_MODEL') ?: 'qwen2.5-coder:7b';
+
+    $schema = <<<'SCHEMA'
+DATABASE MySQL — 5x1000 italiano (contributo 5 per mille IRPEF)
+
+TABLE enti  (~1M righe, una riga per anno per ente)
+  anno               SMALLINT         -- es: 2006 … 2025
+  cod_fiscale        VARCHAR(20)      -- codice fiscale dell'ente
+  denominazione      VARCHAR(500)     -- nome ente (MAIUSCOLO nel DB)
+  regione            VARCHAR(100)     -- MAIUSCOLO: 'LOMBARDIA','TOSCANA','LAZIO','CAMPANIA'…
+  provincia          CHAR(3)          -- sigla: 'MI','RM','TO','NA','BO'…
+  comune             VARCHAR(200)
+  categoria_principale VARCHAR(50)    -- 'volontariato','asd','ets_onlus','ricerca_scientifica',
+                                      --  'ricerca_sanitaria','comuni','beni_culturali','aree_protette'
+  cat_volontariato   TINYINT(1)       -- 1 se ente appartiene a questa categoria
+  cat_asd            TINYINT(1)
+  cat_ets_onlus      TINYINT(1)
+  cat_ricerca_sci    TINYINT(1)
+  cat_ricerca_san    TINYINT(1)
+  cat_comuni         TINYINT(1)
+  cat_beni_cult      TINYINT(1)
+  cat_aree_prot      TINYINT(1)
+  n_scelte           INT              -- scelte espresse dai contribuenti
+  importo_espresso   DECIMAL(15,2)    -- importo da scelte dirette (EUR)
+  importo_generico   DECIMAL(15,2)    -- importo da scelte generiche/inoptato (EUR)
+  importo_totale     DECIMAL(15,2)    -- importo totale ricevuto (EUR)
+  runts_5x1000       TINYINT(1)       -- 1 se iscritto al RUNTS
+
+TABLE categoria_ammissioni  (stato ammissione per categoria per anno)
+  anno               SMALLINT
+  cod_fiscale        VARCHAR(20)
+  denominazione      VARCHAR(500)
+  categoria          VARCHAR(50)
+  stato              ENUM('ammesso','escluso')
+  n_scelte           INT
+  importo_espresso   DECIMAL(15,2)
+  importo_generico   DECIMAL(15,2)
+  importo_totale     DECIMAL(15,2)
+
+TABLE runts  (Registro Unico Terzo Settore)
+  cod_fiscale        VARCHAR(20)
+  denominazione      VARCHAR(500)
+  sezione            VARCHAR(100)
+  sede_comune        VARCHAR(200)
+  sede_prov          CHAR(3)
+  data_iscrizione    DATE
+
+ESEMPI:
+
+Domanda: top 10 enti per importo nel 2024
+SQL: SELECT denominazione, categoria_principale, importo_totale, n_scelte FROM enti WHERE anno = 2024 ORDER BY importo_totale DESC LIMIT 10
+
+Domanda: quante associazioni sportive ci sono in Lombardia nel 2023?
+SQL: SELECT COUNT(*) AS n_enti FROM enti WHERE anno = 2023 AND regione = 'LOMBARDIA' AND categoria_principale = 'asd'
+
+Domanda: totale erogato per categoria nel 2024
+SQL: SELECT categoria_principale, SUM(importo_totale) AS totale_eur, COUNT(*) AS n_enti FROM enti WHERE anno = 2024 GROUP BY categoria_principale ORDER BY totale_eur DESC
+
+Domanda: enti esclusi in almeno una categoria nel 2024
+SQL: SELECT cod_fiscale, denominazione, GROUP_CONCAT(DISTINCT categoria ORDER BY categoria SEPARATOR ', ') AS categorie_escluse FROM categoria_ammissioni WHERE anno = 2024 AND stato = 'escluso' GROUP BY cod_fiscale, denominazione ORDER BY denominazione LIMIT 50
+
+SCHEMA;
+
+    $payload = json_encode([
+        'model'   => $model,
+        'system'  => 'Sei un assistente che genera SOLO query SELECT MySQL valide. Non aggiungere spiegazioni, commenti, markdown o backtick. Rispondi UNICAMENTE con la query SQL su una o più righe.',
+        'prompt'  => $schema . "\nDomanda: $domanda\nSQL:",
+        'stream'  => false,
+        'options' => ['temperature' => 0, 'num_predict' => 500],
+    ]);
+
+    if (!function_exists('curl_init')) err('cURL non disponibile sul server', 500);
+
+    $ch = curl_init("$base/api/generate");
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $payload,
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 60,
+        CURLOPT_CONNECTTIMEOUT => 5,
+    ]);
+    $resp = curl_exec($ch);
+    $cerr = curl_error($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($resp === false || $cerr) {
+        err('Modello AI non raggiungibile. Assicurarsi che Ollama sia avviato sul server.', 503);
+    }
+    if ($code !== 200) {
+        err("Ollama ha risposto con errore HTTP $code.", 503);
+    }
+
+    $data = json_decode($resp, true);
+    if (!isset($data['response'])) err('Risposta Ollama non valida.', 503);
+
+    $sql = trim($data['response']);
+    $sql = preg_replace('/^```(?:sql)?\s*/i', '', $sql);
+    $sql = preg_replace('/\s*```\s*$/', '', $sql);
+    return trim($sql);
+}
+
+function _nlq_validate_sql(string $sql): string {
+    $clean = preg_replace('/--[^\n]*/m', '', $sql);
+    $clean = preg_replace('/\/\*.*?\*\//s', '', $clean);
+    $clean = trim(preg_replace('/\s+/', ' ', $clean));
+
+    if (!preg_match('/^(SELECT|WITH)\s+/i', $clean)) {
+        err('Il modello ha generato una risposta non utilizzabile. Prova a riformulare la domanda.');
+    }
+
+    static $forbidden = [
+        'DROP','DELETE','UPDATE','INSERT','CREATE','ALTER','TRUNCATE',
+        'EXEC','EXECUTE','GRANT','REVOKE','LOAD\s+DATA','INTO\s+OUTFILE',
+        'INTO\s+DUMPFILE','SLEEP\s*\(','BENCHMARK\s*\(',
+    ];
+    foreach ($forbidden as $kw) {
+        if (preg_match('/\b' . $kw . '\b/i', $clean)) {
+            err("Query non permessa (contiene '$kw').");
+        }
+    }
+
+    $allowed = ['enti','categoria_ammissioni','runts','ripartizioni'];
+    if (preg_match_all('/\b(?:FROM|JOIN)\s+`?(\w+)`?/i', $clean, $m)) {
+        foreach ($m[1] as $tbl) {
+            if (!in_array(strtolower($tbl), $allowed, true)) {
+                err("Tabella '$tbl' non accessibile tramite questa interfaccia.");
+            }
+        }
+    }
+
+    if (!preg_match('/\bLIMIT\s+\d+/i', $clean)) {
+        $clean .= ' LIMIT 50';
+    }
+    $clean = preg_replace_callback(
+        '/\bLIMIT\s+(\d+)\b/i',
+        fn($m) => 'LIMIT ' . min((int)$m[1], 100),
+        $clean
+    );
+
+    return $clean;
+}
+
+function action_nlq(): void {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') err('Usa POST per questa azione.', 405);
+
+    // Supporta sia JSON body che form-encoded
+    $body = [];
+    $ct   = $_SERVER['CONTENT_TYPE'] ?? '';
+    if (str_contains($ct, 'application/json')) {
+        $body = json_decode(file_get_contents('php://input'), true) ?? [];
+    }
+
+    $token   = $body['token'] ?? str_param('token');
+    $domanda = trim($body['q'] ?? str_param('q'));
+
+    if (!$token) err('Token mancante.', 401);
+    try {
+        if (!hash_equals(_nlq_token_today(), $token)) err('Token non valido o scaduto.', 401);
+    } catch (\RuntimeException) {
+        err('NLQ non abilitato su questo server.', 503);
+    }
+
+    if (strlen($domanda) < 5)   err('Domanda troppo corta (min. 5 caratteri).');
+    if (strlen($domanda) > 500) err('Domanda troppo lunga (max. 500 caratteri).');
+
+    $ip_hash = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? 'unknown');
+    try {
+        _nlq_check_rate_limit($ip_hash);
+    } catch (\PDOException) {
+        error_log('[api.php] nlq_rate_limit table missing — run migration');
+    }
+
+    $cache_key = md5(mb_strtolower($domanda));
+    $cached    = _nlq_cache_get($cache_key);
+    if ($cached !== null) {
+        json_out(array_merge($cached, ['from_cache' => true]));
+    }
+
+    $sql_raw = _nlq_call_ollama($domanda);
+    $sql     = _nlq_validate_sql($sql_raw);
+
+    $pdo = db();
+    try {
+        $stmt = $pdo->query($sql);
+        $rows = $stmt->fetchAll();
+    } catch (\PDOException $e) {
+        error_log('[api.php] NLQ exec error: ' . $e->getMessage() . ' | SQL: ' . $sql);
+        err('La query generata non è eseguibile sul database. Prova a riformulare la domanda.', 422);
+    }
+
+    $rows = array_map(function ($row) {
+        foreach ($row as &$v) {
+            if ($v !== null && preg_match('/^-?\d+$/', (string)$v))       $v = (int)$v;
+            elseif ($v !== null && preg_match('/^-?\d+\.\d+$/', (string)$v)) $v = (float)$v;
+        }
+        return $row;
+    }, $rows);
+
+    $result = [
+        'domanda'    => $domanda,
+        'sql'        => $sql,
+        'n_righe'    => count($rows),
+        'colonne'    => $rows ? array_keys($rows[0]) : [],
+        'data'       => $rows,
+        'from_cache' => false,
+    ];
+
+    _nlq_cache_set($cache_key, $domanda, $sql, $result);
+    json_out($result);
+}
+
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 try {
@@ -1878,6 +2181,8 @@ try {
         'composizione_categorie' => action_composizione_categorie(),
         'conflitti_categoria'  => action_conflitti_categoria(),
         'geo'                  => action_geo(),
+        'nlq_token'            => action_nlq_token(),
+        'nlq'                  => action_nlq(),
         default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria, geo", 404),
     };
 } catch (PDOException $e) {
