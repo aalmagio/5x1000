@@ -75,6 +75,7 @@ export const nlqQuery = (token, q) =>
   api.post('', { token, q }, {
     params: { action: 'nlq' },
     headers: { 'Content-Type': 'application/json' },
+    timeout: 120_000,
   })
 
 // Lead generation: salva email prima del download

@@ -2019,7 +2019,7 @@ SCHEMA;
         CURLOPT_POSTFIELDS     => $payload,
         CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 60,
+        CURLOPT_TIMEOUT        => 120,
         CURLOPT_CONNECTTIMEOUT => 5,
     ]);
     $resp = curl_exec($ch);
