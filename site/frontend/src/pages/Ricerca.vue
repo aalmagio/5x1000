@@ -8,6 +8,22 @@
       </p>
     </div>
 
+    <!-- Disclaimer -->
+    <div class="flex gap-3 items-start bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 mb-6 text-sm text-blue-800">
+      <svg class="w-5 h-5 flex-shrink-0 mt-0.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <p class="leading-relaxed">
+        <span class="font-semibold">Motore AI autonomo.</span>
+        Questa funzione utilizza un modello di intelligenza artificiale ospitato direttamente
+        sui nostri server, senza dipendenze da servizi esterni a pagamento.
+        Questo ci permette di offrire la ricerca in linguaggio naturale in modo sostenibile
+        e gratuito per tutti gli utenti. I tempi di risposta possono essere di qualche decina
+        di secondi: ti chiediamo un momento di pazienza.
+      </p>
+    </div>
+
     <!-- Form ricerca -->
     <div class="card mb-6">
       <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2 block">
