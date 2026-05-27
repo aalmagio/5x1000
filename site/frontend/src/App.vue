@@ -142,6 +142,7 @@ const navLinks = [
   { to: '/inoptato',   label: 'Inoptato' },
   { to: '/forecast',   label: 'Proiezioni' },
   { to: '/download',   label: 'Download' },
+  { to: '/ricerca',    label: 'Ricerca AI' },
   { to: '/api',        label: 'API' },
   { to: '/about',      label: 'Info' },
 ]
