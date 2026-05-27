@@ -2019,7 +2019,7 @@ SCHEMA;
         CURLOPT_POSTFIELDS     => $payload,
         CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 60,
+        CURLOPT_TIMEOUT        => 120,
         CURLOPT_CONNECTTIMEOUT => 5,
     ]);
     $resp = curl_exec($ch);
@@ -2085,6 +2085,7 @@ function _nlq_validate_sql(string $sql): string {
 }
 
 function action_nlq(): void {
+    set_time_limit(180); // generazione SQL su CPU può richiedere >60s
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') err('Usa POST per questa azione.', 405);
 
     // Supporta sia JSON body che form-encoded
