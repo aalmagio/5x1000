@@ -31,7 +31,8 @@
         </div>
         <div>
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Nome / Codice fiscale</label>
-          <input v-model="filters.q" class="input-field" placeholder="Cerca ente…" @keyup.enter="search()" />
+          <input v-model="filters.q" class="input-field" placeholder="Cerca ente…"
+                 @input="debouncedSearch" @keyup.enter="search()" />
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-3">
@@ -313,6 +314,12 @@ function toggleSort(col) {
     sortBy.value = col
     sortAsc.value = false
   }
+}
+
+let _debounceTimer = null
+function debouncedSearch() {
+  clearTimeout(_debounceTimer)
+  _debounceTimer = setTimeout(() => search(1), 400)
 }
 
 async function search(p = 1) {
