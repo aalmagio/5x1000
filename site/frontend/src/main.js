@@ -20,6 +20,7 @@ const Classifica         = () => import('./pages/Classifica.vue')
 const Geo                = () => import('./pages/Geo.vue')
 const Ricerca            = () => import('./pages/Ricerca.vue')
 const Esclusi            = () => import('./pages/Esclusi.vue')
+const EsclusiDetail      = () => import('./pages/EsclusiDetail.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -39,6 +40,7 @@ const router = createRouter({
     { path: '/geo',                           component: Geo,              name: 'geo' },
     { path: '/ricerca',                       component: Ricerca,          name: 'ricerca' },
     { path: '/esclusi',                       component: Esclusi,          name: 'esclusi' },
+    { path: '/esclusi/:cf',                   component: EsclusiDetail,    name: 'escluso_detail' },
   ],
   scrollBehavior: () => ({ top: 0 }),
 })

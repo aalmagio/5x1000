@@ -1770,8 +1770,10 @@ function action_esclusi(): void {
             MAX(COALESCE(NULLIF(r.denominazione,''), ex.denominazione)) AS denominazione,
             GROUP_CONCAT(DISTINCT ex.categoria ORDER BY ex.categoria SEPARATOR ',') AS categorie_escluse,
             GROUP_CONCAT(DISTINCT am.categoria ORDER BY am.categoria SEPARATOR ',') AS categorie_ammesse,
-            SUM(am.n_scelte)         AS n_scelte_ammesse,
-            SUM(am.importo_totale)   AS importo_ammesse,
+            SUM(ex.n_scelte)              AS n_scelte_escluse,
+            SUM(ex.importo_totale)        AS importo_escluse,
+            SUM(am.n_scelte)              AS n_scelte_ammesse,
+            SUM(am.importo_totale)        AS importo_ammesse,
             MAX(ent.regione) AS regione
          FROM categoria_ammissioni ex
          LEFT JOIN categoria_ammissioni am
@@ -1794,8 +1796,10 @@ function action_esclusi(): void {
         $r['anno']              = (int)$r['anno'];
         $r['categorie_escluse'] = $r['categorie_escluse'] ? explode(',', $r['categorie_escluse']) : [];
         $r['categorie_ammesse'] = $r['categorie_ammesse'] ? explode(',', $r['categorie_ammesse']) : [];
-        $r['n_scelte_ammesse']  = $r['n_scelte_ammesse'] !== null ? (int)$r['n_scelte_ammesse'] : null;
-        $r['importo_ammesse']   = $r['importo_ammesse']  !== null ? (float)$r['importo_ammesse'] : null;
+        $r['n_scelte_escluse']  = $r['n_scelte_escluse']  !== null ? (int)$r['n_scelte_escluse']  : null;
+        $r['importo_escluse']   = $r['importo_escluse']   !== null ? (float)$r['importo_escluse']  : null;
+        $r['n_scelte_ammesse']  = $r['n_scelte_ammesse']  !== null ? (int)$r['n_scelte_ammesse']   : null;
+        $r['importo_ammesse']   = $r['importo_ammesse']   !== null ? (float)$r['importo_ammesse']  : null;
     }
     unset($r);
 
@@ -1805,6 +1809,74 @@ function action_esclusi(): void {
         'pagine'     => $pagine,
         'per_pagina' => $per_pagina,
         'data'       => $rows,
+    ]);
+}
+
+
+// ─── Endpoint: dettaglio ente escluso ────────────────────────────────────────
+/**
+ * ?action=escluso_detail&cf=CODICE_FISCALE
+ *
+ * Legge interamente da categoria_ammissioni (mai da enti).
+ * Restituisce per ogni anno le categorie escluse e ammesse con le rispettive
+ * metriche (n_scelte, importo_espresso, importo_generico, importo_totale).
+ */
+function action_escluso_detail(): void {
+    $cf = str_param('cf');
+    if (!$cf) err('Parametro cf mancante');
+
+    $pdo  = db();
+
+    // Tutte le righe (ammesse + escluse) per questo CF
+    $stmt = $pdo->prepare(
+        "SELECT ca.anno, ca.categoria, ca.stato,
+                ca.n_scelte, ca.importo_espresso, ca.importo_generico,
+                ca.importo_totale, ca.importo_totale_erogabile,
+                COALESCE(NULLIF(r.denominazione,''), ca.denominazione) AS denominazione
+         FROM categoria_ammissioni ca
+         LEFT JOIN runts r ON r.cod_fiscale = ca.cod_fiscale
+         WHERE ca.cod_fiscale = ?
+         ORDER BY ca.anno DESC, ca.stato ASC, ca.categoria ASC"
+    );
+    $stmt->execute([$cf]);
+    $rows = $stmt->fetchAll();
+
+    if (!$rows) err('Ente non trovato negli elenchi di ammissione/esclusione', 404);
+
+    $denom = $rows[0]['denominazione'] ?? $cf;
+
+    // Raggruppa per anno
+    $per_anno = [];
+    foreach ($rows as $r) {
+        $a     = (int)$r['anno'];
+        $stato = $r['stato'];
+        if (!isset($per_anno[$a])) $per_anno[$a] = ['escluse' => [], 'ammesse' => []];
+        $key = $stato === 'escluso' ? 'escluse' : 'ammesse';
+        $per_anno[$a][$key][] = [
+            'categoria'               => $r['categoria'],
+            'n_scelte'                => $r['n_scelte']                !== null ? (int)$r['n_scelte']                : null,
+            'importo_espresso'        => $r['importo_espresso']        !== null ? (float)$r['importo_espresso']      : null,
+            'importo_generico'        => $r['importo_generico']        !== null ? (float)$r['importo_generico']      : null,
+            'importo_totale'          => $r['importo_totale']          !== null ? (float)$r['importo_totale']        : null,
+            'importo_totale_erogabile'=> $r['importo_totale_erogabile']!== null ? (float)$r['importo_totale_erogabile'] : null,
+        ];
+    }
+    krsort($per_anno);
+
+    $storico = [];
+    foreach ($per_anno as $anno => $grp) {
+        $storico[] = [
+            'anno'    => $anno,
+            'escluse' => $grp['escluse'],
+            'ammesse' => $grp['ammesse'],
+        ];
+    }
+
+    json_out([
+        'cod_fiscale'   => $cf,
+        'denominazione' => $denom,
+        'anni_presenti' => array_keys($per_anno),
+        'storico'       => $storico,
     ]);
 }
 
@@ -2353,6 +2425,7 @@ try {
         'composizione_categorie' => action_composizione_categorie(),
         'conflitti_categoria'  => action_conflitti_categoria(),
         'esclusi'              => action_esclusi(),
+        'escluso_detail'       => action_escluso_detail(),
         'geo'                  => action_geo(),
         'nlq_token'            => action_nlq_token(),
         'nlq'                  => action_nlq(),

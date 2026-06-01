@@ -97,7 +97,7 @@
             <!-- Nome + CF + regione -->
             <div class="flex-1 min-w-0">
               <RouterLink
-                :to="`/ente/${e.cod_fiscale}`"
+                :to="`/esclusi/${e.cod_fiscale}`"
                 class="font-medium text-gray-900 hover:text-brand-700 block truncate text-sm"
               >{{ e.denominazione || e.cod_fiscale }}</RouterLink>
               <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 text-xs text-gray-400">
@@ -105,13 +105,19 @@
                 <span v-if="e.regione">{{ e.regione }}</span>
               </div>
 
-              <!-- Metriche ammesse (se presenti) -->
-              <div v-if="e.n_scelte_ammesse || e.importo_ammesse" class="flex items-center gap-3 mt-1.5 text-xs text-gray-500">
-                <span v-if="e.n_scelte_ammesse">
-                  <span class="font-medium text-gray-700">{{ e.n_scelte_ammesse.toLocaleString('it-IT') }}</span> scelte (cat. ammesse)
+              <!-- Metriche -->
+              <div class="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-gray-500">
+                <span v-if="e.n_scelte_escluse">
+                  <span class="font-medium text-red-600">{{ e.n_scelte_escluse.toLocaleString('it-IT') }}</span> scelte escluse
+                </span>
+                <span v-if="e.importo_escluse">
+                  <span class="font-medium text-red-600">{{ formatEur(e.importo_escluse) }}</span> escluse
+                </span>
+                <span v-if="e.n_scelte_ammesse" class="border-l border-gray-200 pl-3">
+                  <span class="font-medium text-green-600">{{ e.n_scelte_ammesse.toLocaleString('it-IT') }}</span> scelte ammesse
                 </span>
                 <span v-if="e.importo_ammesse">
-                  <span class="font-medium text-gray-700">{{ formatEur(e.importo_ammesse) }}</span> (cat. ammesse)
+                  <span class="font-medium text-green-600">{{ formatEur(e.importo_ammesse) }}</span> ammesse
                 </span>
               </div>
 
@@ -144,11 +150,11 @@
               </div>
             </div>
 
-            <!-- Link storico -->
+            <!-- Link dettaglio -->
             <RouterLink
-              :to="`/ente/${e.cod_fiscale}`"
+              :to="`/esclusi/${e.cod_fiscale}`"
               class="flex-shrink-0 text-xs text-brand-600 opacity-0 group-hover:opacity-100 transition-opacity font-medium mt-1"
-            >storico →</RouterLink>
+            >dettaglio →</RouterLink>
           </div>
         </div>
 
