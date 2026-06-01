@@ -78,6 +78,9 @@ export const nlqQuery = (token, q) =>
     timeout: 120_000,
   })
 
+// Enti esclusi (con quadro completo categorie escluse/ammesse per CF+anno)
+export const fetchEsclusi = (params) => get('esclusi', params ?? {})
+
 // Lead generation: salva email prima del download
 export const salvaLead = ({ email, nome, tipo, anno, vuole_newsletter } = {}) =>
   api.post('', new URLSearchParams({

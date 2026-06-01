@@ -1654,6 +1654,106 @@ function action_composizione_categorie(): void {
 }
 
 
+// ─── Endpoint: esclusi ───────────────────────────────────────────────────────
+/**
+ * ?action=esclusi[&q=NOME][&anno=YYYY][&categoria=SLUG][&regione=R][&pagina=1][&per_pagina=50]
+ *
+ * Per ogni coppia (anno, cod_fiscale) che ha almeno una riga 'escluso' in
+ * categoria_ammissioni, restituisce denominazione, categorie escluse e categorie
+ * ammesse (se presenti nello stesso anno). Chiave semantica: CF + anno.
+ */
+function action_esclusi(): void {
+    $pdo        = db();
+    $q          = str_param('q');
+    $anno       = int_param('anno');
+    $categoria  = str_param('categoria');
+    $regione    = str_param('regione');
+    $pagina     = max(1, int_param('pagina', 1));
+    $per_pagina = min(200, max(1, int_param('per_pagina', 50)));
+    $offset     = ($pagina - 1) * $per_pagina;
+
+    // Condizioni applicate alla subquery sugli esclusi
+    $where  = ['ex.stato = \'escluso\''];
+    $params = [];
+
+    if ($anno) {
+        $where[]  = 'ex.anno = ?';
+        $params[] = $anno;
+    }
+    if ($categoria) {
+        $where[]  = 'ex.categoria = ?';
+        $params[] = $categoria;
+    }
+    if ($regione) {
+        $where[]  = 'ex.cod_fiscale IN (SELECT cod_fiscale FROM enti WHERE regione = ? AND anno = ex.anno)';
+        $params[] = $regione;
+    }
+    if ($q) {
+        $where[]  = '(ex.denominazione LIKE ? OR ex.cod_fiscale LIKE ?)';
+        $params[] = '%' . $q . '%';
+        $params[] = '%' . $q . '%';
+    }
+
+    $sql_where = 'WHERE ' . implode(' AND ', $where);
+
+    // Conteggio distinto (anno, cod_fiscale)
+    $stmt_c = $pdo->prepare(
+        "SELECT COUNT(*) FROM (
+            SELECT ex.anno, ex.cod_fiscale
+            FROM categoria_ammissioni ex
+            $sql_where
+            GROUP BY ex.anno, ex.cod_fiscale
+         ) sub"
+    );
+    $stmt_c->execute($params);
+    $totale = (int)$stmt_c->fetchColumn();
+
+    $pagine = max(1, (int)ceil($totale / $per_pagina));
+
+    // Dati: per ogni (anno, CF) con almeno un escluso → aggrega cat escluse e ammesse
+    $params_pag = array_merge($params, [$per_pagina, $offset]);
+    $stmt = $pdo->prepare(
+        "SELECT
+            ex.anno,
+            ex.cod_fiscale,
+            MAX(COALESCE(NULLIF(r.denominazione,''), ex.denominazione)) AS denominazione,
+            GROUP_CONCAT(DISTINCT ex.categoria ORDER BY ex.categoria SEPARATOR ',') AS categorie_escluse,
+            GROUP_CONCAT(DISTINCT am.categoria ORDER BY am.categoria SEPARATOR ',') AS categorie_ammesse,
+            MAX(ent.regione) AS regione
+         FROM categoria_ammissioni ex
+         LEFT JOIN categoria_ammissioni am
+           ON  am.cod_fiscale = ex.cod_fiscale
+           AND am.anno        = ex.anno
+           AND am.stato       = 'ammesso'
+         LEFT JOIN enti ent
+           ON  ent.cod_fiscale = ex.cod_fiscale
+           AND ent.anno        = ex.anno
+         LEFT JOIN runts r ON r.cod_fiscale = ex.cod_fiscale
+         $sql_where
+         GROUP BY ex.anno, ex.cod_fiscale
+         ORDER BY ex.anno DESC, denominazione ASC
+         LIMIT ? OFFSET ?"
+    );
+    $stmt->execute($params_pag);
+    $rows = $stmt->fetchAll();
+
+    foreach ($rows as &$r) {
+        $r['anno']              = (int)$r['anno'];
+        $r['categorie_escluse'] = $r['categorie_escluse'] ? explode(',', $r['categorie_escluse']) : [];
+        $r['categorie_ammesse'] = $r['categorie_ammesse'] ? explode(',', $r['categorie_ammesse']) : [];
+    }
+    unset($r);
+
+    json_out([
+        'totale'     => $totale,
+        'pagina'     => $pagina,
+        'pagine'     => $pagine,
+        'per_pagina' => $per_pagina,
+        'data'       => $rows,
+    ]);
+}
+
+
 // ─── Endpoint: conflitti (ammesso in una cat, escluso in un'altra) ────────────
 /**
  * ?action=conflitti_categoria[&anno=YYYY][&pagina=1][&per_pagina=50]
@@ -2197,10 +2297,11 @@ try {
         'multi_categoria'      => action_multi_categoria(),
         'composizione_categorie' => action_composizione_categorie(),
         'conflitti_categoria'  => action_conflitti_categoria(),
+        'esclusi'              => action_esclusi(),
         'geo'                  => action_geo(),
         'nlq_token'            => action_nlq_token(),
         'nlq'                  => action_nlq(),
-        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria, geo", 404),
+        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria, esclusi, geo, nlq_token, nlq", 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());

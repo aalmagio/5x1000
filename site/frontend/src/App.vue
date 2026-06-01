@@ -99,6 +99,7 @@
               <li><RouterLink to="/categorie"  class="hover:text-white transition-colors">Analisi categorie</RouterLink></li>
               <li><RouterLink to="/classifica" class="hover:text-white transition-colors">Classifica</RouterLink></li>
               <li><RouterLink to="/geo"        class="hover:text-white transition-colors">Mappa geografica</RouterLink></li>
+              <li><RouterLink to="/esclusi"    class="hover:text-white transition-colors">Enti esclusi</RouterLink></li>
               <li><RouterLink to="/inoptato"   class="hover:text-white transition-colors">Inoptato</RouterLink></li>
               <li><RouterLink to="/forecast"   class="hover:text-white transition-colors">Proiezioni trend</RouterLink></li>
               <li><RouterLink to="/download"   class="hover:text-white transition-colors">Download dataset</RouterLink></li>
@@ -139,6 +140,7 @@ const navLinks = [
   { to: '/categorie',  label: 'Categorie' },
   { to: '/classifica', label: 'Classifica' },
   { to: '/geo',        label: 'Mappa' },
+  { to: '/esclusi',    label: 'Esclusi' },
   { to: '/inoptato',   label: 'Inoptato' },
   { to: '/forecast',   label: 'Proiezioni' },
   { to: '/download',   label: 'Download' },
