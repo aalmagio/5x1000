@@ -23,13 +23,6 @@
           </select>
         </div>
         <div>
-          <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Regione</label>
-          <select v-model="filters.regione" class="input-field">
-            <option value="">Tutte le regioni</option>
-            <option v-for="r in regioni" :key="r" :value="r">{{ r }}</option>
-          </select>
-        </div>
-        <div>
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Nome / Codice fiscale</label>
           <input v-model="filters.q" class="input-field" placeholder="Cerca ente…"
                  @input="debouncedSearch" @keyup.enter="search()" />
@@ -85,7 +78,7 @@
               <th>Anno</th>
               <th>Denominazione</th>
               <th class="hidden md:table-cell">CF</th>
-              <th class="hidden sm:table-cell">Regione</th>
+
               <th>Cat. escluse</th>
               <th v-if="showCol('cat_ammesse')" class="hidden lg:table-cell">Cat. ammesse</th>
               <th class="text-right">Scelte escluse</th>
@@ -110,7 +103,7 @@
                 >{{ e.denominazione || e.cod_fiscale }}</RouterLink>
               </td>
               <td class="font-mono text-xs text-gray-400 hidden md:table-cell">{{ e.cod_fiscale }}</td>
-              <td class="text-gray-500 hidden sm:table-cell">{{ e.regione ?? '–' }}</td>
+
               <td>
                 <div class="flex flex-wrap gap-1">
                   <span
@@ -211,7 +204,7 @@ const SLUG_LABELS = {
 }
 const slugLabel = (s) => SLUG_LABELS[s] ?? s.replace(/_/g, ' ')
 
-const filters = ref({ anno: '', categoria: '', regione: '', q: '' })
+const filters = ref({ anno: '', categoria: '', q: '' })
 const result  = ref(null)
 const loading = ref(false)
 const error   = ref(false)
@@ -243,7 +236,7 @@ async function search(p = 1) {
     const params = { pagina: p, per_pagina: 50 }
     if (filters.value.anno)      params.anno      = filters.value.anno
     if (filters.value.categoria) params.categoria = filters.value.categoria
-    if (filters.value.regione)   params.regione   = filters.value.regione
+
     if (filters.value.q)         params.q         = filters.value.q
     const res = await fetchEsclusi(params)
     result.value = res.data
@@ -255,7 +248,7 @@ async function search(p = 1) {
 }
 
 function reset() {
-  filters.value = { anno: '', categoria: '', regione: '', q: '' }
+  filters.value = { anno: '', categoria: '', q: '' }
   search(1)
 }
 

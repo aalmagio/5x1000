@@ -1786,7 +1786,7 @@ function action_esclusi(): void {
          LEFT JOIN runts r ON r.cod_fiscale = ex.cod_fiscale
          $sql_where
          GROUP BY ex.anno, ex.cod_fiscale
-         ORDER BY ex.anno DESC, denominazione ASC
+         ORDER BY ex.anno DESC, importo_escluse DESC
          LIMIT $per_pagina OFFSET $offset"
     );
     $stmt->execute($params);
