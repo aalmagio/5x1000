@@ -41,6 +41,77 @@
       <RouterLink to="/dati" class="btn-primary mt-6 inline-flex">Torna alla ricerca</RouterLink>
     </div>
 
+    <!-- Vista solo-escluso: ente mai ammesso, presente solo negli elenchi esclusi -->
+    <template v-else-if="ente?.solo_escluso">
+      <div class="card mb-6">
+        <div class="flex items-start gap-3">
+          <div class="flex-shrink-0 w-8 h-8 rounded-full bg-red-100 flex items-center justify-center mt-0.5">
+            <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-2xl font-bold text-gray-900 leading-tight">{{ ente.denominazione }}</h1>
+            <p class="font-mono text-gray-400 text-sm mt-1 select-all">{{ ente.cod_fiscale }}</p>
+            <p class="text-sm text-red-600 mt-2 font-medium">
+              Ente presente solo negli elenchi degli esclusi — mai ammesso al beneficio del 5×1000.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="mb-4">Storico ammissioni per categoria</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Anno</th>
+                <th>Categorie escluse</th>
+                <th>Categorie ammesse</th>
+                <th class="text-right hidden sm:table-cell">Scelte (ammesse)</th>
+                <th class="text-right hidden sm:table-cell">Importo (ammesse)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in storicoOrdinato" :key="r.anno">
+                <td class="font-medium">{{ r.anno }}</td>
+                <td>
+                  <div class="flex flex-wrap gap-1">
+                    <span
+                      v-for="cat in r.categorie_escluse" :key="cat"
+                      class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700"
+                    >✗ {{ slugLabel(cat) }}</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="flex flex-wrap gap-1">
+                    <span
+                      v-for="cat in r.categorie_ammesse" :key="cat"
+                      class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700"
+                    >✓ {{ slugLabel(cat) }}</span>
+                    <span v-if="!r.categorie_ammesse?.length" class="text-gray-300 text-xs">–</span>
+                  </div>
+                </td>
+                <td class="text-right tabular-nums hidden sm:table-cell">
+                  <span v-if="r.cat_ammesse_detail?.length">
+                    {{ formatNum(r.cat_ammesse_detail.reduce((s, x) => s + (x.n_scelte ?? 0), 0)) }}
+                  </span>
+                  <span v-else class="text-gray-300">–</span>
+                </td>
+                <td class="text-right tabular-nums hidden sm:table-cell">
+                  <span v-if="r.cat_ammesse_detail?.length">
+                    {{ formatEur(r.cat_ammesse_detail.reduce((s, x) => s + (x.importo_totale ?? 0), 0) || null) }}
+                  </span>
+                  <span v-else class="text-gray-300">–</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
+
     <template v-else-if="ente">
       <!-- Header ente -->
       <div class="card mb-6">

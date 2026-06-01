@@ -105,6 +105,16 @@
                 <span v-if="e.regione">{{ e.regione }}</span>
               </div>
 
+              <!-- Metriche ammesse (se presenti) -->
+              <div v-if="e.n_scelte_ammesse || e.importo_ammesse" class="flex items-center gap-3 mt-1.5 text-xs text-gray-500">
+                <span v-if="e.n_scelte_ammesse">
+                  <span class="font-medium text-gray-700">{{ e.n_scelte_ammesse.toLocaleString('it-IT') }}</span> scelte (cat. ammesse)
+                </span>
+                <span v-if="e.importo_ammesse">
+                  <span class="font-medium text-gray-700">{{ formatEur(e.importo_ammesse) }}</span> (cat. ammesse)
+                </span>
+              </div>
+
               <!-- Categorie -->
               <div class="flex flex-wrap gap-1.5 mt-2">
                 <!-- Escluse -->
@@ -199,6 +209,9 @@ const SLUG_LABELS = {
   aree_protette:       'Aree Protette',
 }
 const slugLabel = (s) => SLUG_LABELS[s] ?? s.replace(/_/g, ' ')
+const formatEur = (n) => n != null && n > 0
+  ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
+  : '–'
 
 const q         = ref('')
 const anno      = ref('')
