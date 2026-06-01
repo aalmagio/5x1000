@@ -173,7 +173,7 @@ import { fetchEsclusi } from '@/api/client'
 import { useMetaStore } from '@/stores/meta'
 
 const meta    = useMetaStore()
-const anni    = computed(() => meta.anni)
+const anni    = computed(() => meta.anni.filter(a => a >= 2019))
 const regioni = computed(() => meta.regioni)
 
 // Slug delle categorie (valori usati in categoria_ammissioni.categoria)

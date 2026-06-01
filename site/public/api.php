@@ -1711,7 +1711,7 @@ function action_esclusi(): void {
     $pagine = max(1, (int)ceil($totale / $per_pagina));
 
     // Dati: per ogni (anno, CF) con almeno un escluso → aggrega cat escluse e ammesse
-    $params_pag = array_merge($params, [$per_pagina, $offset]);
+    // LIMIT/OFFSET embedded come interi (già validati) — MariaDB non accetta bind su LIMIT
     $stmt = $pdo->prepare(
         "SELECT
             ex.anno,
@@ -1732,9 +1732,9 @@ function action_esclusi(): void {
          $sql_where
          GROUP BY ex.anno, ex.cod_fiscale
          ORDER BY ex.anno DESC, denominazione ASC
-         LIMIT ? OFFSET ?"
+         LIMIT $per_pagina OFFSET $offset"
     );
-    $stmt->execute($params_pag);
+    $stmt->execute($params);
     $rows = $stmt->fetchAll();
 
     foreach ($rows as &$r) {
