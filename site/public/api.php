@@ -416,14 +416,18 @@ function action_enti(): void {
         $where[] = 'e.provincia = ?';
         $params[] = $provincia;
     }
+    $ft_q      = null;   // fulltext query string, set below if needed
     if ($q) {
         // Ricerca full-text se la query è sufficientemente lunga (≥3 char).
         // MATCH...AGAINST in boolean mode usa gli indici FULLTEXT su enti.denominazione
         // e runts.denominazione → 10-50x più veloce di LIKE su tabelle grandi.
         // Fallback a LIKE per cod_fiscale (non ha indice FULLTEXT) e query corte.
         if (strlen($q) >= 3) {
-            // Modalità fulltext: * per prefix match (es. "volont*")
-            $ft_q = '+' . implode('* +', preg_split('/\s+/', trim($q))) . '*';
+            // Costruisce query boolean con prefix match su ogni token.
+            // Non usa + (AND obbligatorio) per essere meno rigida; ogni termine
+            // ha il prefisso * per catturare varianti (es. "assoc" → "associazione").
+            $tokens = preg_split('/\s+/', trim($q), -1, PREG_SPLIT_NO_EMPTY);
+            $ft_q   = implode('* ', $tokens) . '*';
             $where[] = '(MATCH(e.denominazione) AGAINST(? IN BOOLEAN MODE)'
                      . ' OR MATCH(r.denominazione) AGAINST(? IN BOOLEAN MODE)'
                      . ' OR e.cod_fiscale LIKE ?)';
@@ -456,7 +460,18 @@ function action_enti(): void {
     $pagine = max(1, (int)ceil($totale / $per_pagina));
     $offset = ($pagina - 1) * $per_pagina;
 
-    // Dati — denominazione canonica: RUNTS se disponibile, altrimenti anno corrente
+    // Dati — denominazione canonica: RUNTS se disponibile, altrimenti anno corrente.
+    // Quando c'è una ricerca fulltext, aggiunge _score per ordinare per rilevanza.
+    if ($ft_q !== null) {
+        $score_col  = ', (MATCH(e.denominazione) AGAINST(? IN BOOLEAN MODE)'
+                    . ' + MATCH(r.denominazione) AGAINST(? IN BOOLEAN MODE)) AS _score';
+        $order_by   = '_score DESC, e.anno DESC';
+        $score_params = array_merge($params, [$ft_q, $ft_q]);
+    } else {
+        $score_col    = '';
+        $order_by     = "e.$sort $dir";
+        $score_params = $params;
+    }
     $data_stmt = $pdo->prepare(
         "SELECT e.anno, e.cod_fiscale,
                 COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
@@ -464,13 +479,14 @@ function action_enti(): void {
                 e.categoria_principale,
                 e.n_scelte, e.importo_espresso, e.importo_generico, e.importo_totale,
                 e.runts_5x1000
+                $score_col
          FROM enti e
          LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
          $sql_where
-         ORDER BY e.$sort $dir
+         ORDER BY $order_by
          LIMIT $per_pagina OFFSET $offset"
     );
-    $data_stmt->execute($params);
+    $data_stmt->execute($score_params);
     $rows = $data_stmt->fetchAll();
 
     foreach ($rows as &$r) {

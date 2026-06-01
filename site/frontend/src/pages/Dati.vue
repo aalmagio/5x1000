@@ -31,7 +31,8 @@
         </div>
         <div>
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Nome / Codice fiscale</label>
-          <input v-model="filters.q" class="input-field" placeholder="Cerca ente…" @keyup.enter="search()" />
+          <input v-model="filters.q" class="input-field" placeholder="Cerca ente…"
+                 @input="debouncedSearch" @keyup.enter="search()" />
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-3">
@@ -238,7 +239,7 @@ const result    = ref(null)
 const loading   = ref(false)
 const error     = ref(false)
 const page      = ref(1)
-const sortBy    = ref('importo_totale')
+const sortBy    = ref('anno')
 const sortAsc   = ref(false)
 
 const filters = ref({
@@ -259,7 +260,12 @@ const sortedData = computed(() => {
   return [...result.value.data].sort((a, b) => {
     const av = a[col] ?? 0
     const bv = b[col] ?? 0
-    return sortAsc.value ? av - bv : bv - av
+    const primary = sortAsc.value ? av - bv : bv - av
+    if (primary !== 0) return primary
+    // secondario: anno desc → n_scelte desc; n_scelte desc → anno desc
+    if (col === 'anno') return (b.n_scelte ?? 0) - (a.n_scelte ?? 0)
+    if (col === 'n_scelte') return (b.anno ?? 0) - (a.anno ?? 0)
+    return 0
   })
 })
 
@@ -270,7 +276,11 @@ const colOpzionali = ref([
   { key: 'importo_medio',     label: '€/firma',        visible: false },
 ])
 const showCol   = (key) => colOpzionali.value.find(c => c.key === key)?.visible ?? false
-const importoMedio = (e) => (e.importo_espresso && e.n_scelte) ? e.importo_espresso / e.n_scelte : null
+const importoMedio = (e) => {
+  if (!e?.n_scelte) return null
+  const base = e.importo_espresso || e.importo_totale
+  return base ? base / e.n_scelte : null
+}
 
 const formatNum  = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
 const formatEur  = (n) => n != null
@@ -304,6 +314,12 @@ function toggleSort(col) {
     sortBy.value = col
     sortAsc.value = false
   }
+}
+
+let _debounceTimer = null
+function debouncedSearch() {
+  clearTimeout(_debounceTimer)
+  _debounceTimer = setTimeout(() => search(1), 400)
 }
 
 async function search(p = 1) {

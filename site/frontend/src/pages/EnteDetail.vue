@@ -423,8 +423,11 @@ const categorieMultiple = computed(() =>
 )
 
 // ── Importo medio per firma ───────────────────────────────────────────────────
-const importoMedioFirma = (r) =>
-  (r?.importo_espresso && r?.n_scelte) ? r.importo_espresso / r.n_scelte : null
+const importoMedioFirma = (r) => {
+  if (!r?.n_scelte) return null
+  const base = r.importo_espresso || r.importo_totale
+  return base ? base / r.n_scelte : null
+}
 
 const formatEur2 = (n) => n != null
   ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(n)
@@ -433,8 +436,9 @@ const formatEur2 = (n) => n != null
 // ── Reddito medio stimato ─────────────────────────────────────────────────────
 const irpefMedio = computed(() => {
   const r = latestRow.value
-  if (!r?.importo_espresso || !r?.n_scelte) return null
-  return (r.importo_espresso / r.n_scelte) / 0.005
+  if (!r?.n_scelte) return null
+  const base = r.importo_espresso || r.importo_totale
+  return base ? (base / r.n_scelte) / 0.005 : null
 })
 const redditoStimato = computed(() => {
   if (!irpefMedio.value) return null
