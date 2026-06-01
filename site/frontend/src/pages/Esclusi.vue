@@ -57,16 +57,7 @@
         <strong class="text-gray-800">{{ formatNum(result.totale) }}</strong>
         {{ result.totale === 1 ? 'ente escluso' : 'enti esclusi' }}
       </span>
-      <div class="flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs">
-        <span class="px-2 text-gray-400 font-medium">Colonne:</span>
-        <button
-          v-for="col in colOpzionali" :key="col.key"
-          @click="col.visible = !col.visible"
-          class="px-2.5 py-1 rounded-md transition-colors font-medium"
-          :class="col.visible ? 'bg-white shadow text-gray-800' : 'text-gray-400 hover:text-gray-600'"
-        >{{ col.label }}</button>
-      </div>
-      <span>Pagina {{ page }} di {{ result.pagine }}</span>
+<span>Pagina {{ page }} di {{ result.pagine }}</span>
     </div>
 
     <!-- Tabella risultati -->
@@ -80,11 +71,8 @@
               <th class="hidden md:table-cell">CF</th>
 
               <th>Cat. escluse</th>
-              <th v-if="showCol('cat_ammesse')" class="hidden lg:table-cell">Cat. ammesse</th>
               <th class="text-right">Scelte escluse</th>
               <th class="text-right">Importo escluse</th>
-              <th v-if="showCol('ammesse_scelte')"  class="text-right hidden xl:table-cell">Scelte ammesse</th>
-              <th v-if="showCol('ammesse_importo')" class="text-right hidden xl:table-cell">Importo ammesse</th>
               <th class="w-16"></th>
             </tr>
           </thead>
@@ -112,19 +100,8 @@
                   >✗ {{ slugLabel(cat) }}</span>
                 </div>
               </td>
-              <td v-if="showCol('cat_ammesse')" class="hidden lg:table-cell">
-                <div class="flex flex-wrap gap-1">
-                  <span
-                    v-for="cat in e.categorie_ammesse" :key="cat"
-                    class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700"
-                  >✓ {{ slugLabel(cat) }}</span>
-                  <span v-if="!e.categorie_ammesse?.length" class="text-gray-300 text-xs">–</span>
-                </div>
-              </td>
               <td class="text-right tabular-nums text-gray-700">{{ formatNum(e.n_scelte_escluse) }}</td>
               <td class="text-right tabular-nums font-semibold text-red-700">{{ formatEur(e.importo_escluse) }}</td>
-              <td v-if="showCol('ammesse_scelte')"  class="text-right tabular-nums text-green-700 hidden xl:table-cell">{{ formatNum(e.n_scelte_ammesse) }}</td>
-              <td v-if="showCol('ammesse_importo')" class="text-right tabular-nums text-green-700 hidden xl:table-cell">{{ formatEur(e.importo_ammesse) }}</td>
               <td>
                 <RouterLink
                   :to="`/esclusi/${e.cod_fiscale}`"
@@ -209,13 +186,6 @@ const result  = ref(null)
 const loading = ref(false)
 const error   = ref(false)
 const page    = ref(1)
-
-const colOpzionali = ref([
-  { key: 'cat_ammesse',    label: 'Cat. ammesse',    visible: false },
-  { key: 'ammesse_scelte', label: 'Scelte ammesse',  visible: false },
-  { key: 'ammesse_importo',label: 'Importo ammesse', visible: false },
-])
-const showCol = (key) => colOpzionali.value.find(c => c.key === key)?.visible ?? false
 
 const formatNum = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
 const formatEur = (n) => n != null
