@@ -69,8 +69,9 @@ export const fetchProvince = (regione) => get('province', regione ? { regione } 
 // Geo: aggregati erogato per regione / provincia / comune
 export const fetchGeo = (params) => get('geo', params ?? {})
 
-// Enti esclusi (ricerca paginata)
-export const fetchEsclusi = (params) => get('esclusi', params ?? {})
+// Enti esclusi (ricerca paginata) + dettaglio CF
+export const fetchEsclusi       = (params) => get('esclusi', params ?? {})
+export const fetchEsclusiDetail = (cf)     => get('escluso_detail', { cf })
 
 // NLQ: Natural Language Query (semi-protetto con token HMAC giornaliero)
 export const nlqToken = () => get('nlq_token')
