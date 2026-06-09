@@ -2126,11 +2126,16 @@ function action_nlq(): void {
 
     $pdo = db();
     try {
+        // Impone un timeout di 25s sulla singola query MySQL (evita subquery lente su grandi tabelle)
+        try { $pdo->exec("SET SESSION MAX_EXECUTION_TIME=25000"); } catch (\Throwable) {}
         $stmt = $pdo->query($sql);
         $rows = $stmt->fetchAll();
     } catch (\PDOException $e) {
         error_log('[api.php] NLQ exec error: ' . $e->getMessage() . ' | SQL: ' . $sql);
-        err('La query generata non è eseguibile sul database. Prova a riformulare la domanda.', 422);
+        $msg = str_contains($e->getMessage(), '3024') || str_contains($e->getMessage(), 'execution time')
+            ? 'La query ha impiegato troppo tempo. Prova a riformulare la domanda in modo più semplice (es. specifica l\'anno).'
+            : 'La query generata non è eseguibile sul database. Prova a riformulare la domanda.';
+        err($msg, 422);
     }
 
     $rows = array_map(function ($row) {
