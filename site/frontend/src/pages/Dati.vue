@@ -239,7 +239,7 @@ const result    = ref(null)
 const loading   = ref(false)
 const error     = ref(false)
 const page      = ref(1)
-const sortBy    = ref('anno')
+const sortBy    = ref('importo_totale')
 const sortAsc   = ref(false)
 
 const filters = ref({
@@ -345,7 +345,9 @@ async function search(p = 1) {
 }
 
 function reset() {
-  filters.value = { anno: null, categoria: null, regione: '', q: '', runts_filter: 'all' }
+  filters.value = { anno: meta.annoCorrente, categoria: null, regione: '', q: '', runts_filter: 'all' }
+  sortBy.value  = 'importo_totale'
+  sortAsc.value = false
   province.value = []
   search()
 }
@@ -354,6 +356,7 @@ function goPage(p) { search(p) }
 
 onMounted(async () => {
   await meta.ensure()
+  filters.value.anno = meta.annoCorrente
   await search()
 })
 </script>
