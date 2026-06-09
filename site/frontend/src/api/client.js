@@ -75,14 +75,8 @@ export const nlqQuery = (token, q) =>
   api.post('', { token, q }, {
     params: { action: 'nlq' },
     headers: { 'Content-Type': 'application/json' },
-    timeout: 120_000,
+    timeout: 180_000,
   })
-
-// Enti esclusi (con quadro completo categorie escluse/ammesse per CF+anno)
-export const fetchEsclusi = (params) => get('esclusi', params ?? {})
-
-// Dettaglio ente escluso — legge solo categoria_ammissioni
-export const fetchEsclusiDetail = (cf) => get('escluso_detail', { cf })
 
 // Lead generation: salva email prima del download
 export const salvaLead = ({ email, nome, tipo, anno, vuole_newsletter } = {}) =>
