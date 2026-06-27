@@ -32,6 +32,7 @@
         <div>
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Nome / Codice fiscale</label>
           <input v-model="filters.q" class="input-field" placeholder="Cerca ente…"
+                 autocomplete="off"
                  @input="debouncedSearch" @keyup.enter="search()" />
         </div>
       </div>
@@ -348,7 +349,6 @@ function reset() {
   filters.value = { anno: meta.annoCorrente, categoria: null, regione: '', q: '', runts_filter: 'all' }
   sortBy.value  = 'importo_totale'
   sortAsc.value = false
-  province.value = []
   search()
 }
 
