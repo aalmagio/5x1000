@@ -417,17 +417,24 @@ function action_enti(): void {
         $params[] = $provincia;
     }
     $ft_q      = null;   // fulltext query string, set below if needed
+    $ft_like   = false;  // true quando il WHERE mescola FULLTEXT + LIKE (score=0 bug workaround)
     if ($q) {
-        // Ricerca full-text se la query è sufficientemente lunga (≥3 char).
-        // MATCH...AGAINST in boolean mode usa gli indici FULLTEXT su enti.denominazione
-        // e runts.denominazione → 10-50x più veloce di LIKE su tabelle grandi.
-        // Fallback a LIKE per cod_fiscale (non ha indice FULLTEXT) e query corte.
-        if (strlen($q) >= 3) {
-            // Costruisce query boolean con prefix match su ogni token.
-            // Non usa + (AND obbligatorio) per essere meno rigida; ogni termine
-            // ha il prefisso * per catturare varianti (es. "assoc" → "associazione").
-            $tokens = preg_split('/\s+/', trim($q), -1, PREG_SPLIT_NO_EMPTY);
-            $ft_q   = implode('* ', $tokens) . '*';
+        $q_upper = strtoupper(trim($q));
+        // CF esatto: 11 cifre (aziende/PI) o 16 alfanumerici schema persona fisica.
+        // Salta FULLTEXT ed esegue un match diretto su cod_fiscale → indice PRIMARY.
+        $is_exact_cf = preg_match('/^\d{11}$/', $q_upper)
+                    || preg_match('/^[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]$/', $q_upper);
+        if ($is_exact_cf) {
+            $where[]  = 'e.cod_fiscale = ?';
+            $params[] = $q_upper;
+        } elseif (strlen($q) >= 3) {
+            // FULLTEXT su denominazione + LIKE su cod_fiscale.
+            // NB: quando il match arriva solo via LIKE il punteggio FULLTEXT è 0;
+            // per evitare che MySQL filtri queste righe nell'ORDER BY _score
+            // tracciamo $ft_like e disabilitiamo il sort per rilevanza.
+            $tokens  = preg_split('/\s+/', trim($q), -1, PREG_SPLIT_NO_EMPTY);
+            $ft_q    = implode('* ', $tokens) . '*';
+            $ft_like = true;
             $where[] = '(MATCH(e.denominazione) AGAINST(? IN BOOLEAN MODE)'
                      . ' OR MATCH(r.denominazione) AGAINST(? IN BOOLEAN MODE)'
                      . ' OR e.cod_fiscale LIKE ?)';
@@ -435,7 +442,7 @@ function action_enti(): void {
             $params[] = $ft_q;
             $params[] = '%' . $q . '%';
         } else {
-            // Query corta o cod_fiscale-like: LIKE tradizionale
+            $ft_like  = true;
             $where[] = '(e.denominazione LIKE ? OR e.cod_fiscale LIKE ? OR r.denominazione LIKE ?)';
             $params[] = '%' . $q . '%';
             $params[] = '%' . $q . '%';
@@ -450,10 +457,19 @@ function action_enti(): void {
 
     $sql_where = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
+    // Helper per debug SQL leggibile (sostituisce ? con i valori reali)
+    $debug_sql_fn = function(string $sql, array $p): string {
+        $i = 0;
+        return preg_replace_callback('/\?/', function() use ($p, &$i) {
+            $v = $p[$i++] ?? 'NULL';
+            return is_numeric($v) ? (string)$v : "'" . str_replace("'", "''", (string)$v) . "'";
+        }, $sql);
+    };
+
+    $count_sql = "SELECT COUNT(*) FROM enti e LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale $sql_where";
+
     // Conteggio totale
-    $count_stmt = $pdo->prepare(
-        "SELECT COUNT(*) FROM enti e LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale $sql_where"
-    );
+    $count_stmt = $pdo->prepare($count_sql);
     $count_stmt->execute($params);
     $totale = (int)$count_stmt->fetchColumn();
 
@@ -461,19 +477,21 @@ function action_enti(): void {
     $offset = ($pagina - 1) * $per_pagina;
 
     // Dati — denominazione canonica: RUNTS se disponibile, altrimenti anno corrente.
-    // Quando c'è una ricerca fulltext, aggiunge _score per ordinare per rilevanza.
-    if ($ft_q !== null) {
-        $score_col  = ', (MATCH(e.denominazione) AGAINST(? IN BOOLEAN MODE)'
-                    . ' + MATCH(r.denominazione) AGAINST(? IN BOOLEAN MODE)) AS _score';
-        $order_by   = '_score DESC, e.anno DESC';
+    // Score ordering attivo solo per FULLTEXT puro (senza LIKE): quando il WHERE
+    // mescola FULLTEXT+LIKE, righe con score=0 (match solo su CF) verrebbero
+    // eliminate da MySQL → usa il sort utente in quel caso.
+    if ($ft_q !== null && !$ft_like) {
+        $score_col    = ', (MATCH(e.denominazione) AGAINST(? IN BOOLEAN MODE)'
+                      . ' + MATCH(r.denominazione) AGAINST(? IN BOOLEAN MODE)) AS _score';
+        $order_by     = '_score DESC, e.anno DESC';
         $score_params = array_merge($params, [$ft_q, $ft_q]);
     } else {
         $score_col    = '';
         $order_by     = "e.$sort $dir";
         $score_params = $params;
     }
-    $data_stmt = $pdo->prepare(
-        "SELECT e.anno, e.cod_fiscale,
+
+    $data_sql = "SELECT e.anno, e.cod_fiscale,
                 COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
                 e.regione, e.provincia, e.comune,
                 e.categoria_principale,
@@ -484,8 +502,9 @@ function action_enti(): void {
          LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
          $sql_where
          ORDER BY $order_by
-         LIMIT $per_pagina OFFSET $offset"
-    );
+         LIMIT $per_pagina OFFSET $offset";
+
+    $data_stmt = $pdo->prepare($data_sql);
     $data_stmt->execute($score_params);
     $rows = $data_stmt->fetchAll();
 
@@ -504,6 +523,7 @@ function action_enti(): void {
         'pagine'     => $pagine,
         'per_pagina' => $per_pagina,
         'data'       => $rows,
+        'debug_sql'  => $debug_sql_fn($count_sql, $params) . "\n\n" . $debug_sql_fn($data_sql, $score_params),
     ]);
 }
 
