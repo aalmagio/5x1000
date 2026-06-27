@@ -69,6 +69,14 @@
       </div>
     </div>
 
+    <!-- Debug: query params (solo dev) -->
+    <div v-if="isDev && lastParams" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-mono text-amber-900">
+      <span class="font-semibold text-amber-700 mr-2">DEV – ultima query:</span>
+      <span v-for="(v, k) in lastParams" :key="k" class="mr-3">
+        <span class="text-amber-500">{{ k }}</span>=<span class="font-semibold">{{ v }}</span>
+      </span>
+    </div>
+
     <!-- Errore -->
     <div v-if="error" class="card border-red-200 bg-red-50 flex items-center gap-3 mb-4 p-4">
       <svg class="w-5 h-5 text-red-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -236,7 +244,9 @@ const meta      = useMetaStore()
 const anni      = computed(() => meta.anni)
 const categorie = computed(() => meta.categorie)
 const regioni   = computed(() => meta.regioni)
+const isDev     = window.location.hostname === 'dev5x1000.almagioni.com'
 const result    = ref(null)
+const lastParams = ref(null)
 const loading   = ref(false)
 const error     = ref(false)
 const page      = ref(1)
@@ -336,6 +346,7 @@ async function search(p = 1) {
     if (filters.value.runts_filter === 'runts')     params.runts_only = 1
     if (filters.value.runts_filter === 'non_runts') params.non_runts  = 1
 
+    lastParams.value = { ...params }
     const res = await fetchEnti(params)
     result.value = res.data
   } catch {
