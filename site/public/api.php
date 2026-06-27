@@ -417,12 +417,16 @@ function action_enti(): void {
         $params[] = $provincia;
     }
     if ($q) {
-        // Ricerca full-text se la query è sufficientemente lunga (≥3 char).
-        // MATCH...AGAINST in boolean mode usa gli indici FULLTEXT su enti.denominazione
-        // e runts.denominazione → 10-50x più veloce di LIKE su tabelle grandi.
-        // Fallback a LIKE per cod_fiscale (non ha indice FULLTEXT) e query corte.
-        if (strlen($q) >= 3) {
-            // Modalità fulltext: * per prefix match (es. "volont*")
+        $q_upper = strtoupper(trim($q));
+        // CF esatto: 11 cifre (aziende/PI) o 16 alfanumerici schema persona fisica
+        $is_exact_cf = preg_match('/^\d{11}$/', $q_upper)
+                    || preg_match('/^[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]$/', $q_upper);
+        if ($is_exact_cf) {
+            // Match diretto su cod_fiscale — salta FULLTEXT
+            $where[]  = 'e.cod_fiscale = ?';
+            $params[] = $q_upper;
+        } elseif (strlen($q) >= 3) {
+            // Fulltext su denominazione + LIKE su cod_fiscale
             $ft_q = '+' . implode('* +', preg_split('/\s+/', trim($q))) . '*';
             $where[] = '(MATCH(e.denominazione) AGAINST(? IN BOOLEAN MODE)'
                      . ' OR MATCH(r.denominazione) AGAINST(? IN BOOLEAN MODE)'
@@ -431,7 +435,6 @@ function action_enti(): void {
             $params[] = $ft_q;
             $params[] = '%' . $q . '%';
         } else {
-            // Query corta o cod_fiscale-like: LIKE tradizionale
             $where[] = '(e.denominazione LIKE ? OR e.cod_fiscale LIKE ? OR r.denominazione LIKE ?)';
             $params[] = '%' . $q . '%';
             $params[] = '%' . $q . '%';
@@ -446,19 +449,26 @@ function action_enti(): void {
 
     $sql_where = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
+    // Helper per debug SQL leggibile (sostituisce ? con i valori reali)
+    $debug_sql = function(string $sql, array $p): string {
+        $i = 0;
+        return preg_replace_callback('/\?/', function() use ($p, &$i) {
+            $v = $p[$i++] ?? 'NULL';
+            return is_numeric($v) ? (string)$v : "'" . str_replace("'", "''", (string)$v) . "'";
+        }, $sql);
+    };
+
+    $count_sql = "SELECT COUNT(*) FROM enti e LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale $sql_where";
+
     // Conteggio totale
-    $count_stmt = $pdo->prepare(
-        "SELECT COUNT(*) FROM enti e LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale $sql_where"
-    );
+    $count_stmt = $pdo->prepare($count_sql);
     $count_stmt->execute($params);
     $totale = (int)$count_stmt->fetchColumn();
 
     $pagine = max(1, (int)ceil($totale / $per_pagina));
     $offset = ($pagina - 1) * $per_pagina;
 
-    // Dati — denominazione canonica: RUNTS se disponibile, altrimenti anno corrente
-    $data_stmt = $pdo->prepare(
-        "SELECT e.anno, e.cod_fiscale,
+    $data_sql = "SELECT e.anno, e.cod_fiscale,
                 COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
                 e.regione, e.provincia, e.comune,
                 e.categoria_principale,
@@ -468,8 +478,10 @@ function action_enti(): void {
          LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
          $sql_where
          ORDER BY e.$sort $dir
-         LIMIT $per_pagina OFFSET $offset"
-    );
+         LIMIT $per_pagina OFFSET $offset";
+
+    // Dati — denominazione canonica: RUNTS se disponibile, altrimenti anno corrente
+    $data_stmt = $pdo->prepare($data_sql);
     $data_stmt->execute($params);
     $rows = $data_stmt->fetchAll();
 
@@ -488,6 +500,7 @@ function action_enti(): void {
         'pagine'     => $pagine,
         'per_pagina' => $per_pagina,
         'data'       => $rows,
+        'debug_sql'  => $debug_sql($count_sql, $params) . "\n\n" . $debug_sql($data_sql, $params),
     ]);
 }
 

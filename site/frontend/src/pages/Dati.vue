@@ -31,7 +31,9 @@
         </div>
         <div>
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Nome / Codice fiscale</label>
-          <input v-model="filters.q" class="input-field" placeholder="Cerca ente…" @keyup.enter="search()" />
+          <input v-model="filters.q" class="input-field" placeholder="Cerca ente…"
+                 autocomplete="off"
+                 @input="debouncedSearch" @keyup.enter="search()" />
         </div>
       </div>
       <div class="flex flex-wrap items-center gap-3">
@@ -65,6 +67,17 @@
           >Non RUNTS</button>
         </div>
       </div>
+    </div>
+
+    <!-- Debug: query params + SQL (solo dev) -->
+    <div v-if="isDev && lastParams" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-mono text-amber-900">
+      <div class="mb-1">
+        <span class="font-semibold text-amber-700 mr-2">DEV – params:</span>
+        <span v-for="(v, k) in lastParams" :key="k" class="mr-3">
+          <span class="text-amber-500">{{ k }}</span>=<span class="font-semibold">{{ v }}</span>
+        </span>
+      </div>
+      <div v-if="debugSql" class="mt-2 pt-2 border-t border-amber-200 whitespace-pre-wrap break-all leading-relaxed">{{ debugSql }}</div>
     </div>
 
     <!-- Errore -->
@@ -234,7 +247,10 @@ const meta      = useMetaStore()
 const anni      = computed(() => meta.anni)
 const categorie = computed(() => meta.categorie)
 const regioni   = computed(() => meta.regioni)
+const isDev     = window.location.hostname === 'dev5x1000.almagioni.com'
 const result    = ref(null)
+const lastParams = ref(null)
+const debugSql  = ref(null)
 const loading   = ref(false)
 const error     = ref(false)
 const page      = ref(1)
@@ -259,7 +275,11 @@ const sortedData = computed(() => {
   return [...result.value.data].sort((a, b) => {
     const av = a[col] ?? 0
     const bv = b[col] ?? 0
-    return sortAsc.value ? av - bv : bv - av
+    const primary = sortAsc.value ? av - bv : bv - av
+    if (primary !== 0) return primary
+    if (col === 'anno') return (b.n_scelte ?? 0) - (a.n_scelte ?? 0)
+    if (col === 'n_scelte') return (b.anno ?? 0) - (a.anno ?? 0)
+    return 0
   })
 })
 
@@ -270,7 +290,11 @@ const colOpzionali = ref([
   { key: 'importo_medio',     label: '€/firma',        visible: false },
 ])
 const showCol   = (key) => colOpzionali.value.find(c => c.key === key)?.visible ?? false
-const importoMedio = (e) => (e.importo_espresso && e.n_scelte) ? e.importo_espresso / e.n_scelte : null
+const importoMedio = (e) => {
+  if (!e?.n_scelte) return null
+  const base = e.importo_espresso || e.importo_totale
+  return base ? base / e.n_scelte : null
+}
 
 const formatNum  = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
 const formatEur  = (n) => n != null
@@ -306,6 +330,12 @@ function toggleSort(col) {
   }
 }
 
+let _debounceTimer = null
+function debouncedSearch() {
+  clearTimeout(_debounceTimer)
+  _debounceTimer = setTimeout(() => search(1), 400)
+}
+
 async function search(p = 1) {
   loading.value = true
   error.value   = false
@@ -319,8 +349,10 @@ async function search(p = 1) {
     if (filters.value.runts_filter === 'runts')     params.runts_only = 1
     if (filters.value.runts_filter === 'non_runts') params.non_runts  = 1
 
+    lastParams.value = { ...params }
     const res = await fetchEnti(params)
     result.value = res.data
+    if (isDev) debugSql.value = res.data.debug_sql ?? null
   } catch {
     error.value = true
   } finally {
@@ -329,8 +361,9 @@ async function search(p = 1) {
 }
 
 function reset() {
-  filters.value = { anno: null, categoria: null, regione: '', q: '', runts_filter: 'all' }
-  province.value = []
+  filters.value = { anno: meta.annoCorrente, categoria: null, regione: '', q: '', runts_filter: 'all' }
+  sortBy.value  = 'importo_totale'
+  sortAsc.value = false
   search()
 }
 
@@ -338,6 +371,7 @@ function goPage(p) { search(p) }
 
 onMounted(async () => {
   await meta.ensure()
+  filters.value.anno = meta.annoCorrente
   await search()
 })
 </script>
