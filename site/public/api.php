@@ -416,18 +416,25 @@ function action_enti(): void {
         $where[] = 'e.provincia = ?';
         $params[] = $provincia;
     }
+    $ft_q      = null;   // fulltext query string, set below if needed
+    $ft_like   = false;  // true quando il WHERE mescola FULLTEXT + LIKE (score=0 bug workaround)
     if ($q) {
         $q_upper = strtoupper(trim($q));
-        // CF esatto: 11 cifre (aziende/PI) o 16 alfanumerici schema persona fisica
+        // CF esatto: 11 cifre (aziende/PI) o 16 alfanumerici schema persona fisica.
+        // Salta FULLTEXT ed esegue un match diretto su cod_fiscale → indice PRIMARY.
         $is_exact_cf = preg_match('/^\d{11}$/', $q_upper)
                     || preg_match('/^[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]$/', $q_upper);
         if ($is_exact_cf) {
-            // Match diretto su cod_fiscale — salta FULLTEXT
             $where[]  = 'e.cod_fiscale = ?';
             $params[] = $q_upper;
         } elseif (strlen($q) >= 3) {
-            // Fulltext su denominazione + LIKE su cod_fiscale
-            $ft_q = '+' . implode('* +', preg_split('/\s+/', trim($q))) . '*';
+            // FULLTEXT su denominazione + LIKE su cod_fiscale.
+            // NB: quando il match arriva solo via LIKE il punteggio FULLTEXT è 0;
+            // per evitare che MySQL filtri queste righe nell'ORDER BY _score
+            // tracciamo $ft_like e disabilitiamo il sort per rilevanza.
+            $tokens  = preg_split('/\s+/', trim($q), -1, PREG_SPLIT_NO_EMPTY);
+            $ft_q    = implode('* ', $tokens) . '*';
+            $ft_like = true;
             $where[] = '(MATCH(e.denominazione) AGAINST(? IN BOOLEAN MODE)'
                      . ' OR MATCH(r.denominazione) AGAINST(? IN BOOLEAN MODE)'
                      . ' OR e.cod_fiscale LIKE ?)';
@@ -435,6 +442,7 @@ function action_enti(): void {
             $params[] = $ft_q;
             $params[] = '%' . $q . '%';
         } else {
+            $ft_like  = true;
             $where[] = '(e.denominazione LIKE ? OR e.cod_fiscale LIKE ? OR r.denominazione LIKE ?)';
             $params[] = '%' . $q . '%';
             $params[] = '%' . $q . '%';
@@ -450,7 +458,7 @@ function action_enti(): void {
     $sql_where = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
     // Helper per debug SQL leggibile (sostituisce ? con i valori reali)
-    $debug_sql = function(string $sql, array $p): string {
+    $debug_sql_fn = function(string $sql, array $p): string {
         $i = 0;
         return preg_replace_callback('/\?/', function() use ($p, &$i) {
             $v = $p[$i++] ?? 'NULL';
@@ -468,21 +476,36 @@ function action_enti(): void {
     $pagine = max(1, (int)ceil($totale / $per_pagina));
     $offset = ($pagina - 1) * $per_pagina;
 
+    // Dati — denominazione canonica: RUNTS se disponibile, altrimenti anno corrente.
+    // Score ordering attivo solo per FULLTEXT puro (senza LIKE): quando il WHERE
+    // mescola FULLTEXT+LIKE, righe con score=0 (match solo su CF) verrebbero
+    // eliminate da MySQL → usa il sort utente in quel caso.
+    if ($ft_q !== null && !$ft_like) {
+        $score_col    = ', (MATCH(e.denominazione) AGAINST(? IN BOOLEAN MODE)'
+                      . ' + MATCH(r.denominazione) AGAINST(? IN BOOLEAN MODE)) AS _score';
+        $order_by     = '_score DESC, e.anno DESC';
+        $score_params = array_merge($params, [$ft_q, $ft_q]);
+    } else {
+        $score_col    = '';
+        $order_by     = "e.$sort $dir";
+        $score_params = $params;
+    }
+
     $data_sql = "SELECT e.anno, e.cod_fiscale,
                 COALESCE(NULLIF(r.denominazione,''), e.denominazione) AS denominazione,
                 e.regione, e.provincia, e.comune,
                 e.categoria_principale,
                 e.n_scelte, e.importo_espresso, e.importo_generico, e.importo_totale,
                 e.runts_5x1000
+                $score_col
          FROM enti e
          LEFT JOIN runts r ON r.cod_fiscale = e.cod_fiscale
          $sql_where
-         ORDER BY e.$sort $dir
+         ORDER BY $order_by
          LIMIT $per_pagina OFFSET $offset";
 
-    // Dati — denominazione canonica: RUNTS se disponibile, altrimenti anno corrente
     $data_stmt = $pdo->prepare($data_sql);
-    $data_stmt->execute($params);
+    $data_stmt->execute($score_params);
     $rows = $data_stmt->fetchAll();
 
     foreach ($rows as &$r) {
@@ -500,7 +523,7 @@ function action_enti(): void {
         'pagine'     => $pagine,
         'per_pagina' => $per_pagina,
         'data'       => $rows,
-        'debug_sql'  => $debug_sql($count_sql, $params) . "\n\n" . $debug_sql($data_sql, $params),
+        'debug_sql'  => $debug_sql_fn($count_sql, $params) . "\n\n" . $debug_sql_fn($data_sql, $score_params),
     ]);
 }
 
@@ -524,7 +547,58 @@ function action_ente(): void {
     $stmt->execute([$cf]);
     $rows = $stmt->fetchAll();
 
-    if (!$rows) err('Ente non trovato', 404);
+    if (!$rows) {
+        // Fallback: ente non in `enti` (mai ammesso) — cerca in categoria_ammissioni
+        $stmt_ex = $pdo->prepare(
+            "SELECT ca.anno, ca.categoria, ca.stato, ca.denominazione,
+                    ca.n_scelte, ca.importo_espresso, ca.importo_generico, ca.importo_totale,
+                    COALESCE(NULLIF(r.denominazione,''), ca.denominazione) AS denominazione_canonica
+             FROM categoria_ammissioni ca
+             LEFT JOIN runts r ON r.cod_fiscale = ca.cod_fiscale
+             WHERE ca.cod_fiscale = ?
+             ORDER BY ca.anno DESC, ca.stato ASC, ca.categoria ASC"
+        );
+        $stmt_ex->execute([$cf]);
+        $ex_rows = $stmt_ex->fetchAll();
+
+        if (!$ex_rows) err('Ente non trovato', 404);
+
+        // Raggruppa per anno → {escluse: [], ammesse: []}
+        $per_anno_ex = [];
+        $denom_ex = $ex_rows[0]['denominazione_canonica'] ?? $ex_rows[0]['denominazione'];
+        foreach ($ex_rows as $er) {
+            $a = (int)$er['anno'];
+            $stato = $er['stato'];
+            if (!isset($per_anno_ex[$a])) $per_anno_ex[$a] = ['escluse' => [], 'ammesse' => []];
+            $key = $stato === 'escluso' ? 'escluse' : 'ammesse';
+            $per_anno_ex[$a][$key][] = [
+                'categoria'        => $er['categoria'],
+                'n_scelte'         => $er['n_scelte'] !== null ? (int)$er['n_scelte'] : null,
+                'importo_espresso' => $er['importo_espresso'] !== null ? (float)$er['importo_espresso'] : null,
+                'importo_generico' => $er['importo_generico'] !== null ? (float)$er['importo_generico'] : null,
+                'importo_totale'   => $er['importo_totale'] !== null ? (float)$er['importo_totale'] : null,
+            ];
+        }
+        krsort($per_anno_ex);
+
+        $storico_ex = [];
+        foreach ($per_anno_ex as $anno => $grp) {
+            $storico_ex[] = [
+                'anno'             => $anno,
+                'categorie_escluse'=> array_column($grp['escluse'], 'categoria'),
+                'categorie_ammesse'=> array_column($grp['ammesse'], 'categoria'),
+                'cat_ammesse_detail'=> $grp['ammesse'],
+            ];
+        }
+
+        json_out([
+            'cod_fiscale'   => $cf,
+            'denominazione' => $denom_ex,
+            'solo_escluso'  => true,
+            'anni_presenti' => array_keys($per_anno_ex),
+            'storico'       => $storico_ex,
+        ]);
+    }
 
     $first = $rows[0];
 
@@ -1651,6 +1725,182 @@ function action_composizione_categorie(): void {
 }
 
 
+// ─── Endpoint: esclusi ───────────────────────────────────────────────────────
+/**
+ * ?action=esclusi[&q=NOME][&anno=YYYY][&categoria=SLUG][&regione=R][&pagina=1][&per_pagina=50]
+ *
+ * Per ogni coppia (anno, cod_fiscale) che ha almeno una riga 'escluso' in
+ * categoria_ammissioni, restituisce denominazione, categorie escluse e categorie
+ * ammesse (se presenti nello stesso anno). Chiave semantica: CF + anno.
+ */
+function action_esclusi(): void {
+    $pdo        = db();
+    $q          = str_param('q');
+    $anno       = int_param('anno');
+    $categoria  = str_param('categoria');
+    $regione    = str_param('regione');
+    $pagina     = max(1, int_param('pagina', 1));
+    $per_pagina = min(200, max(1, int_param('per_pagina', 50)));
+    $offset     = ($pagina - 1) * $per_pagina;
+
+    // Condizioni applicate alla subquery sugli esclusi
+    $where  = ['ex.stato = \'escluso\''];
+    $params = [];
+
+    if ($anno) {
+        $where[]  = 'ex.anno = ?';
+        $params[] = $anno;
+    }
+    if ($categoria) {
+        $where[]  = 'ex.categoria = ?';
+        $params[] = $categoria;
+    }
+    if ($regione) {
+        $where[]  = 'ex.cod_fiscale IN (SELECT cod_fiscale FROM enti WHERE regione = ? AND anno = ex.anno)';
+        $params[] = $regione;
+    }
+    if ($q) {
+        $where[]  = '(ex.denominazione LIKE ? OR ex.cod_fiscale LIKE ?)';
+        $params[] = '%' . $q . '%';
+        $params[] = '%' . $q . '%';
+    }
+
+    $sql_where = 'WHERE ' . implode(' AND ', $where);
+
+    // Conteggio distinto (anno, cod_fiscale)
+    $stmt_c = $pdo->prepare(
+        "SELECT COUNT(*) FROM (
+            SELECT ex.anno, ex.cod_fiscale
+            FROM categoria_ammissioni ex
+            $sql_where
+            GROUP BY ex.anno, ex.cod_fiscale
+         ) sub"
+    );
+    $stmt_c->execute($params);
+    $totale = (int)$stmt_c->fetchColumn();
+
+    $pagine = max(1, (int)ceil($totale / $per_pagina));
+
+    // Dati: per ogni (anno, CF) con almeno un escluso → aggrega cat escluse e ammesse
+    // LIMIT/OFFSET embedded come interi (già validati) — MariaDB non accetta bind su LIMIT
+    $stmt = $pdo->prepare(
+        "SELECT
+            ex.anno,
+            ex.cod_fiscale,
+            MAX(COALESCE(NULLIF(r.denominazione,''), ex.denominazione)) AS denominazione,
+            GROUP_CONCAT(DISTINCT ex.categoria ORDER BY ex.categoria SEPARATOR ',') AS categorie_escluse,
+            GROUP_CONCAT(DISTINCT am.categoria ORDER BY am.categoria SEPARATOR ',') AS categorie_ammesse,
+            SUM(ex.n_scelte)              AS n_scelte_escluse,
+            SUM(ex.importo_totale)        AS importo_escluse,
+            SUM(am.n_scelte)              AS n_scelte_ammesse,
+            SUM(am.importo_totale)        AS importo_ammesse,
+            MAX(ent.regione) AS regione
+         FROM categoria_ammissioni ex
+         LEFT JOIN categoria_ammissioni am
+           ON  am.cod_fiscale = ex.cod_fiscale
+           AND am.anno        = ex.anno
+           AND am.stato       = 'ammesso'
+         LEFT JOIN enti ent
+           ON  ent.cod_fiscale = ex.cod_fiscale
+           AND ent.anno        = ex.anno
+         LEFT JOIN runts r ON r.cod_fiscale = ex.cod_fiscale
+         $sql_where
+         GROUP BY ex.anno, ex.cod_fiscale
+         ORDER BY ex.anno DESC, importo_escluse DESC
+         LIMIT $per_pagina OFFSET $offset"
+    );
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+
+    foreach ($rows as &$r) {
+        $r['anno']              = (int)$r['anno'];
+        $r['categorie_escluse'] = $r['categorie_escluse'] ? explode(',', $r['categorie_escluse']) : [];
+        $r['categorie_ammesse'] = $r['categorie_ammesse'] ? explode(',', $r['categorie_ammesse']) : [];
+        $r['n_scelte_escluse']  = $r['n_scelte_escluse']  !== null ? (int)$r['n_scelte_escluse']  : null;
+        $r['importo_escluse']   = $r['importo_escluse']   !== null ? (float)$r['importo_escluse']  : null;
+        $r['n_scelte_ammesse']  = $r['n_scelte_ammesse']  !== null ? (int)$r['n_scelte_ammesse']   : null;
+        $r['importo_ammesse']   = $r['importo_ammesse']   !== null ? (float)$r['importo_ammesse']  : null;
+    }
+    unset($r);
+
+    json_out([
+        'totale'     => $totale,
+        'pagina'     => $pagina,
+        'pagine'     => $pagine,
+        'per_pagina' => $per_pagina,
+        'data'       => $rows,
+    ]);
+}
+
+
+// ─── Endpoint: dettaglio ente escluso ────────────────────────────────────────
+/**
+ * ?action=escluso_detail&cf=CODICE_FISCALE
+ *
+ * Legge interamente da categoria_ammissioni (mai da enti).
+ * Restituisce per ogni anno le categorie escluse e ammesse con le rispettive
+ * metriche (n_scelte, importo_espresso, importo_generico, importo_totale).
+ */
+function action_escluso_detail(): void {
+    $cf = str_param('cf');
+    if (!$cf) err('Parametro cf mancante');
+
+    $pdo  = db();
+
+    // Tutte le righe (ammesse + escluse) per questo CF
+    $stmt = $pdo->prepare(
+        "SELECT ca.anno, ca.categoria, ca.stato,
+                ca.n_scelte, ca.importo_espresso, ca.importo_generico,
+                ca.importo_totale, ca.importo_totale_erogabile,
+                COALESCE(NULLIF(r.denominazione,''), ca.denominazione) AS denominazione
+         FROM categoria_ammissioni ca
+         LEFT JOIN runts r ON r.cod_fiscale = ca.cod_fiscale
+         WHERE ca.cod_fiscale = ?
+         ORDER BY ca.anno DESC, ca.stato ASC, ca.categoria ASC"
+    );
+    $stmt->execute([$cf]);
+    $rows = $stmt->fetchAll();
+
+    if (!$rows) err('Ente non trovato negli elenchi di ammissione/esclusione', 404);
+
+    $denom = $rows[0]['denominazione'] ?? $cf;
+
+    // Raggruppa per anno
+    $per_anno = [];
+    foreach ($rows as $r) {
+        $a     = (int)$r['anno'];
+        $stato = $r['stato'];
+        if (!isset($per_anno[$a])) $per_anno[$a] = ['escluse' => [], 'ammesse' => []];
+        $key = $stato === 'escluso' ? 'escluse' : 'ammesse';
+        $per_anno[$a][$key][] = [
+            'categoria'               => $r['categoria'],
+            'n_scelte'                => $r['n_scelte']                !== null ? (int)$r['n_scelte']                : null,
+            'importo_espresso'        => $r['importo_espresso']        !== null ? (float)$r['importo_espresso']      : null,
+            'importo_generico'        => $r['importo_generico']        !== null ? (float)$r['importo_generico']      : null,
+            'importo_totale'          => $r['importo_totale']          !== null ? (float)$r['importo_totale']        : null,
+            'importo_totale_erogabile'=> $r['importo_totale_erogabile']!== null ? (float)$r['importo_totale_erogabile'] : null,
+        ];
+    }
+    krsort($per_anno);
+
+    $storico = [];
+    foreach ($per_anno as $anno => $grp) {
+        $storico[] = [
+            'anno'    => $anno,
+            'escluse' => $grp['escluse'],
+            'ammesse' => $grp['ammesse'],
+        ];
+    }
+
+    json_out([
+        'cod_fiscale'   => $cf,
+        'denominazione' => $denom,
+        'anni_presenti' => array_keys($per_anno),
+        'storico'       => $storico,
+    ]);
+}
+
+
 // ─── Endpoint: conflitti (ammesso in una cat, escluso in un'altra) ────────────
 /**
  * ?action=conflitti_categoria[&anno=YYYY][&pagina=1][&per_pagina=50]
@@ -2139,16 +2389,11 @@ function action_nlq(): void {
 
     $pdo = db();
     try {
-        // Impone un timeout di 25s sulla singola query MySQL (evita subquery lente su grandi tabelle)
-        try { $pdo->exec("SET SESSION MAX_EXECUTION_TIME=25000"); } catch (\Throwable) {}
         $stmt = $pdo->query($sql);
         $rows = $stmt->fetchAll();
     } catch (\PDOException $e) {
         error_log('[api.php] NLQ exec error: ' . $e->getMessage() . ' | SQL: ' . $sql);
-        $msg = str_contains($e->getMessage(), '3024') || str_contains($e->getMessage(), 'execution time')
-            ? 'La query ha impiegato troppo tempo. Prova a riformulare la domanda in modo più semplice (es. specifica l\'anno).'
-            : 'La query generata non è eseguibile sul database. Prova a riformulare la domanda.';
-        err($msg, 422);
+        err('La query generata non è eseguibile sul database. Prova a riformulare la domanda.', 422);
     }
 
     $rows = array_map(function ($row) {
@@ -2199,10 +2444,12 @@ try {
         'multi_categoria'      => action_multi_categoria(),
         'composizione_categorie' => action_composizione_categorie(),
         'conflitti_categoria'  => action_conflitti_categoria(),
+        'esclusi'              => action_esclusi(),
+        'escluso_detail'       => action_escluso_detail(),
         'geo'                  => action_geo(),
         'nlq_token'            => action_nlq_token(),
         'nlq'                  => action_nlq(),
-        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria, geo", 404),
+        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria, esclusi, geo, nlq_token, nlq", 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());
