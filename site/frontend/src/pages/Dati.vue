@@ -69,12 +69,15 @@
       </div>
     </div>
 
-    <!-- Debug: query params (solo dev) -->
+    <!-- Debug: query params + SQL (solo dev) -->
     <div v-if="isDev && lastParams" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-mono text-amber-900">
-      <span class="font-semibold text-amber-700 mr-2">DEV – ultima query:</span>
-      <span v-for="(v, k) in lastParams" :key="k" class="mr-3">
-        <span class="text-amber-500">{{ k }}</span>=<span class="font-semibold">{{ v }}</span>
-      </span>
+      <div class="mb-1">
+        <span class="font-semibold text-amber-700 mr-2">DEV – params:</span>
+        <span v-for="(v, k) in lastParams" :key="k" class="mr-3">
+          <span class="text-amber-500">{{ k }}</span>=<span class="font-semibold">{{ v }}</span>
+        </span>
+      </div>
+      <div v-if="debugSql" class="mt-2 pt-2 border-t border-amber-200 whitespace-pre-wrap break-all leading-relaxed">{{ debugSql }}</div>
     </div>
 
     <!-- Errore -->
@@ -247,6 +250,7 @@ const regioni   = computed(() => meta.regioni)
 const isDev     = window.location.hostname === 'dev5x1000.almagioni.com'
 const result    = ref(null)
 const lastParams = ref(null)
+const debugSql  = ref(null)
 const loading   = ref(false)
 const error     = ref(false)
 const page      = ref(1)
@@ -273,7 +277,6 @@ const sortedData = computed(() => {
     const bv = b[col] ?? 0
     const primary = sortAsc.value ? av - bv : bv - av
     if (primary !== 0) return primary
-    // secondario: anno desc → n_scelte desc; n_scelte desc → anno desc
     if (col === 'anno') return (b.n_scelte ?? 0) - (a.n_scelte ?? 0)
     if (col === 'n_scelte') return (b.anno ?? 0) - (a.anno ?? 0)
     return 0
@@ -349,6 +352,7 @@ async function search(p = 1) {
     lastParams.value = { ...params }
     const res = await fetchEnti(params)
     result.value = res.data
+    if (isDev) debugSql.value = res.data.debug_sql ?? null
   } catch {
     error.value = true
   } finally {
