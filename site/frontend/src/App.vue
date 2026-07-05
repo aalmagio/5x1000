@@ -102,7 +102,8 @@
               <li><RouterLink to="/inoptato"   class="hover:text-white transition-colors">Inoptato</RouterLink></li>
               <li><RouterLink to="/forecast"   class="hover:text-white transition-colors">Proiezioni trend</RouterLink></li>
               <li><RouterLink to="/download"   class="hover:text-white transition-colors">Download dataset</RouterLink></li>
-              <li><RouterLink to="/ricerca"   class="hover:text-white transition-colors">Ricerca AI</RouterLink></li>
+              <li><RouterLink to="/ricerca"          class="hover:text-white transition-colors">Ricerca AI</RouterLink></li>
+              <li><RouterLink to="/ricerca-avanzata" class="hover:text-white transition-colors">Ricerca avanzata riparti</RouterLink></li>
             </ul>
           </div>
           <!-- ASSIF -->
@@ -142,7 +143,8 @@ const navLinks = [
   { to: '/inoptato',   label: 'Inoptato' },
   { to: '/forecast',   label: 'Proiezioni' },
   { to: '/download',   label: 'Download' },
-  { to: '/ricerca',    label: 'Ricerca AI' },
+  { to: '/ricerca',          label: 'Ricerca AI' },
+  { to: '/ricerca-avanzata', label: 'Riparti' },
   { to: '/api',        label: 'API' },
   { to: '/about',      label: 'Info' },
 ]
