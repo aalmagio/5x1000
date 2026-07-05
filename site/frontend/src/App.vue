@@ -243,6 +243,7 @@
               <li><RouterLink to="/geo"              class="hover:text-white transition-colors">Mappa geografica</RouterLink></li>
               <li><RouterLink to="/categorie"        class="hover:text-white transition-colors">Analisi categorie</RouterLink></li>
               <li><RouterLink to="/ricerca-avanzata" class="hover:text-white transition-colors">Riparti</RouterLink></li>
+              <li><RouterLink to="/esclusi"          class="hover:text-white transition-colors">Esclusi dai riparti</RouterLink></li>
               <li><RouterLink to="/inoptato"         class="hover:text-white transition-colors">Inoptato</RouterLink></li>
               <li><RouterLink to="/forecast"         class="hover:text-white transition-colors">Proiezioni trend</RouterLink></li>
               <li><RouterLink to="/download"         class="hover:text-white transition-colors">Download dataset</RouterLink></li>
@@ -288,10 +289,11 @@ const menuDati = [
 ]
 
 const menuAnalisi = [
-  { to: '/categorie',        label: 'Categorie',    icon: '📊' },
-  { to: '/ricerca-avanzata', label: 'Riparti',      icon: '🔀' },
-  { to: '/inoptato',         label: 'Inoptato',     icon: '📭' },
-  { to: '/forecast',         label: 'Proiezioni',   icon: '📈' },
+  { to: '/categorie',        label: 'Categorie',         icon: '📊' },
+  { to: '/ricerca-avanzata', label: 'Riparti',           icon: '🔀' },
+  { to: '/esclusi',          label: 'Esclusi dai riparti', icon: '🚫' },
+  { to: '/inoptato',         label: 'Inoptato',          icon: '📭' },
+  { to: '/forecast',         label: 'Proiezioni',        icon: '📈' },
 ]
 
 const menuAltro = [
