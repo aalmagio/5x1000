@@ -2,10 +2,10 @@
   <div class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
     <!-- Header -->
     <div class="mb-6">
-      <h1 class="text-2xl font-bold text-gray-900">Ricerca Avanzata</h1>
+      <h1 class="text-2xl font-bold text-gray-900">Ricerca Avanzata — Riparti</h1>
       <p class="text-gray-500 mt-1 text-sm">
-        Stato degli enti nei riparti — categorie ammesse ed escluse da <em>categoria_ammissioni</em>.
-        Usa il filtro "Solo conflitti" per trovare enti presenti in più categorie con stati diversi.
+        Stato degli enti nei riparti: categorie ammesse ed escluse.
+        Usa "Solo conflitti" per trovare enti ammessi in una categoria ed esclusi in un'altra.
       </p>
     </div>
 
@@ -60,7 +60,7 @@
             <option v-for="c in ALL_CATS" :key="c.slug" :value="c.slug">{{ c.label }}</option>
           </select>
         </div>
-        <!-- Stato categoria (opzionale, attivo solo se categoria selezionata) -->
+        <!-- Stato categoria -->
         <div>
           <label class="block text-xs text-gray-500 mb-1">Stato in categoria</label>
           <select
@@ -76,7 +76,7 @@
         </div>
       </div>
 
-      <!-- Solo conflitti + reset -->
+      <!-- Solo conflitti + view toggle + reset -->
       <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         <label class="flex items-center gap-2 cursor-pointer select-none text-sm text-gray-600">
           <input
@@ -87,10 +87,25 @@
           />
           <span>Solo conflitti <span class="text-gray-400 font-normal">(ammesso in una cat, escluso in un'altra)</span></span>
         </label>
+
+        <!-- View mode toggle -->
+        <div class="flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 p-0.5 text-xs ml-auto">
+          <button
+            @click="setView('anno')"
+            class="px-2.5 py-1 rounded-md transition-colors font-medium"
+            :class="viewMode === 'anno' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'"
+          >Per anno</button>
+          <button
+            @click="setView('ente')"
+            class="px-2.5 py-1 rounded-md transition-colors font-medium"
+            :class="viewMode === 'ente' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'"
+          >Per ente</button>
+        </div>
+
         <button
           v-if="hasActiveFilters"
           @click="reset"
-          class="ml-auto text-xs text-gray-400 hover:text-gray-600 underline"
+          class="text-xs text-gray-400 hover:text-gray-600 underline"
         >Azzera filtri</button>
       </div>
     </div>
@@ -110,10 +125,10 @@
       <!-- Summary bar -->
       <div class="flex items-center justify-between mb-3">
         <span class="text-sm text-gray-500">
-          <span class="font-semibold text-gray-800">{{ totale.toLocaleString('it-IT') }}</span> risultati
+          <span class="font-semibold text-gray-800">{{ totale.toLocaleString('it-IT') }}</span>
+          {{ viewMode === 'ente' ? 'enti' : 'risultati' }}
           <span v-if="pagine > 1"> — pagina {{ pagina }}/{{ pagine }}</span>
         </span>
-        <!-- Legend -->
         <div class="hidden sm:flex items-center gap-3 text-xs text-gray-500">
           <span class="inline-flex items-center gap-1">
             <span class="inline-block w-3 h-3 rounded-sm bg-green-100 border border-green-200"></span>
@@ -126,15 +141,15 @@
         </div>
       </div>
 
-      <!-- Table -->
-      <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <!-- ── VIEW: per anno ── -->
+      <div v-if="viewMode === 'anno'" class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead>
               <tr class="border-b border-gray-100 bg-gray-50/80">
                 <th class="text-left px-4 py-3 font-semibold text-gray-600 w-16">Anno</th>
                 <th class="text-left px-4 py-3 font-semibold text-gray-600">Ente</th>
-                <th class="text-left px-4 py-3 font-semibold text-gray-600 hidden md:table-cell w-36">Regione</th>
+                <th class="text-left px-4 py-3 font-semibold text-gray-600 hidden md:table-cell w-32">Regione</th>
                 <th class="text-left px-4 py-3 font-semibold text-gray-600">Stato nei riparti</th>
               </tr>
             </thead>
@@ -160,22 +175,80 @@
                 <td class="px-4 py-3 align-top">
                   <div class="flex flex-wrap gap-1">
                     <span
-                      v-for="cat in r.categorie_ammesse"
-                      :key="`amm-${cat}`"
+                      v-for="cat in r.categorie_ammesse" :key="`amm-${cat}`"
                       class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700"
-                    >
-                      <span class="text-green-500 leading-none">✓</span>
-                      {{ slugLabel(cat) }}
-                    </span>
+                    ><span class="text-green-500 leading-none">✓</span> {{ slugLabel(cat) }}</span>
                     <span
-                      v-for="cat in r.categorie_escluse"
-                      :key="`esc-${cat}`"
+                      v-for="cat in r.categorie_escluse" :key="`esc-${cat}`"
                       class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-600"
-                    >
-                      <span class="text-red-400 leading-none">✗</span>
-                      {{ slugLabel(cat) }}
-                    </span>
+                    ><span class="text-red-400 leading-none">✗</span> {{ slugLabel(cat) }}</span>
                   </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── VIEW: per ente ── -->
+      <div v-else class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-gray-100 bg-gray-50/80">
+                <th class="text-left px-4 py-3 font-semibold text-gray-600">Ente</th>
+                <th class="text-left px-4 py-3 font-semibold text-gray-600 hidden md:table-cell w-32">Regione</th>
+                <th class="text-left px-4 py-3 font-semibold text-gray-600">Ammesso</th>
+                <th class="text-left px-4 py-3 font-semibold text-gray-600">Escluso (con anni)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="rows.length === 0">
+                <td colspan="4" class="text-center py-12 text-gray-400">Nessun risultato</td>
+              </tr>
+              <tr
+                v-for="r in rows"
+                :key="r.cod_fiscale"
+                class="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"
+                :class="r.ha_conflitti ? 'bg-amber-50/30' : ''"
+              >
+                <td class="px-4 py-3 align-top">
+                  <RouterLink
+                    :to="`/ente/${r.cod_fiscale}`"
+                    class="font-medium text-brand-600 hover:text-brand-700 hover:underline leading-tight block"
+                  >{{ r.denominazione }}</RouterLink>
+                  <span class="text-xs text-gray-400 font-mono">{{ r.cod_fiscale }}</span>
+                  <span class="ml-2 text-xs text-gray-400">({{ r.n_anni }} ann{{ r.n_anni === 1 ? 'o' : 'i' }})</span>
+                </td>
+                <td class="px-4 py-3 text-gray-500 text-xs hidden md:table-cell align-top">{{ r.regione || '–' }}</td>
+                <!-- Categorie ammesse -->
+                <td class="px-4 py-3 align-top">
+                  <div class="flex flex-wrap gap-1">
+                    <span
+                      v-for="cat in r.categorie_ammesse" :key="`amm-${cat}`"
+                      class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700"
+                    ><span class="text-green-500 leading-none">✓</span> {{ slugLabel(cat) }}</span>
+                    <span v-if="!r.categorie_ammesse.length" class="text-gray-300 text-xs">–</span>
+                  </div>
+                </td>
+                <!-- Categorie escluse con anni -->
+                <td class="px-4 py-3 align-top">
+                  <div v-if="Object.keys(r.escluso_detail ?? {}).length" class="flex flex-col gap-1">
+                    <div
+                      v-for="(anni, cat) in r.escluso_detail"
+                      :key="cat"
+                      class="flex flex-wrap items-center gap-1"
+                    >
+                      <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-600">
+                        <span class="text-red-400 leading-none">✗</span> {{ slugLabel(cat) }}
+                      </span>
+                      <span
+                        v-for="a in anni" :key="a"
+                        class="text-xs text-red-400 font-mono bg-red-50 px-1 rounded"
+                      >{{ a }}</span>
+                    </div>
+                  </div>
+                  <span v-else class="text-gray-300 text-xs">–</span>
                 </td>
               </tr>
             </tbody>
@@ -209,12 +282,13 @@ import { fetchRicercaAvanzata } from '@/api/client'
 
 const meta = useMetaStore()
 
-const loading = ref(false)
-const error   = ref(null)
-const rows    = ref([])
-const totale  = ref(0)
-const pagina  = ref(1)
-const pagine  = ref(1)
+const loading  = ref(false)
+const error    = ref(null)
+const rows     = ref([])
+const totale   = ref(0)
+const pagina   = ref(1)
+const pagine   = ref(1)
+const viewMode = ref('anno') // 'anno' | 'ente'
 
 const filters = ref({
   q:              '',
@@ -259,6 +333,7 @@ const hasActiveFilters = computed(() =>
 
 function buildParams(pg = 1) {
   const p = { pagina: pg }
+  if (viewMode.value === 'ente') p.raggruppa = 1
   if (filters.value.q)              p.q             = filters.value.q
   if (filters.value.anno)           p.anno          = filters.value.anno
   if (filters.value.categoria)      p.categoria     = filters.value.categoria
@@ -300,6 +375,12 @@ async function goPage(p) {
   } finally {
     loading.value = false
   }
+}
+
+function setView(mode) {
+  if (viewMode.value === mode) return
+  viewMode.value = mode
+  search()
 }
 
 function reset() {
