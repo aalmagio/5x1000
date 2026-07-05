@@ -41,77 +41,6 @@
       <RouterLink to="/dati" class="btn-primary mt-6 inline-flex">Torna alla ricerca</RouterLink>
     </div>
 
-    <!-- Vista solo-escluso: ente mai ammesso, presente solo negli elenchi esclusi -->
-    <template v-else-if="ente?.solo_escluso">
-      <div class="card mb-6">
-        <div class="flex items-start gap-3">
-          <div class="flex-shrink-0 w-8 h-8 rounded-full bg-red-100 flex items-center justify-center mt-0.5">
-            <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-            </svg>
-          </div>
-          <div>
-            <h1 class="text-2xl font-bold text-gray-900 leading-tight">{{ ente.denominazione }}</h1>
-            <p class="font-mono text-gray-400 text-sm mt-1 select-all">{{ ente.cod_fiscale }}</p>
-            <p class="text-sm text-red-600 mt-2 font-medium">
-              Ente presente solo negli elenchi degli esclusi — mai ammesso al beneficio del 5×1000.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2 class="mb-4">Storico ammissioni per categoria</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Anno</th>
-                <th>Categorie escluse</th>
-                <th>Categorie ammesse</th>
-                <th class="text-right hidden sm:table-cell">Scelte (ammesse)</th>
-                <th class="text-right hidden sm:table-cell">Importo (ammesse)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="r in storicoOrdinato" :key="r.anno">
-                <td class="font-medium">{{ r.anno }}</td>
-                <td>
-                  <div class="flex flex-wrap gap-1">
-                    <span
-                      v-for="cat in r.categorie_escluse" :key="cat"
-                      class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700"
-                    >✗ {{ slugLabel(cat) }}</span>
-                  </div>
-                </td>
-                <td>
-                  <div class="flex flex-wrap gap-1">
-                    <span
-                      v-for="cat in r.categorie_ammesse" :key="cat"
-                      class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700"
-                    >✓ {{ slugLabel(cat) }}</span>
-                    <span v-if="!r.categorie_ammesse?.length" class="text-gray-300 text-xs">–</span>
-                  </div>
-                </td>
-                <td class="text-right tabular-nums hidden sm:table-cell">
-                  <span v-if="r.cat_ammesse_detail?.length">
-                    {{ formatNum(r.cat_ammesse_detail.reduce((s, x) => s + (x.n_scelte ?? 0), 0)) }}
-                  </span>
-                  <span v-else class="text-gray-300">–</span>
-                </td>
-                <td class="text-right tabular-nums hidden sm:table-cell">
-                  <span v-if="r.cat_ammesse_detail?.length">
-                    {{ formatEur(r.cat_ammesse_detail.reduce((s, x) => s + (x.importo_totale ?? 0), 0) || null) }}
-                  </span>
-                  <span v-else class="text-gray-300">–</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </template>
-
     <template v-else-if="ente">
       <!-- Header ente -->
       <div class="card mb-6">
@@ -145,6 +74,29 @@
             </div>
             <p class="text-xs text-gray-400 mt-1">{{ annoPrecedente }} → {{ annoUltimo }}</p>
           </div>
+        </div>
+
+        <!-- Stato nei riparti (solo se l'ente ha esclusioni in qualche anno) -->
+        <div v-if="haEsclusioni" class="mt-3 pt-3 border-t border-gray-100">
+          <p class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Stato nei riparti</p>
+          <div class="flex flex-wrap gap-1.5">
+            <span
+              v-for="(stato, cat) in statoRiparti"
+              :key="cat"
+              class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium"
+              :class="{
+                'bg-green-100 text-green-700': stato === 'ammesso',
+                'bg-red-100 text-red-700':     stato === 'escluso',
+                'bg-amber-100 text-amber-700': stato === 'misto',
+              }"
+            >
+              <span>{{ stato === 'ammesso' ? '✓' : stato === 'escluso' ? '✗' : '⚠' }}</span>
+              {{ slugLabel(cat) }}
+            </span>
+          </div>
+          <p v-if="Object.values(statoRiparti).some(s => s === 'misto')" class="text-xs text-amber-600 mt-1.5">
+            In alcune categorie l'ente è escluso in certi anni
+          </p>
         </div>
       </div>
 
@@ -302,7 +254,7 @@
                 <template v-if="r.cat_breakdown">
                   <tr
                     v-for="cb in r.cat_breakdown"
-                    :key="r.anno + '-' + cb.categoria"
+                    :key="`${r.anno}-amm-${cb.categoria}`"
                     class="text-xs text-gray-500 bg-white"
                   >
                     <td class="pl-6">
@@ -318,6 +270,22 @@
                     <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(cb.importo_generico) }}</td>
                     <td class="text-right tabular-nums hidden lg:table-cell text-gray-500">{{ formatEur2(importoMedioFirma(cb)) }}</td>
                     <td class="text-right tabular-nums text-gray-700">{{ formatEur(cb.importo_totale) }}</td>
+                  </tr>
+                </template>
+                <!-- Sub-righe categorie escluse dal riparto -->
+                <template v-if="r.cat_escluse?.length || r.categorie_escluse?.length">
+                  <tr
+                    v-for="cat in (r.cat_escluse?.length ? r.cat_escluse : r.categorie_escluse)"
+                    :key="`${r.anno}-esc-${cat}`"
+                    class="text-xs"
+                  >
+                    <td colspan="99" class="py-1 pl-10 bg-red-50/40">
+                      <span class="inline-flex items-center gap-1 text-red-500">
+                        <span class="text-red-400">✗</span>
+                        <span class="badge bg-red-100 text-red-600 text-xs">{{ slugLabel(cat) }}</span>
+                        <span class="text-red-400">escluso dal riparto</span>
+                      </span>
+                    </td>
                   </tr>
                 </template>
               </template>
@@ -493,12 +461,32 @@ const categorieMultiple = computed(() =>
   hasCatBreakdown.value
 )
 
+// True se in qualche anno l'ente è stato escluso da almeno un riparto
+const haEsclusioni = computed(() =>
+  storicoOrdinato.value.some(r => r.cat_escluse?.length > 0 || r.categorie_escluse?.length > 0)
+)
+
+// Stato aggregato per categoria attraverso tutti gli anni: 'ammesso' | 'escluso' | 'misto'
+const statoRiparti = computed(() => {
+  const amm = new Set()
+  const esc = new Set()
+  for (const r of storicoOrdinato.value) {
+    if (r.cat_breakdown)     r.cat_breakdown.forEach(cb => cb.categoria && amm.add(cb.categoria))
+    if (r.cat_escluse)       r.cat_escluse.forEach(c => esc.add(c))
+    if (r.categorie_ammesse) r.categorie_ammesse.forEach(c => amm.add(c))
+    if (r.categorie_escluse) r.categorie_escluse.forEach(c => esc.add(c))
+    if (r.categoria && !r.cat_breakdown) amm.add(r.categoria)
+  }
+  ;(ente.value?.categorie ?? []).forEach(c => amm.add(c))
+  const result = {}
+  amm.forEach(c => { result[c] = esc.has(c) ? 'misto' : 'ammesso' })
+  esc.forEach(c => { if (!result[c]) result[c] = 'escluso' })
+  return result
+})
+
 // ── Importo medio per firma ───────────────────────────────────────────────────
-const importoMedioFirma = (r) => {
-  if (!r?.n_scelte) return null
-  const base = r.importo_espresso || r.importo_totale
-  return base ? base / r.n_scelte : null
-}
+const importoMedioFirma = (r) =>
+  (r?.importo_espresso && r?.n_scelte) ? r.importo_espresso / r.n_scelte : null
 
 const formatEur2 = (n) => n != null
   ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(n)
@@ -507,9 +495,8 @@ const formatEur2 = (n) => n != null
 // ── Reddito medio stimato ─────────────────────────────────────────────────────
 const irpefMedio = computed(() => {
   const r = latestRow.value
-  if (!r?.n_scelte) return null
-  const base = r.importo_espresso || r.importo_totale
-  return base ? (base / r.n_scelte) / 0.005 : null
+  if (!r?.importo_espresso || !r?.n_scelte) return null
+  return (r.importo_espresso / r.n_scelte) / 0.005
 })
 const redditoStimato = computed(() => {
   if (!irpefMedio.value) return null

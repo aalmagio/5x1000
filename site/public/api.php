@@ -416,6 +416,27 @@ function action_enti(): void {
         $where[] = 'e.provincia = ?';
         $params[] = $provincia;
     }
+    $categoria_riparto = str_param('categoria_riparto');
+    if ($categoria_riparto) {
+        $rip_map = [
+            'volontariato'        => 'e.cat_volontariato',
+            'asd'                 => 'e.cat_asd',
+            'ets_onlus'           => 'e.cat_ets_onlus',
+            'ets/onlus'           => 'e.cat_ets_onlus',
+            'ricerca_scientifica' => 'e.cat_ricerca_sci',
+            'ricerca_sanitaria'   => 'e.cat_ricerca_san',
+            'comuni'              => 'e.cat_comuni',
+            'beni_culturali'      => 'e.cat_beni_cult',
+            'aree_protette'       => 'e.cat_aree_prot',
+        ];
+        $rip_key = strtolower($categoria_riparto);
+        if (isset($rip_map[$rip_key])) {
+            $where[] = $rip_map[$rip_key] . ' = 1';
+        } else {
+            $where[] = 'e.categoria_principale = ?';
+            $params[] = $categoria_riparto;
+        }
+    }
     $ft_q      = null;   // fulltext query string, set below if needed
     $ft_like   = false;  // true quando il WHERE mescola FULLTEXT + LIKE (score=0 bug workaround)
     if ($q) {
@@ -658,6 +679,19 @@ function action_ente(): void {
         ];
     }
 
+    // Categorie in cui l'ente è stato escluso (per anno)
+    $stmt_esc = $pdo->prepare(
+        "SELECT anno, GROUP_CONCAT(categoria ORDER BY categoria SEPARATOR ',') AS cat_escluse
+         FROM categoria_ammissioni
+         WHERE cod_fiscale = ? AND stato = 'escluso'
+         GROUP BY anno"
+    );
+    $stmt_esc->execute([$cf]);
+    $escluse_per_anno = [];
+    foreach ($stmt_esc->fetchAll() as $er) {
+        $escluse_per_anno[(int)$er['anno']] = explode(',', $er['cat_escluse']);
+    }
+
     $storico = [];
     foreach ($per_anno as $anno => $anno_rows) {
         $r0          = $anno_rows[0];
@@ -686,6 +720,7 @@ function action_ente(): void {
             'denominazione'         => $r0['denominazione'],
             'categoria'             => count($anno_rows) === 1 ? $r0['categoria_principale'] : null,
             'cat_breakdown'         => $cat_breakdown,
+            'cat_escluse'           => $escluse_per_anno[$anno] ?? [],
             'n_scelte'              => $tot_scelte,
             'importo_espresso'      => $tot_esp > 0 ? round($tot_esp, 2) : null,
             'importo_generico'      => $tot_gen > 0 ? round($tot_gen, 2) : null,
