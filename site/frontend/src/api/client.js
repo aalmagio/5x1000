@@ -73,6 +73,9 @@ export const fetchGeo = (params) => get('geo', params ?? {})
 export const fetchEsclusi       = (params) => get('esclusi', params ?? {})
 export const fetchEsclusiDetail = (cf)     => get('escluso_detail', { cf })
 
+// Categorie distinte da categoria_ammissioni (slugs reali per filtro "Categoria di riparto")
+export const fetchCategorieRiparto = () => get('categorie_riparto')
+
 // Ricerca avanzata: enti con stato per riparto (ammessi + esclusi da categoria_ammissioni)
 export const fetchRicercaAvanzata = (params) => get('ricerca_avanzata', params ?? {})
 

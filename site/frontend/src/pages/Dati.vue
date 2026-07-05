@@ -26,7 +26,7 @@
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Categoria di riparto</label>
           <select v-model="filters.categoria_riparto" class="input-field">
             <option :value="null">Tutti i riparti</option>
-            <option v-for="c in categorie" :key="c" :value="c">{{ c.replace(/_/g, ' ') }}</option>
+            <option v-for="c in categorieRiparto" :key="c" :value="c">{{ ripartoLabel(c) }}</option>
           </select>
         </div>
         <div>
@@ -247,13 +247,28 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { fetchEnti } from '@/api/client'
+import { fetchEnti, fetchCategorieRiparto } from '@/api/client'
 import { useMetaStore } from '@/stores/meta'
 
 const meta      = useMetaStore()
 const anni      = computed(() => meta.anni)
 const categorie = computed(() => meta.categorie)
 const regioni   = computed(() => meta.regioni)
+
+// Categorie riparto: slugs da categoria_ammissioni (separati da categoria_principale)
+const categorieRiparto = ref([])
+const RIPARTO_LABELS = {
+  ets_onlus:           'ETS / ONLUS',
+  'ets/onlus':         'ETS / ONLUS',
+  volontariato:        'Volontariato',
+  asd:                 'ASD',
+  ricerca_scientifica: 'Ricerca Scientifica',
+  ricerca_sanitaria:   'Ricerca Sanitaria',
+  comuni:              'Comuni',
+  beni_culturali:      'Beni Culturali',
+  aree_protette:       'Aree Protette',
+}
+const ripartoLabel = (slug) => RIPARTO_LABELS[(slug ?? '').toLowerCase()] ?? slug
 const isDev     = window.location.hostname === 'dev5x1000.almagioni.com'
 const result    = ref(null)
 const lastParams = ref(null)
@@ -381,6 +396,7 @@ function goPage(p) { search(p) }
 onMounted(async () => {
   await meta.ensure()
   filters.value.anno = meta.annoCorrente
+  fetchCategorieRiparto().then(r => { categorieRiparto.value = r.data ?? [] })
   await search()
 })
 </script>

@@ -185,6 +185,15 @@ function action_categorie(): void {
     json_out($cats);
 }
 
+function action_categorie_riparto(): void {
+    // Valori distinti di categoria_ammissioni.categoria — usati per il filtro "Categoria di riparto"
+    // in modo che i valori nel dropdown corrispondano esattamente a quelli presenti in tabella.
+    $cats = db()->query(
+        "SELECT DISTINCT categoria FROM categoria_ammissioni ORDER BY categoria"
+    )->fetchAll(PDO::FETCH_COLUMN);
+    json_out($cats);
+}
+
 // ─── Normalizzazione nomi regione ────────────────────────────────────────────
 // Mappa i valori raw del DB alle 20 regioni ufficiali italiane.
 // Trento e Bolzano vengono entrambi raggruppati sotto "Trentino-Alto Adige".
@@ -2670,6 +2679,7 @@ try {
         'esclusi'              => action_esclusi(),
         'escluso_detail'       => action_escluso_detail(),
         'ricerca_avanzata'     => action_ricerca_avanzata(),
+        'categorie_riparto'    => action_categorie_riparto(),
         'geo'                  => action_geo(),
         'nlq_token'            => action_nlq_token(),
         'nlq'                  => action_nlq(),
