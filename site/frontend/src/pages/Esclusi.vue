@@ -1,231 +1,331 @@
 <template>
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-10">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+    <!-- Header -->
     <div class="mb-6">
-      <h1 class="mb-1">Enti esclusi</h1>
-      <p class="text-gray-500">Enti presenti negli elenchi degli esclusi per almeno una categoria. Chiave: codice fiscale + anno. Un ente può risultare escluso in una categoria e ammesso in un'altra nello stesso anno.</p>
+      <h1 class="text-2xl font-bold text-gray-900">Enti esclusi dai riparti</h1>
+      <p class="text-gray-500 mt-1 text-sm">
+        Enti esclusi da almeno una categoria di riparto in un dato anno.
+        Clicca su una riga per vedere il dettaglio storico per categoria.
+      </p>
     </div>
 
-    <!-- Filtri -->
-    <div class="card mb-6">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+    <!-- Filters -->
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <!-- Nome / CF -->
+        <div class="lg:col-span-2">
+          <label class="block text-xs text-gray-500 mb-1">Nome / Codice Fiscale</label>
+          <input
+            v-model="filters.q"
+            type="text"
+            placeholder="Cerca ente..."
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+            autocomplete="off"
+            @input="debouncedSearch"
+          />
+        </div>
+        <!-- Anno -->
         <div>
-          <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Anno</label>
-          <select v-model="filters.anno" class="input-field">
-            <option value="">Tutti</option>
-            <option v-for="a in anni" :key="a" :value="a">{{ a }}</option>
+          <label class="block text-xs text-gray-500 mb-1">Anno</label>
+          <select
+            v-model="filters.anno"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+            @change="search"
+          >
+            <option :value="null">Tutti gli anni</option>
+            <option v-for="a in meta.anni" :key="a" :value="a">{{ a }}</option>
           </select>
         </div>
+        <!-- Regione -->
         <div>
-          <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Escluso in categoria</label>
-          <select v-model="filters.categoria" class="input-field">
-            <option value="">Tutte</option>
-            <option v-for="c in categorieSlug" :key="c" :value="c">{{ slugLabel(c) }}</option>
+          <label class="block text-xs text-gray-500 mb-1">Regione</label>
+          <select
+            v-model="filters.regione"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+            @change="search"
+          >
+            <option :value="null">Tutte le regioni</option>
+            <option v-for="r in meta.regioni" :key="r" :value="r">{{ r }}</option>
           </select>
         </div>
+        <!-- Categoria -->
         <div>
-          <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Nome / Codice fiscale</label>
-          <input v-model="filters.q" class="input-field" placeholder="Cerca ente…"
-                 @input="debouncedSearch" @keyup.enter="search()" />
+          <label class="block text-xs text-gray-500 mb-1">Categoria riparto</label>
+          <select
+            v-model="filters.categoria"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+            @change="search"
+          >
+            <option :value="null">Tutte le categorie</option>
+            <option v-for="c in categorieRiparto" :key="c" :value="c">{{ slugLabel(c) }}</option>
+          </select>
         </div>
       </div>
-      <div class="flex flex-wrap items-center gap-3">
-        <button class="btn-primary gap-2 inline-flex items-center" :disabled="loading" @click="search()">
-          <svg v-if="!loading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-          </svg>
-          <svg v-else class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-          </svg>
-          <span>{{ loading ? 'Caricamento…' : 'Cerca' }}</span>
-        </button>
-        <button class="btn-secondary" @click="reset" :disabled="loading">Reset</button>
+
+      <!-- Reset -->
+      <div class="mt-3 flex items-center justify-between">
+        <span class="text-xs text-gray-400">
+          <template v-if="!loading && result">
+            {{ result.totale.toLocaleString('it-IT') }} enti esclusi trovati
+          </template>
+        </span>
+        <button
+          class="text-xs text-brand-500 hover:underline"
+          @click="resetFilters"
+        >Azzera filtri</button>
       </div>
     </div>
 
-    <!-- Errore -->
-    <div v-if="error" class="card border-red-200 bg-red-50 flex items-center gap-3 mb-4 p-4">
-      <svg class="w-5 h-5 text-red-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+    <!-- Loading -->
+    <div v-if="loading" class="flex items-center justify-center py-16 text-gray-400">
+      <svg class="animate-spin w-6 h-6 mr-2" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
       </svg>
-      <span class="text-sm text-red-700">Errore nel caricamento dati. Verifica la connessione e riprova.</span>
+      Caricamento...
     </div>
 
-    <!-- Info risultati + toggle colonne -->
-    <div v-if="result" class="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-500">
-      <span>
-        <strong class="text-gray-800">{{ formatNum(result.totale) }}</strong>
-        {{ result.totale === 1 ? 'ente escluso' : 'enti esclusi' }}
-      </span>
-<span>Pagina {{ page }} di {{ result.pagine }}</span>
+    <!-- Error -->
+    <div v-else-if="error" class="bg-red-50 text-red-700 rounded-xl p-4 text-sm">{{ error }}</div>
+
+    <!-- Empty -->
+    <div v-else-if="result && result.data.length === 0" class="text-center py-16 text-gray-400">
+      Nessun ente trovato con i filtri selezionati.
     </div>
 
-    <!-- Tabella risultati -->
-    <div v-if="result?.data?.length" class="card p-0 overflow-hidden mb-4">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Anno</th>
-              <th>Denominazione</th>
-              <th class="hidden md:table-cell">CF</th>
+    <!-- Table -->
+    <template v-else-if="result">
+      <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="bg-gray-50 border-b border-gray-200 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                <th class="px-4 py-3 w-16">Anno</th>
+                <th class="px-4 py-3">Denominazione / CF</th>
+                <th class="px-4 py-3 hidden md:table-cell">Regione</th>
+                <th class="px-4 py-3">Escluso da</th>
+                <th class="px-4 py-3 hidden lg:table-cell">Ammesso in</th>
+                <th class="px-4 py-3 text-right hidden lg:table-cell">Scelte escluse</th>
+                <th class="px-4 py-3 text-right hidden xl:table-cell">Importo escluso</th>
+                <th class="px-4 py-3 w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="row in result.data" :key="`${row.anno}-${row.cod_fiscale}`">
+                <!-- Main row -->
+                <tr
+                  class="border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors"
+                  :class="expandedKey === rowKey(row) ? 'bg-brand-50' : ''"
+                  @click="toggleDetail(row)"
+                >
+                  <td class="px-4 py-3 font-mono text-gray-600">{{ row.anno }}</td>
+                  <td class="px-4 py-3">
+                    <div class="font-medium text-gray-900 leading-snug">{{ row.denominazione }}</div>
+                    <div class="text-xs text-gray-400 font-mono">{{ row.cod_fiscale }}</div>
+                  </td>
+                  <td class="px-4 py-3 hidden md:table-cell text-gray-500 text-xs">{{ row.regione ?? '—' }}</td>
+                  <td class="px-4 py-3">
+                    <div class="flex flex-wrap gap-1">
+                      <span
+                        v-for="c in row.categorie_escluse" :key="c"
+                        class="inline-block bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-full font-medium"
+                      >{{ slugLabel(c) }}</span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 hidden lg:table-cell">
+                    <div class="flex flex-wrap gap-1">
+                      <span
+                        v-for="c in row.categorie_ammesse" :key="c"
+                        class="inline-block bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full font-medium"
+                      >{{ slugLabel(c) }}</span>
+                      <span v-if="row.categorie_ammesse.length === 0" class="text-gray-300 text-xs">—</span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 text-right hidden lg:table-cell text-gray-600 tabular-nums">
+                    {{ row.n_scelte_escluse != null ? row.n_scelte_escluse.toLocaleString('it-IT') : '—' }}
+                  </td>
+                  <td class="px-4 py-3 text-right hidden xl:table-cell text-gray-600 tabular-nums">
+                    {{ row.importo_escluse != null ? fmtEur(row.importo_escluse) : '—' }}
+                  </td>
+                  <td class="px-4 py-3 text-gray-400">
+                    <svg class="w-4 h-4 transition-transform" :class="expandedKey === rowKey(row) ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                  </td>
+                </tr>
 
-              <th>Cat. escluse</th>
-              <th class="text-right">Scelte escluse</th>
-              <th class="text-right">Importo escluse</th>
-              <th class="w-16"></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="e in result.data"
-              :key="`${e.anno}-${e.cod_fiscale}`"
-              class="group hover:bg-red-50/30 transition-colors"
-            >
-              <td class="font-medium tabular-nums text-gray-500">{{ e.anno }}</td>
-              <td class="max-w-xs">
-                <RouterLink
-                  :to="`/esclusi/${e.cod_fiscale}`"
-                  class="font-medium text-gray-900 hover:text-brand-700 truncate block"
-                  :title="e.denominazione"
-                >{{ e.denominazione || e.cod_fiscale }}</RouterLink>
-              </td>
-              <td class="font-mono text-xs text-gray-400 hidden md:table-cell">{{ e.cod_fiscale }}</td>
-
-              <td>
-                <div class="flex flex-wrap gap-1">
-                  <span
-                    v-for="cat in e.categorie_escluse" :key="cat"
-                    class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700"
-                  >✗ {{ slugLabel(cat) }}</span>
-                </div>
-              </td>
-              <td class="text-right tabular-nums text-gray-700">{{ formatNum(e.n_scelte_escluse) }}</td>
-              <td class="text-right tabular-nums font-semibold text-red-700">{{ formatEur(e.importo_escluse) }}</td>
-              <td>
-                <RouterLink
-                  :to="`/esclusi/${e.cod_fiscale}`"
-                  class="text-xs text-brand-600 hover:text-brand-700 font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
-                >dettaglio →</RouterLink>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                <!-- Expanded detail row -->
+                <tr v-if="expandedKey === rowKey(row)" :key="`detail-${row.anno}-${row.cod_fiscale}`">
+                  <td colspan="8" class="bg-brand-50 px-6 pb-5 pt-2">
+                    <!-- Loading detail -->
+                    <div v-if="detailLoading" class="text-xs text-gray-400 py-2 flex items-center gap-2">
+                      <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                      </svg>
+                      Caricamento storico...
+                    </div>
+                    <!-- Detail content -->
+                    <div v-else-if="detail">
+                      <div class="font-semibold text-gray-700 mb-3 text-sm">
+                        Storico completo — {{ detail.denominazione }}
+                        <span class="font-mono text-gray-400 font-normal ml-2 text-xs">{{ detail.cod_fiscale }}</span>
+                      </div>
+                      <div class="space-y-3">
+                        <div v-for="anno in detail.storico" :key="anno.anno" class="bg-white rounded-lg border border-gray-200 p-3">
+                          <div class="font-semibold text-gray-600 text-sm mb-2">{{ anno.anno }}</div>
+                          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <!-- Escluse -->
+                            <div v-if="anno.escluse.length">
+                              <div class="text-xs font-semibold text-red-600 mb-1.5 uppercase tracking-wide">Escluso</div>
+                              <div v-for="cat in anno.escluse" :key="cat.categoria" class="flex items-start gap-2 mb-1.5">
+                                <span class="inline-block bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-full font-medium shrink-0">{{ slugLabel(cat.categoria) }}</span>
+                                <span class="text-xs text-gray-500">
+                                  <template v-if="cat.n_scelte != null">{{ cat.n_scelte.toLocaleString('it-IT') }} scelte</template>
+                                  <template v-if="cat.n_scelte != null && cat.importo_totale != null"> · </template>
+                                  <template v-if="cat.importo_totale != null">{{ fmtEur(cat.importo_totale) }}</template>
+                                </span>
+                              </div>
+                            </div>
+                            <!-- Ammesse -->
+                            <div v-if="anno.ammesse.length">
+                              <div class="text-xs font-semibold text-green-600 mb-1.5 uppercase tracking-wide">Ammesso</div>
+                              <div v-for="cat in anno.ammesse" :key="cat.categoria" class="flex items-start gap-2 mb-1.5">
+                                <span class="inline-block bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full font-medium shrink-0">{{ slugLabel(cat.categoria) }}</span>
+                                <span class="text-xs text-gray-500">
+                                  <template v-if="cat.n_scelte != null">{{ cat.n_scelte.toLocaleString('it-IT') }} scelte</template>
+                                  <template v-if="cat.n_scelte != null && cat.importo_totale != null"> · </template>
+                                  <template v-if="cat.importo_totale != null">{{ fmtEur(cat.importo_totale) }}</template>
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-else class="text-xs text-gray-400 py-2">Nessun dettaglio disponibile.</div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
 
-    <!-- Empty state -->
-    <div v-else-if="result && !result.data.length" class="card text-center py-16">
-      <p class="text-gray-500 font-medium mb-1">Nessun risultato</p>
-      <p class="text-sm text-gray-400 mb-4">Prova a modificare i filtri di ricerca.</p>
-      <button class="btn-secondary" @click="reset">Cancella filtri</button>
-    </div>
-
-    <!-- Skeleton -->
-    <div v-else-if="loading && !result" class="card p-0 overflow-hidden mb-4 animate-pulse">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th v-for="n in 8" :key="n"><div class="h-4 bg-gray-200 rounded w-16"></div></th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="n in 10" :key="n">
-              <td><div class="h-4 bg-gray-100 rounded w-12"></div></td>
-              <td><div class="h-4 bg-gray-100 rounded w-48"></div></td>
-              <td class="hidden md:table-cell"><div class="h-4 bg-gray-100 rounded w-28"></div></td>
-              <td class="hidden sm:table-cell"><div class="h-4 bg-gray-100 rounded w-20"></div></td>
-              <td><div class="h-5 bg-red-50 rounded-full w-24"></div></td>
-              <td><div class="h-4 bg-gray-100 rounded w-16 ml-auto"></div></td>
-              <td><div class="h-4 bg-gray-100 rounded w-20 ml-auto"></div></td>
-              <td></td>
-            </tr>
-          </tbody>
-        </table>
+      <!-- Pagination -->
+      <div v-if="result.pagine > 1" class="mt-4 flex items-center justify-between text-sm text-gray-600">
+        <span>Pagina {{ result.pagina }} di {{ result.pagine }}</span>
+        <div class="flex gap-2">
+          <button
+            :disabled="result.pagina <= 1"
+            class="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            @click="goPage(result.pagina - 1)"
+          >← Prec</button>
+          <button
+            :disabled="result.pagina >= result.pagine"
+            class="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            @click="goPage(result.pagina + 1)"
+          >Succ →</button>
+        </div>
       </div>
-    </div>
-
-    <!-- Paginazione -->
-    <div v-if="result?.pagine > 1" class="flex items-center justify-center gap-3 mt-2">
-      <button class="btn-secondary px-3" :disabled="page <= 1" @click="goPage(1)" title="Prima pagina">«</button>
-      <button class="btn-secondary" :disabled="page <= 1" @click="goPage(page - 1)">← Precedente</button>
-      <span class="text-sm text-gray-600 px-2">{{ page }} / {{ result.pagine }}</span>
-      <button class="btn-secondary" :disabled="page >= result.pagine" @click="goPage(page + 1)">Successiva →</button>
-      <button class="btn-secondary px-3" :disabled="page >= result.pagine" @click="goPage(result.pagine)" title="Ultima pagina">»</button>
-    </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { RouterLink } from 'vue-router'
-import { fetchEsclusi } from '@/api/client'
+import { ref, onMounted } from 'vue'
 import { useMetaStore } from '@/stores/meta'
+import { fetchEsclusi, fetchEsclusiDetail, fetchCategorieRiparto } from '@/api/client'
 
-const meta    = useMetaStore()
-const anni    = computed(() => meta.anni.filter(a => a >= 2019))
-const regioni = computed(() => meta.regioni)
+const meta = useMetaStore()
 
-const categorieSlug = [
-  'volontariato', 'asd', 'ets_onlus', 'ricerca_scientifica',
-  'ricerca_sanitaria', 'comuni', 'beni_culturali', 'aree_protette',
-]
 const SLUG_LABELS = {
-  volontariato:        'Volontariato',
-  asd:                 'ASD',
   ets_onlus:           'ETS/ONLUS',
-  ricerca_scientifica: 'Ricerca Scientifica',
-  ricerca_sanitaria:   'Ricerca Sanitaria',
+  asd:                 'Sport dilettantistico',
+  ricerca_scientifica: 'Ricerca scientifica',
+  ricerca_sanitaria:   'Ricerca sanitaria',
   comuni:              'Comuni',
-  beni_culturali:      'Beni Culturali',
-  aree_protette:       'Aree Protette',
+  beni_culturali:      'Beni culturali',
+  aree_protette:       'Aree protette',
 }
-const slugLabel = (s) => SLUG_LABELS[s] ?? s.replace(/_/g, ' ')
+const slugLabel = (s) => SLUG_LABELS[s] ?? s
 
-const filters = ref({ anno: '', categoria: '', q: '' })
-const result  = ref(null)
+const fmtEur = (v) => new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v)
+
+const categorieRiparto = ref([])
+const filters = ref({ q: '', anno: null, regione: null, categoria: null })
 const loading = ref(false)
-const error   = ref(false)
-const page    = ref(1)
+const error   = ref(null)
+const result  = ref(null)
 
-const formatNum = (n) => n != null ? Number(n).toLocaleString('it-IT') : '–'
-const formatEur = (n) => n != null
-  ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
-  : '–'
+const expandedKey  = ref(null)
+const detail       = ref(null)
+const detailLoading = ref(false)
 
-let _debounceTimer = null
-function debouncedSearch() {
-  clearTimeout(_debounceTimer)
-  _debounceTimer = setTimeout(() => search(1), 400)
+const rowKey = (row) => `${row.anno}-${row.cod_fiscale}`
+
+let debounceTimer = null
+const debouncedSearch = () => {
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(search, 350)
 }
 
-async function search(p = 1) {
+async function search(pagina = 1) {
   loading.value = true
-  error.value   = false
-  page.value    = p
-  try {
-    const params = { pagina: p, per_pagina: 50 }
-    if (filters.value.anno)      params.anno      = filters.value.anno
-    if (filters.value.categoria) params.categoria = filters.value.categoria
+  error.value   = null
+  expandedKey.value = null
+  detail.value  = null
 
-    if (filters.value.q)         params.q         = filters.value.q
+  const params = { pagina }
+  if (filters.value.q)         params.q         = filters.value.q
+  if (filters.value.anno)      params.anno      = filters.value.anno
+  if (filters.value.regione)   params.regione   = filters.value.regione
+  if (filters.value.categoria) params.categoria = filters.value.categoria
+
+  try {
     const res = await fetchEsclusi(params)
     result.value = res.data
-  } catch {
-    error.value = true
+  } catch (e) {
+    error.value = e?.response?.data?.error ?? e?.message ?? 'Errore di caricamento'
   } finally {
     loading.value = false
   }
 }
 
-function reset() {
-  filters.value = { anno: '', categoria: '', q: '' }
-  search(1)
+async function toggleDetail(row) {
+  const k = rowKey(row)
+  if (expandedKey.value === k) {
+    expandedKey.value = null
+    detail.value = null
+    return
+  }
+  expandedKey.value = k
+  detail.value = null
+  detailLoading.value = true
+  try {
+    const res = await fetchEsclusiDetail(row.cod_fiscale)
+    detail.value = res.data
+  } catch {
+    detail.value = null
+  } finally {
+    detailLoading.value = false
+  }
 }
 
-function goPage(p) { search(p) }
+function goPage(p) {
+  search(p)
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function resetFilters() {
+  filters.value = { q: '', anno: null, regione: null, categoria: null }
+  search()
+}
 
 onMounted(async () => {
   await meta.ensure()
+  const cr = await fetchCategorieRiparto()
+  categorieRiparto.value = cr.data ?? []
   await search()
 })
 </script>
