@@ -10,8 +10,8 @@
             alt="ASSIF"
             class="h-8 w-auto"
           />
-          <span class="hidden sm:block text-sm font-semibold text-gray-700 border-l border-gray-300 pl-3 leading-tight">
-            Osservatorio<br><span class="text-brand-500 font-bold">5×1000</span>
+          <span class="hidden sm:block text-xs font-semibold text-gray-700 border-l border-gray-300 pl-3 leading-snug">
+            Osservatorio ASSIF<br><span class="text-brand-500">sul 5, 2 e 8 per mille</span>
           </span>
         </RouterLink>
 
@@ -215,7 +215,7 @@
               class="h-8 w-auto mb-3 brightness-0 invert"
             />
             <p class="text-gray-400 text-xs leading-relaxed">
-              Osservatorio sul 5 per mille, un progetto di ASSIF<br>
+              Osservatorio ASSIF sul 5, 2 e 8 per mille<br>
               Associazione Italiana Fundraiser
             </p>
             <div class="flex gap-3 mt-4">
