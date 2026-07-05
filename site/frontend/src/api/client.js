@@ -73,6 +73,9 @@ export const fetchGeo = (params) => get('geo', params ?? {})
 export const fetchEsclusi       = (params) => get('esclusi', params ?? {})
 export const fetchEsclusiDetail = (cf)     => get('escluso_detail', { cf })
 
+// Ricerca avanzata: enti con stato per riparto (ammessi + esclusi da categoria_ammissioni)
+export const fetchRicercaAvanzata = (params) => get('ricerca_avanzata', params ?? {})
+
 // NLQ: Natural Language Query (semi-protetto con token HMAC giornaliero)
 export const nlqToken = () => get('nlq_token')
 export const nlqQuery = (token, q) =>

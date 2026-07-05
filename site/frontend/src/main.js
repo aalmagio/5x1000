@@ -19,8 +19,7 @@ const Forecast           = () => import('./pages/Forecast.vue')
 const Classifica         = () => import('./pages/Classifica.vue')
 const Geo                = () => import('./pages/Geo.vue')
 const Ricerca            = () => import('./pages/Ricerca.vue')
-const Esclusi            = () => import('./pages/Esclusi.vue')
-const EsclusiDetail      = () => import('./pages/EsclusiDetail.vue')
+const RicercaAvanzata    = () => import('./pages/RicercaAvanzata.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -39,8 +38,7 @@ const router = createRouter({
     { path: '/ente/:cf',                      component: EnteDetail,       name: 'ente' },
     { path: '/geo',                           component: Geo,              name: 'geo' },
     { path: '/ricerca',                       component: Ricerca,          name: 'ricerca' },
-    { path: '/esclusi',                       component: Esclusi,          name: 'esclusi' },
-    { path: '/esclusi/:cf',                   component: EsclusiDetail,    name: 'escluso_detail' },
+    { path: '/ricerca-avanzata',              component: RicercaAvanzata,  name: 'ricerca_avanzata' },
   ],
   scrollBehavior: () => ({ top: 0 }),
 })

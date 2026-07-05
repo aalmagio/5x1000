@@ -11,7 +11,7 @@
             class="h-8 w-auto"
           />
           <span class="hidden sm:block text-sm font-semibold text-gray-700 border-l border-gray-300 pl-3 leading-tight">
-            Osservatorio ASSIF<br><span class="text-brand-500 font-bold">sul 5, 2 e 8 per mille</span>
+            Osservatorio<br><span class="text-brand-500 font-bold">5×1000</span>
           </span>
         </RouterLink>
 
@@ -71,7 +71,7 @@
               class="h-8 w-auto mb-3 brightness-0 invert"
             />
             <p class="text-gray-400 text-xs leading-relaxed">
-              Osservatorio ASSIF sul 5, 2 e 8 per mille<br>
+              Osservatorio sul 5 per mille, un progetto di ASSIF<br>
               Associazione Italiana Fundraiser
             </p>
             <!-- Social -->
@@ -99,11 +99,11 @@
               <li><RouterLink to="/categorie"  class="hover:text-white transition-colors">Analisi categorie</RouterLink></li>
               <li><RouterLink to="/classifica" class="hover:text-white transition-colors">Classifica</RouterLink></li>
               <li><RouterLink to="/geo"        class="hover:text-white transition-colors">Mappa geografica</RouterLink></li>
-              <li><RouterLink to="/esclusi"    class="hover:text-white transition-colors">Enti esclusi</RouterLink></li>
               <li><RouterLink to="/inoptato"   class="hover:text-white transition-colors">Inoptato</RouterLink></li>
               <li><RouterLink to="/forecast"   class="hover:text-white transition-colors">Proiezioni trend</RouterLink></li>
               <li><RouterLink to="/download"   class="hover:text-white transition-colors">Download dataset</RouterLink></li>
-              <li><RouterLink to="/ricerca"   class="hover:text-white transition-colors">Ricerca AI</RouterLink></li>
+              <li><RouterLink to="/ricerca"          class="hover:text-white transition-colors">Ricerca AI</RouterLink></li>
+              <li><RouterLink to="/ricerca-avanzata" class="hover:text-white transition-colors">Ricerca avanzata riparti</RouterLink></li>
             </ul>
           </div>
           <!-- ASSIF -->
@@ -111,7 +111,7 @@
             <p class="font-semibold text-white mb-3">ASSIF</p>
             <ul class="space-y-2">
               <li><a href="https://www.assif.it" target="_blank" rel="noopener" class="hover:text-white transition-colors">Sito ASSIF</a></li>
-              <li><a href="https://5x1000.assif.it" target="_blank" rel="noopener" class="hover:text-white transition-colors">Osservatorio ASSIF sul 5, 2 e 8 per mille</a></li>
+              <li><a href="https://5x1000.assif.it" target="_blank" rel="noopener" class="hover:text-white transition-colors">Osservatorio 5×1000</a></li>
               <li><a href="https://www.assif.it/soci/modulo-iscrizione/" target="_blank" rel="noopener" class="hover:text-white transition-colors">Diventa socio</a></li>
               <li><a href="https://www.assif.it/contatti/" target="_blank" rel="noopener" class="hover:text-white transition-colors">Contatti</a></li>
               <li><RouterLink to="/about" class="hover:text-white transition-colors">Crediti &amp; licenza</RouterLink></li>
@@ -140,11 +140,11 @@ const navLinks = [
   { to: '/categorie',  label: 'Categorie' },
   { to: '/classifica', label: 'Classifica' },
   { to: '/geo',        label: 'Mappa' },
-  { to: '/esclusi',    label: 'Esclusi' },
   { to: '/inoptato',   label: 'Inoptato' },
   { to: '/forecast',   label: 'Proiezioni' },
   { to: '/download',   label: 'Download' },
-  { to: '/ricerca',    label: 'Ricerca AI' },
+  { to: '/ricerca',          label: 'Ricerca AI' },
+  { to: '/ricerca-avanzata', label: 'Riparti' },
   { to: '/api',        label: 'API' },
   { to: '/about',      label: 'Info' },
 ]
