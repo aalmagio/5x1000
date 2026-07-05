@@ -4,7 +4,7 @@
     <header class="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
       <nav class="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
         <!-- Logo -->
-        <RouterLink to="/" class="flex items-center gap-3 group">
+        <RouterLink to="/" class="flex items-center gap-3 group" @click="closeAll">
           <img
             src="https://5x1000.assif.it/wp-content/uploads/2026/05/ASSIF_logo-1.png"
             alt="ASSIF"
@@ -17,12 +17,124 @@
 
         <!-- Desktop nav -->
         <ul class="hidden md:flex items-center gap-0.5 text-sm font-medium">
-          <li v-for="link in navLinks" :key="link.to">
+          <!-- Home -->
+          <li>
             <RouterLink
-              :to="link.to"
+              to="/"
               class="px-3 py-2 rounded-md text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
               active-class="text-brand-500 font-semibold"
-            >{{ link.label }}</RouterLink>
+              @click="closeAll"
+            >Home</RouterLink>
+          </li>
+
+          <!-- Dropdown: Dati -->
+          <li class="relative" @mouseenter="open('dati')" @mouseleave="scheduleClose">
+            <button
+              class="flex items-center gap-1 px-3 py-2 rounded-md transition-colors"
+              :class="openMenu === 'dati' || isDatiActive
+                ? 'text-brand-500 font-semibold bg-gray-50'
+                : 'text-gray-600 hover:text-brand-500 hover:bg-gray-50'"
+              @click="toggle('dati')"
+            >
+              Dati
+              <svg class="w-3.5 h-3.5 transition-transform" :class="openMenu === 'dati' ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
+              </svg>
+            </button>
+            <div
+              v-show="openMenu === 'dati'"
+              class="absolute top-full left-0 mt-1 w-48 bg-white rounded-xl border border-gray-200 shadow-lg py-1 z-50"
+              @mouseenter="cancelClose"
+              @mouseleave="scheduleClose"
+            >
+              <RouterLink v-for="l in menuDati" :key="l.to" :to="l.to"
+                class="flex items-center gap-2.5 px-4 py-2 text-sm text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+                active-class="text-brand-500 font-semibold bg-brand-50"
+                @click="closeAll"
+              >
+                <span class="text-base leading-none">{{ l.icon }}</span>
+                <span>{{ l.label }}</span>
+              </RouterLink>
+            </div>
+          </li>
+
+          <!-- Dropdown: Analisi -->
+          <li class="relative" @mouseenter="open('analisi')" @mouseleave="scheduleClose">
+            <button
+              class="flex items-center gap-1 px-3 py-2 rounded-md transition-colors"
+              :class="openMenu === 'analisi' || isAnalisiActive
+                ? 'text-brand-500 font-semibold bg-gray-50'
+                : 'text-gray-600 hover:text-brand-500 hover:bg-gray-50'"
+              @click="toggle('analisi')"
+            >
+              Analisi
+              <svg class="w-3.5 h-3.5 transition-transform" :class="openMenu === 'analisi' ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
+              </svg>
+            </button>
+            <div
+              v-show="openMenu === 'analisi'"
+              class="absolute top-full left-0 mt-1 w-52 bg-white rounded-xl border border-gray-200 shadow-lg py-1 z-50"
+              @mouseenter="cancelClose"
+              @mouseleave="scheduleClose"
+            >
+              <RouterLink v-for="l in menuAnalisi" :key="l.to" :to="l.to"
+                class="flex items-center gap-2.5 px-4 py-2 text-sm text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+                active-class="text-brand-500 font-semibold bg-brand-50"
+                @click="closeAll"
+              >
+                <span class="text-base leading-none">{{ l.icon }}</span>
+                <span>{{ l.label }}</span>
+              </RouterLink>
+            </div>
+          </li>
+
+          <!-- Ricerca AI -->
+          <li>
+            <RouterLink
+              to="/ricerca"
+              class="px-3 py-2 rounded-md text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+              active-class="text-brand-500 font-semibold"
+              @click="closeAll"
+            >Ricerca AI</RouterLink>
+          </li>
+
+          <!-- Download -->
+          <li>
+            <RouterLink
+              to="/download"
+              class="px-3 py-2 rounded-md text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+              active-class="text-brand-500 font-semibold"
+              @click="closeAll"
+            >Download</RouterLink>
+          </li>
+
+          <!-- Dropdown: ··· -->
+          <li class="relative" @mouseenter="open('altro')" @mouseleave="scheduleClose">
+            <button
+              class="flex items-center gap-1 px-3 py-2 rounded-md transition-colors"
+              :class="openMenu === 'altro' || isAltroActive
+                ? 'text-brand-500 font-semibold bg-gray-50'
+                : 'text-gray-600 hover:text-brand-500 hover:bg-gray-50'"
+              @click="toggle('altro')"
+            >
+              ···
+            </button>
+            <div
+              v-show="openMenu === 'altro'"
+              class="absolute top-full right-0 mt-1 w-40 bg-white rounded-xl border border-gray-200 shadow-lg py-1 z-50"
+              @mouseenter="cancelClose"
+              @mouseleave="scheduleClose"
+            >
+              <RouterLink v-for="l in menuAltro" :key="l.to" :to="l.to"
+                class="flex items-center gap-2.5 px-4 py-2 text-sm text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+                active-class="text-brand-500 font-semibold bg-brand-50"
+                @click="closeAll"
+              >
+                <span class="text-base leading-none">{{ l.icon }}</span>
+                <span>{{ l.label }}</span>
+              </RouterLink>
+            </div>
           </li>
         </ul>
 
@@ -41,16 +153,48 @@
         </button>
       </nav>
 
-      <!-- Mobile menu -->
-      <div v-show="menuOpen" class="md:hidden border-t border-gray-100 px-4 py-2 pb-4 space-y-1 bg-white">
-        <RouterLink
-          v-for="link in navLinks"
-          :key="link.to"
-          :to="link.to"
-          class="block px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
-          active-class="text-brand-500 bg-red-50"
-          @click="menuOpen = false"
-        >{{ link.label }}</RouterLink>
+      <!-- Mobile menu — flat list with section dividers -->
+      <div v-show="menuOpen" class="md:hidden border-t border-gray-100 bg-white pb-3">
+        <!-- Dati -->
+        <div class="px-4 pt-3 pb-1">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 px-3">Dati</p>
+          <RouterLink v-for="l in menuDati" :key="l.to" :to="l.to"
+            class="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+            active-class="text-brand-500 bg-red-50"
+            @click="menuOpen = false"
+          >
+            <span>{{ l.icon }}</span> {{ l.label }}
+          </RouterLink>
+        </div>
+        <div class="border-t border-gray-100 px-4 pt-3 pb-1">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 px-3">Analisi</p>
+          <RouterLink v-for="l in menuAnalisi" :key="l.to" :to="l.to"
+            class="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+            active-class="text-brand-500 bg-red-50"
+            @click="menuOpen = false"
+          >
+            <span>{{ l.icon }}</span> {{ l.label }}
+          </RouterLink>
+        </div>
+        <div class="border-t border-gray-100 px-4 pt-3 pb-1">
+          <RouterLink to="/ricerca"
+            class="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+            active-class="text-brand-500 bg-red-50"
+            @click="menuOpen = false"
+          >🤖 Ricerca AI</RouterLink>
+          <RouterLink to="/download"
+            class="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+            active-class="text-brand-500 bg-red-50"
+            @click="menuOpen = false"
+          >📥 Download</RouterLink>
+          <RouterLink v-for="l in menuAltro" :key="l.to" :to="l.to"
+            class="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+            active-class="text-brand-500 bg-red-50"
+            @click="menuOpen = false"
+          >
+            <span>{{ l.icon }}</span> {{ l.label }}
+          </RouterLink>
+        </div>
       </div>
     </header>
 
@@ -74,7 +218,6 @@
               Osservatorio sul 5 per mille, un progetto di ASSIF<br>
               Associazione Italiana Fundraiser
             </p>
-            <!-- Social -->
             <div class="flex gap-3 mt-4">
               <a href="https://www.facebook.com/ASSIF.Associazione.Italiana.Fundraiser/" target="_blank" rel="noopener" class="hover:text-white transition-colors" aria-label="Facebook">
                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M22 12c0-5.523-4.477-10-10-10S2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.878v-6.987h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.988C18.343 21.128 22 16.991 22 12z"/></svg>
@@ -90,20 +233,20 @@
               </a>
             </div>
           </div>
-          <!-- Esplora -->
+          <!-- Esplora (footer) -->
           <div>
             <p class="font-semibold text-white mb-3">Esplora</p>
             <ul class="space-y-2">
-              <li><RouterLink to="/dati"       class="hover:text-white transition-colors">Ricerca enti</RouterLink></li>
-              <li><RouterLink to="/confronto"  class="hover:text-white transition-colors">Confronto enti</RouterLink></li>
-              <li><RouterLink to="/categorie"  class="hover:text-white transition-colors">Analisi categorie</RouterLink></li>
-              <li><RouterLink to="/classifica" class="hover:text-white transition-colors">Classifica</RouterLink></li>
-              <li><RouterLink to="/geo"        class="hover:text-white transition-colors">Mappa geografica</RouterLink></li>
-              <li><RouterLink to="/inoptato"   class="hover:text-white transition-colors">Inoptato</RouterLink></li>
-              <li><RouterLink to="/forecast"   class="hover:text-white transition-colors">Proiezioni trend</RouterLink></li>
-              <li><RouterLink to="/download"   class="hover:text-white transition-colors">Download dataset</RouterLink></li>
+              <li><RouterLink to="/dati"             class="hover:text-white transition-colors">Ricerca enti</RouterLink></li>
+              <li><RouterLink to="/confronto"        class="hover:text-white transition-colors">Confronto enti</RouterLink></li>
+              <li><RouterLink to="/classifica"       class="hover:text-white transition-colors">Classifica</RouterLink></li>
+              <li><RouterLink to="/geo"              class="hover:text-white transition-colors">Mappa geografica</RouterLink></li>
+              <li><RouterLink to="/categorie"        class="hover:text-white transition-colors">Analisi categorie</RouterLink></li>
+              <li><RouterLink to="/ricerca-avanzata" class="hover:text-white transition-colors">Riparti</RouterLink></li>
+              <li><RouterLink to="/inoptato"         class="hover:text-white transition-colors">Inoptato</RouterLink></li>
+              <li><RouterLink to="/forecast"         class="hover:text-white transition-colors">Proiezioni trend</RouterLink></li>
+              <li><RouterLink to="/download"         class="hover:text-white transition-colors">Download dataset</RouterLink></li>
               <li><RouterLink to="/ricerca"          class="hover:text-white transition-colors">Ricerca AI</RouterLink></li>
-              <li><RouterLink to="/ricerca-avanzata" class="hover:text-white transition-colors">Ricerca avanzata riparti</RouterLink></li>
             </ul>
           </div>
           <!-- ASSIF -->
@@ -114,6 +257,7 @@
               <li><a href="https://5x1000.assif.it" target="_blank" rel="noopener" class="hover:text-white transition-colors">Osservatorio 5×1000</a></li>
               <li><a href="https://www.assif.it/soci/modulo-iscrizione/" target="_blank" rel="noopener" class="hover:text-white transition-colors">Diventa socio</a></li>
               <li><a href="https://www.assif.it/contatti/" target="_blank" rel="noopener" class="hover:text-white transition-colors">Contatti</a></li>
+              <li><RouterLink to="/api"   class="hover:text-white transition-colors">API</RouterLink></li>
               <li><RouterLink to="/about" class="hover:text-white transition-colors">Crediti &amp; licenza</RouterLink></li>
             </ul>
           </div>
@@ -128,24 +272,49 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { RouterLink, RouterView } from 'vue-router'
+import { ref, computed } from 'vue'
+import { RouterLink, RouterView, useRoute } from 'vue-router'
 
+const route    = useRoute()
 const menuOpen = ref(false)
+const openMenu = ref(null)
+let closeTimer = null
 
-const navLinks = [
-  { to: '/',           label: 'Home' },
-  { to: '/dati',       label: 'Esplora' },
-  { to: '/confronto',  label: 'Confronto' },
-  { to: '/categorie',  label: 'Categorie' },
-  { to: '/classifica', label: 'Classifica' },
-  { to: '/geo',        label: 'Mappa' },
-  { to: '/inoptato',   label: 'Inoptato' },
-  { to: '/forecast',   label: 'Proiezioni' },
-  { to: '/download',   label: 'Download' },
-  { to: '/ricerca',          label: 'Ricerca AI' },
-  { to: '/ricerca-avanzata', label: 'Riparti' },
-  { to: '/api',        label: 'API' },
-  { to: '/about',      label: 'Info' },
+const menuDati = [
+  { to: '/dati',       label: 'Esplora enti',  icon: '🔍' },
+  { to: '/confronto',  label: 'Confronto',      icon: '⚖️' },
+  { to: '/classifica', label: 'Classifica',     icon: '🏆' },
+  { to: '/geo',        label: 'Mappa',          icon: '🗺️' },
 ]
+
+const menuAnalisi = [
+  { to: '/categorie',        label: 'Categorie',    icon: '📊' },
+  { to: '/ricerca-avanzata', label: 'Riparti',      icon: '🔀' },
+  { to: '/inoptato',         label: 'Inoptato',     icon: '📭' },
+  { to: '/forecast',         label: 'Proiezioni',   icon: '📈' },
+]
+
+const menuAltro = [
+  { to: '/api',   label: 'API',  icon: '⚙️' },
+  { to: '/about', label: 'Info', icon: 'ℹ️' },
+]
+
+const datiPaths    = menuDati.map(l => l.to)
+const analisiPaths = menuAnalisi.map(l => l.to)
+const altroPaths   = menuAltro.map(l => l.to)
+
+const isDatiActive    = computed(() => datiPaths.includes(route.path))
+const isAnalisiActive = computed(() => analisiPaths.includes(route.path))
+const isAltroActive   = computed(() => altroPaths.includes(route.path))
+
+function open(name)  { cancelClose(); openMenu.value = name }
+function toggle(name){ openMenu.value = openMenu.value === name ? null : name; cancelClose() }
+function closeAll()  { openMenu.value = null; menuOpen.value = false }
+
+function scheduleClose() {
+  closeTimer = setTimeout(() => { openMenu.value = null }, 150)
+}
+function cancelClose() {
+  if (closeTimer) { clearTimeout(closeTimer); closeTimer = null }
+}
 </script>
