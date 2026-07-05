@@ -75,6 +75,29 @@
             <p class="text-xs text-gray-400 mt-1">{{ annoPrecedente }} → {{ annoUltimo }}</p>
           </div>
         </div>
+
+        <!-- Stato nei riparti (solo se l'ente ha esclusioni in qualche anno) -->
+        <div v-if="haEsclusioni" class="mt-3 pt-3 border-t border-gray-100">
+          <p class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Stato nei riparti</p>
+          <div class="flex flex-wrap gap-1.5">
+            <span
+              v-for="(stato, cat) in statoRiparti"
+              :key="cat"
+              class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium"
+              :class="{
+                'bg-green-100 text-green-700': stato === 'ammesso',
+                'bg-red-100 text-red-700':     stato === 'escluso',
+                'bg-amber-100 text-amber-700': stato === 'misto',
+              }"
+            >
+              <span>{{ stato === 'ammesso' ? '✓' : stato === 'escluso' ? '✗' : '⚠' }}</span>
+              {{ slugLabel(cat) }}
+            </span>
+          </div>
+          <p v-if="Object.values(statoRiparti).some(s => s === 'misto')" class="text-xs text-amber-600 mt-1.5">
+            In alcune categorie l'ente è escluso in certi anni
+          </p>
+        </div>
       </div>
 
       <!-- KPI Cards -->
@@ -231,7 +254,7 @@
                 <template v-if="r.cat_breakdown">
                   <tr
                     v-for="cb in r.cat_breakdown"
-                    :key="r.anno + '-' + cb.categoria"
+                    :key="`${r.anno}-amm-${cb.categoria}`"
                     class="text-xs text-gray-500 bg-white"
                   >
                     <td class="pl-6">
@@ -247,6 +270,22 @@
                     <td class="text-right tabular-nums hidden sm:table-cell">{{ formatEur(cb.importo_generico) }}</td>
                     <td class="text-right tabular-nums hidden lg:table-cell text-gray-500">{{ formatEur2(importoMedioFirma(cb)) }}</td>
                     <td class="text-right tabular-nums text-gray-700">{{ formatEur(cb.importo_totale) }}</td>
+                  </tr>
+                </template>
+                <!-- Sub-righe categorie escluse dal riparto -->
+                <template v-if="r.cat_escluse?.length || r.categorie_escluse?.length">
+                  <tr
+                    v-for="cat in (r.cat_escluse?.length ? r.cat_escluse : r.categorie_escluse)"
+                    :key="`${r.anno}-esc-${cat}`"
+                    class="text-xs"
+                  >
+                    <td colspan="99" class="py-1 pl-10 bg-red-50/40">
+                      <span class="inline-flex items-center gap-1 text-red-500">
+                        <span class="text-red-400">✗</span>
+                        <span class="badge bg-red-100 text-red-600 text-xs">{{ slugLabel(cat) }}</span>
+                        <span class="text-red-400">escluso dal riparto</span>
+                      </span>
+                    </td>
                   </tr>
                 </template>
               </template>
@@ -421,6 +460,29 @@ const categorieMultiple = computed(() =>
   (ente.value?.categorie?.length ?? 0) > 1 ||
   hasCatBreakdown.value
 )
+
+// True se in qualche anno l'ente è stato escluso da almeno un riparto
+const haEsclusioni = computed(() =>
+  storicoOrdinato.value.some(r => r.cat_escluse?.length > 0 || r.categorie_escluse?.length > 0)
+)
+
+// Stato aggregato per categoria attraverso tutti gli anni: 'ammesso' | 'escluso' | 'misto'
+const statoRiparti = computed(() => {
+  const amm = new Set()
+  const esc = new Set()
+  for (const r of storicoOrdinato.value) {
+    if (r.cat_breakdown)     r.cat_breakdown.forEach(cb => cb.categoria && amm.add(cb.categoria))
+    if (r.cat_escluse)       r.cat_escluse.forEach(c => esc.add(c))
+    if (r.categorie_ammesse) r.categorie_ammesse.forEach(c => amm.add(c))
+    if (r.categorie_escluse) r.categorie_escluse.forEach(c => esc.add(c))
+    if (r.categoria && !r.cat_breakdown) amm.add(r.categoria)
+  }
+  ;(ente.value?.categorie ?? []).forEach(c => amm.add(c))
+  const result = {}
+  amm.forEach(c => { result[c] = esc.has(c) ? 'misto' : 'ammesso' })
+  esc.forEach(c => { if (!result[c]) result[c] = 'escluso' })
+  return result
+})
 
 // ── Importo medio per firma ───────────────────────────────────────────────────
 const importoMedioFirma = (r) =>

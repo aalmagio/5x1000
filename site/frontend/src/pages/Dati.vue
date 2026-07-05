@@ -7,7 +7,7 @@
 
     <!-- Filtri -->
     <div class="card mb-6">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-4">
         <div>
           <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Anno</label>
           <select v-model="filters.anno" class="input-field">
@@ -16,9 +16,16 @@
           </select>
         </div>
         <div>
-          <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Categoria</label>
+          <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Categoria principale</label>
           <select v-model="filters.categoria" class="input-field">
             <option :value="null">Tutte le categorie</option>
+            <option v-for="c in categorie" :key="c" :value="c">{{ c.replace(/_/g, ' ') }}</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-gray-500 mb-1.5 block uppercase tracking-wide">Categoria di riparto</label>
+          <select v-model="filters.categoria_riparto" class="input-field">
+            <option :value="null">Tutti i riparti</option>
             <option v-for="c in categorie" :key="c" :value="c">{{ c.replace(/_/g, ' ') }}</option>
           </select>
         </div>
@@ -258,15 +265,16 @@ const sortBy    = ref('importo_totale')
 const sortAsc   = ref(false)
 
 const filters = ref({
-  anno:         null,
-  categoria:    null,
-  regione:      '',
-  q:            '',
-  runts_filter: 'all',  // 'all' | 'runts' | 'non_runts'
+  anno:              null,
+  categoria:         null,
+  categoria_riparto: null,
+  regione:           '',
+  q:                 '',
+  runts_filter:      'all',  // 'all' | 'runts' | 'non_runts'
 })
 
 const hasActiveFilters = computed(() =>
-  filters.value.anno || filters.value.categoria || filters.value.regione || filters.value.q || filters.value.runts_filter !== 'all'
+  filters.value.anno || filters.value.categoria || filters.value.categoria_riparto || filters.value.regione || filters.value.q || filters.value.runts_filter !== 'all'
 )
 
 const sortedData = computed(() => {
@@ -342,9 +350,10 @@ async function search(p = 1) {
   page.value    = p
   try {
     const params = { pagina: p, per_pagina: 50 }
-    if (filters.value.anno)       params.anno      = filters.value.anno
-    if (filters.value.categoria)  params.categoria = filters.value.categoria
-    if (filters.value.regione)    params.regione   = filters.value.regione
+    if (filters.value.anno)              params.anno              = filters.value.anno
+    if (filters.value.categoria)         params.categoria         = filters.value.categoria
+    if (filters.value.categoria_riparto) params.categoria_riparto = filters.value.categoria_riparto
+    if (filters.value.regione)           params.regione           = filters.value.regione
     if (filters.value.q)          params.q         = filters.value.q
     if (filters.value.runts_filter === 'runts')     params.runts_only = 1
     if (filters.value.runts_filter === 'non_runts') params.non_runts  = 1
@@ -361,7 +370,7 @@ async function search(p = 1) {
 }
 
 function reset() {
-  filters.value = { anno: meta.annoCorrente, categoria: null, regione: '', q: '', runts_filter: 'all' }
+  filters.value = { anno: meta.annoCorrente, categoria: null, categoria_riparto: null, regione: '', q: '', runts_filter: 'all' }
   sortBy.value  = 'importo_totale'
   sortAsc.value = false
   search()
