@@ -368,12 +368,17 @@ def novita_elenco(anno: int, session) -> dict:
         return {"errore": str(e)}
     finally:
         logging.disable(logging.NOTSET)
-    online = {sanitize_filename(u, i, ext)
-              for ext in ("pdf", "csv") for i, u in enumerate(links.get(ext, []), 1)}
+    # mantieni l'ordine di pagina per poter confrontare il primo filename
+    online_ord = [sanitize_filename(u, i, ext)
+                  for ext in ("pdf", "csv") for i, u in enumerate(links.get(ext, []), 1)]
+    online = set(online_ord)
     cartella = ROOT / str(anno)
     locali = {p.name for p in cartella.iterdir() if p.is_file()} if cartella.is_dir() else set()
+    primo = online_ord[0] if online_ord else None
     return {"online": len(online), "locali": len(locali - {f"dati_{anno}.xlsx"}),
-            "nuovi": sorted(online - locali)}
+            "nuovi": sorted(online - locali),
+            "primo_online": primo,
+            "primo_presente": primo in locali if primo else None}
 
 
 def chiedi_link_categorie(anno: int, gia_presenti: set[str], session) -> list[tuple[str, str]]:
@@ -476,6 +481,8 @@ def elabora_anno(anno: int, nuovo: bool, db_ok: bool) -> bool:
     8. Pubblicazione DB in transazione {'' if db_ok else '(DB NON RAGGIUNGIBILE: sarà saltata)'}
     9. Ripartizioni, RUNTS, catalogo file, forecast
    10. Verifica finale -> Dati/verifiche/""")
+    pubblica_ok = db_ok and ask_yes_no(
+        f"\n  Pubblicare l'anno {anno} sul sito al termine?", default="s")
     if not ask_yes_no("\n  Avvio la procedura?", default="s"):
         return False
 
@@ -562,7 +569,7 @@ def elabora_anno(anno: int, nuovo: bool, db_ok: bool) -> bool:
     _pl._mark_done(str(ROOT), anno, "categorie")
 
     pubblicato = False
-    if db_ok and ask_yes_no(f"\n  Dati locali pronti. Pubblico l'anno {anno} sul sito?", default="s"):
+    if pubblica_ok:
         pubblicato = pubblica_anno(anno, t0)
     elif not db_ok:
         print("\n  DB non raggiungibile da questa macchina: pubblicazione non eseguita.\n"
@@ -666,14 +673,21 @@ def menu_aggiorna(db_ok: bool) -> None:
 
     if ask_yes_no("  Controllo su AdE quali anni hanno file nuovi? (circa 1-2 s per anno)", default="s"):
         session = _sessione()
-        print(f"\n  {'ANNO':<6}{'FILE ONLINE':>12}{'FILE LOCALI':>12}{'NUOVI SU AdE':>14}")
+        print(f"\n  {'ANNO':<6}{'ONLINE':>8}{'LOCALI':>8}  {'PRIMO FILE ONLINE (segnale cambio dati)'}")
         for a in anni:
             n = novita_elenco(a, session)
             if "errore" in n:
                 print(f"  {a:<6}  errore: {n['errore']}")
             else:
-                flag = "  <-- novità" if n["nuovi"] else ""
-                print(f"  {a:<6}{n['online']:>12}{n['locali']:>12}{len(n['nuovi']):>14}{flag}")
+                primo = n.get("primo_online") or "-"
+                presente = n.get("primo_presente")
+                if presente is None:
+                    stato = ""
+                elif presente:
+                    stato = "  (già in locale)"
+                else:
+                    stato = "  <-- NON in locale, aggiorna"
+                print(f"  {a:<6}{n['online']:>8}{n['locali']:>8}  {primo}{stato}")
 
     try:
         anno = int(chiedi("\n  Anno da aggiornare"))
