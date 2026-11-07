@@ -83,8 +83,19 @@ site/frontend/dist/
 Thumbs.db
 desktop.ini
 
+# --- Analisi locali QlikView / QlikSense ---
+QVD/
+_LOCAL/
+
+# --- File RUNTS (scaricati manualmente, non in repo) ---
+Runts/
+
+# --- Configurazione locale pipeline ---
+ciclo_defaults.yaml
+
 # --- File vecchi / backup ---
 _OLD/
+_archivio/
 *.old
 *.bak
 *.tmp

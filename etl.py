@@ -1090,6 +1090,7 @@ def main():
         logging.info("Merge RUNTS saltato (--no-runts)")
 
     # --- Filtro anni ---
+    csv_path = out_dir / "enti_5x1000_norm.csv"
     anni_filter = None
     if args.anni:
         anni_filter = [int(a.strip()) for a in args.anni.split(",")]
@@ -1103,7 +1104,6 @@ def main():
             )
 
     # --- Processing streaming: anno per anno → CSV ---
-    csv_path = out_dir / "enti_5x1000_norm.csv"
     logging.info(f"Output CSV: {csv_path}")
 
     # Callback per aggiornamento DB per-anno

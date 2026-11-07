@@ -13,6 +13,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Comandi principali
 
 ```bash
+# Procedura guidata (aggiunta anno, aggiornamento anno, verifica, ripubblicazione)
+python guida.py
+
+# Verifica coerenza AdE <-> CSV <-> DB (Excel in Dati/verifiche/, exit 2 se anomalie)
+python verifica.py --anni 2024
+
+# Sincronizzazione sviluppo -> produzione (scambio tabelle atomico)
+python sync.py --stato        # confronto, nessuna modifica
+python sync.py                # DB + file (richiede sezione sync: in config.yaml)
+python sync.py --rollback     # torna alla versione precedente
+python sync.py --pulisci      # elimina tabelle *__old e release vecchie
+
 # Pipeline completa interattiva
 python pipeline.py
 
@@ -48,6 +60,10 @@ gsheets.py                 →  upload su Google Sheets (per Looker Studio)
 db_updater.py              →  aggiornamento MySQL del sito 5x1000.almagioni.com
 forecast.py                →  site/public/data/forecast.json
 ```
+
+**`guida.py`** è il punto d'ingresso consigliato per aggiungere o aggiornare un anno. Per un singolo anno: archivia i file correnti in `_archivio/<anno>_<ts>/` (grezzi, Excel estratti, copia del CSV), riscarica da zero, esegue due controlli bloccanti (estratto vs versione precedente e CSV grezzi AdE; dopo l'ETL gli altri anni del CSV devono restare identici) e ripristina l'archivio se qualcosa fallisce prima della pubblicazione. Pubblica con `db_updater.sostituisci_anno()` (DELETE+INSERT in un'unica transazione, ROLLBACK su errore o conteggio enti diverso dagli attesi), poi `finalizza_ciclo`, forecast e `verifica.py`. Lock in `Dati/.stato/guida.lock`.
+
+**`sync.py`** porta i dati da sviluppo (sottodominio Plesk, DB `DEV_DB_*`) a produzione (`PROD_DB_*`). Copia le tabelle `enti, categoria_ammissioni, ripartizioni, runts, pipeline_runs, dataset_files` in `<tabella>__new` su produzione a blocchi per chiave primaria, verifica conteggi e totali per anno, copia i file scaricabili in una nuova release (`dataset_files.percorso` riscritto, SHA-256 ricontrollato), poi esegue un unico `RENAME TABLE` atomico (`t -> t__old, t__new -> t`), svuota `nlq_cache` e sostituisce `forecast.json`. Blocca se lo schema differisce o se un anno presente in produzione manca in sviluppo. Non tocca mai `leads` e `nlq_rate_limit`. Stato dell'ultima sync in `Dati/.stato/sync_ultimo.json`. Si esegue via SSH sul server dalla root di sviluppo (`<home>/dev5x1000.almagioni.com`); la produzione è la cartella sorella `<home>/5x1000.almagioni.com` e i percorsi `sync:` in `config.yaml` sono relativi alla root (release in `Dati/_release/` di produzione, unica posizione servita da `api.php`). Procedura operativa: `PROCEDURA_AGGIORNAMENTO.md`.
 
 **`pipeline.py`** è l'orchestratore: esegue tutti gli step in sequenza, fa le domande upfront e passa i parametri ai singoli script via subprocess. I passi completati in modalità `--ciclo` sono tracciati con file sentinella `.done` in `Dati/.stato/`.
 

@@ -319,38 +319,9 @@ def aggiorna_anno_ciclo(
             # categoria_ammissioni: solo file di questo anno
             if dati_dir and dati_dir.exists():
                 totale_cat = 0
-                for cat_dir in sorted(dati_dir.iterdir()):
-                    if not cat_dir.is_dir():
-                        continue
-                    cat_slug = _CAT_SLUG.get(cat_dir.name.upper(), cat_dir.name.lower())
-                    for stato in ("ammesso", "escluso"):
-                        pattern = f"{anno}_*_{'ammessi' if stato == 'ammesso' else 'esclusi'}.xlsx"
-                        for xlsx in sorted(cat_dir.glob(pattern)):
-                            if anno >= 2019:
-                                righe, *_ = _leggi_xlsx_ripartizione(xlsx)
-                                if not righe:
-                                    continue
-                                batch = [
-                                    (anno, cat_slug,
-                                     r["cf"], r.get("denom"), stato,
-                                     r["numero_scelte"], r["imp_esp"], r["imp_gen"], r["imp_ver"],
-                                     r["imp_sottos"] or None, r["imp_erog"] or None)
-                                    for r in righe
-                                ]
-                            else:
-                                righe = _leggi_xlsx_ammissioni(xlsx)
-                                if not righe:
-                                    continue
-                                batch = [
-                                    (anno, cat_slug,
-                                     r["cf"], r["denom"], stato,
-                                     r["n_scelte"], r["importo_espresso"],
-                                     r["importo_generico"], r["importo_totale"],
-                                     None, None)
-                                    for r in righe
-                                ]
-                            cur.executemany(_CAT_AMM_UPSERT, batch)
-                            totale_cat += len(batch)
+                for _xlsx, batch in righe_categoria_anno(dati_dir, anno):
+                    cur.executemany(_CAT_AMM_UPSERT, batch)
+                    totale_cat += len(batch)
 
                 if totale_cat:
                     logger.info(f"db_updater: categoria_ammissioni anno {anno}: {totale_cat} righe")
@@ -361,6 +332,128 @@ def aggiorna_anno_ciclo(
     except Exception as exc:
         logger.error(f"db_updater: aggiorna_anno_ciclo({anno}) errore – {exc}", exc_info=True)
         return False
+
+
+def righe_categoria_anno(dati_dir: Path, anno: int):
+    """
+    Generatore: per ogni file Dati/<CAT>/<anno>_*_{ammessi,esclusi}.xlsx produce
+    (path_xlsx, batch) dove batch è la lista di tuple pronte per _CAT_AMM_UPSERT:
+      (anno, categoria, cf, denom, stato, n_scelte, imp_esp, imp_gen, imp_tot,
+       imp_sotto_soglia, imp_erogabile)
+    Ordine: per categoria, prima gli ammessi poi gli esclusi (in caso di CF
+    presente in entrambi, con l'UPSERT vince l'escluso).
+    Usato sia dal caricamento DB sia da verifica.py, così i due leggono
+    i file nello stesso modo.
+    """
+    dati_dir = Path(dati_dir)
+    for cat_dir in sorted(dati_dir.iterdir()):
+        if not cat_dir.is_dir() or cat_dir.name.startswith("."):
+            continue
+        cat_slug = _CAT_SLUG.get(cat_dir.name.upper(), cat_dir.name.lower())
+        for stato in ("ammesso", "escluso"):
+            pattern = f"{anno}_*_{'ammessi' if stato == 'ammesso' else 'esclusi'}.xlsx"
+            for xlsx in sorted(cat_dir.glob(pattern)):
+                if anno >= 2019:
+                    righe, *_ = _leggi_xlsx_ripartizione(xlsx)
+                    if not righe:
+                        continue
+                    batch = [
+                        (anno, cat_slug,
+                         r["cf"], r.get("denom"), stato,
+                         r["numero_scelte"], r["imp_esp"], r["imp_gen"], r["imp_ver"],
+                         r["imp_sottos"] or None, r["imp_erog"] or None)
+                        for r in righe
+                    ]
+                else:
+                    righe = _leggi_xlsx_ammissioni(xlsx)
+                    if not righe:
+                        continue
+                    batch = [
+                        (anno, cat_slug,
+                         r["cf"], r["denom"], stato,
+                         r["n_scelte"], r["importo_espresso"],
+                         r["importo_generico"], r["importo_totale"],
+                         None, None)
+                        for r in righe
+                    ]
+                yield xlsx, batch
+
+
+def sostituisci_anno(
+    anno: int,
+    csv_path: Path | str,
+    dati_dir: Path | str,
+    attesi_enti: int | None = None,
+    db_config: dict | None = None,
+) -> tuple[bool, dict]:
+    """
+    Sostituisce TUTTI i dati di un anno nel DB in un'unica transazione InnoDB:
+      DELETE enti/categoria_ammissioni dell'anno → INSERT dai file aggiornati → COMMIT.
+
+    Il sito continua a leggere i dati precedenti fino al COMMIT (MVCC); qualsiasi
+    errore provoca ROLLBACK e il DB resta com'era. A differenza dell'UPSERT,
+    gli enti rimossi da AdE spariscono anche dal DB.
+
+    attesi_enti: se indicato, prima del COMMIT verifica che COUNT(enti dell'anno)
+    sia uguale a questo valore (CF distinti attesi dal CSV); se diverso → ROLLBACK.
+
+    Ritorna (ok, info) con info = {"enti_prima", "enti_dopo", "cat_prima", "cat_dopo"}.
+    """
+    import pymysql
+    import pandas as pd
+
+    cfg = _db_config({**(db_config or {}), "autocommit": False})
+    if not cfg["user"] or not cfg["database"]:
+        logger.error("db_updater: SITE_DB_* non configurati – sostituisci_anno impossibile")
+        return False, {}
+
+    csv_path = Path(csv_path)
+    dati_dir = Path(dati_dir)
+    info: dict = {}
+    t0 = time.time()
+
+    conn = pymysql.connect(**cfg)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM enti WHERE anno = %s", (anno,))
+        info["enti_prima"] = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM categoria_ammissioni WHERE anno = %s", (anno,))
+        info["cat_prima"] = cur.fetchone()[0]
+
+        # enti: DELETE + INSERT (upsert=False), dentro la transazione
+        _aggiorna_enti(cur, csv_path, pd, [anno], upsert=False)
+
+        # categoria_ammissioni: DELETE + INSERT
+        cur.execute("DELETE FROM categoria_ammissioni WHERE anno = %s", (anno,))
+        for _xlsx, batch in righe_categoria_anno(dati_dir, anno):
+            cur.executemany(_CAT_AMM_UPSERT, batch)
+
+        cur.execute("SELECT COUNT(*) FROM enti WHERE anno = %s", (anno,))
+        info["enti_dopo"] = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM categoria_ammissioni WHERE anno = %s", (anno,))
+        info["cat_dopo"] = cur.fetchone()[0]
+
+        if info["enti_dopo"] == 0:
+            raise RuntimeError(f"nessun ente caricato per l'anno {anno}")
+        if attesi_enti is not None and info["enti_dopo"] != attesi_enti:
+            raise RuntimeError(
+                f"enti caricati ({info['enti_dopo']:,}) diversi dagli attesi ({attesi_enti:,})"
+            )
+
+        conn.commit()
+        logger.info(
+            f"db_updater: sostituisci_anno({anno}) COMMIT in {time.time()-t0:.1f}s – "
+            f"enti {info['enti_prima']:,} → {info['enti_dopo']:,}, "
+            f"categoria_ammissioni {info['cat_prima']:,} → {info['cat_dopo']:,}"
+        )
+        return True, info
+
+    except Exception as exc:
+        conn.rollback()
+        logger.error(f"db_updater: sostituisci_anno({anno}) ROLLBACK – {exc}", exc_info=True)
+        return False, info
+    finally:
+        conn.close()
 
 
 def finalizza_ciclo(

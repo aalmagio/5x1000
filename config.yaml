@@ -72,3 +72,20 @@ excel:
   alt_row_bg: "#EEF2FF"      # Colore sfondo righe alternate
   border_color: "#D9D9D9"    # Colore bordi celle
   max_col_width: 40          # Larghezza massima colonne (caratteri)
+
+# --- Sincronizzazione sviluppo -> produzione (sync.py) ---
+# Si esegue via SSH dalla root del progetto di SVILUPPO (dev5x1000.almagioni.com).
+# Credenziali DB nel .env di sviluppo: SITE_DB_* (= DB di sviluppo) e PROD_DB_*.
+# Percorsi relativi = relativi alla root del progetto in cui gira sync.py.
+# Le due root sono cartelle sorelle nella home Plesk:
+#   <home>/dev5x1000.almagioni.com   (sviluppo, webroot site/public)
+#   <home>/5x1000.almagioni.com      (produzione, webroot site/public;
+#                                     alias dati5x1000.assif.it)
+# prod_release_dir deve stare dentro Dati/ di produzione: api.php serve solo
+# file sotto realpath(site/public/../../Dati).
+sync:
+  dev_dati:          "Dati"
+  prod_release_dir:  "../5x1000.almagioni.com/Dati/_release"
+  dev_forecast:      "site/public/data/forecast.json"
+  prod_forecast:     "../5x1000.almagioni.com/site/public/data/forecast.json"
+  release_da_tenere: 2
