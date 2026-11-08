@@ -572,6 +572,20 @@ def _upsert_file(cur, anno, tipo, categoria, formato, path: Path) -> None:
     logger.info(f"_upsert_file: {tipo} anno={anno} {path.name} ({path.stat().st_size} bytes)")
     size_mb = round(path.stat().st_size / 1_048_576, 2)
     sha = _sha256(path)
+    # MySQL non considera NULL = NULL nei vincoli UNIQUE: ON DUPLICATE KEY UPDATE
+    # non scatta mai per righe con anno IS NULL o categoria IS NULL, generando
+    # duplicati a ogni esecuzione. Per queste righe si fa prima un DELETE esplicito.
+    if anno is None or categoria is None:
+        anno_cond = "anno IS NULL" if anno is None else "anno = %s"
+        cat_cond  = "categoria IS NULL" if categoria is None else "categoria = %s"
+        params    = [v for v, is_null in ((anno, anno is None), (tipo, False),
+                                          (categoria, categoria is None), (formato, False))
+                     if not is_null]
+        cur.execute(
+            f"DELETE FROM dataset_files WHERE {anno_cond} AND tipo = %s "
+            f"AND {cat_cond} AND formato = %s",
+            params,
+        )
     cur.execute(
         """
         INSERT INTO dataset_files
