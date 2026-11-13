@@ -45,4 +45,18 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
 })
 
+// Ogni build cancella i chunk precedenti (prebuild in package.json). Una pagina
+// aperta prima del deploy che naviga verso una route lazy non li trova più:
+// ricarica una sola volta per prendere la build nuova (flag anti-loop).
+router.onError((err, to) => {
+  const msg = String(err?.message ?? '')
+  if (!/dynamically imported module|Importing a module script failed/i.test(msg)) return
+  try {
+    if (sessionStorage.getItem('chunk_reload') === to.fullPath) return
+    sessionStorage.setItem('chunk_reload', to.fullPath)
+  } catch { /* storage non disponibile: ricarica comunque */ }
+  window.location.assign(to.fullPath)
+})
+router.afterEach(() => { try { sessionStorage.removeItem('chunk_reload') } catch {} })
+
 createApp(App).use(createPinia()).use(router).mount('#app')

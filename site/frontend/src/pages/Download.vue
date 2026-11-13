@@ -239,6 +239,10 @@
         </p>
 
         <form @submit.prevent="submitLead" class="space-y-4">
+          <!-- Honeypot anti-bot: invisibile agli utenti, i bot lo compilano -->
+          <div class="absolute -left-[9999px] w-px h-px overflow-hidden" aria-hidden="true">
+            <label>Sito web <input v-model="modal.sito_web" type="text" name="sito_web" tabindex="-1" autocomplete="off" /></label>
+          </div>
           <div>
             <label class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5 block">Nome (opzionale)</label>
             <input
@@ -335,6 +339,7 @@ const modal = reactive({
   emailError:       '',
   saving:           false,
   vuole_newsletter: false,
+  sito_web:         '',    // honeypot
   pending:          null,  // { tipo, anno, href } — download in attesa
 })
 
@@ -349,6 +354,7 @@ function requestDownload({ tipo, anno, href }) {
   modal.nome             = ''
   modal.emailError       = ''
   modal.vuole_newsletter = false
+  modal.sito_web         = ''
   modal.open             = true
 }
 
@@ -380,6 +386,7 @@ async function submitLead() {
         tipo:             modal.pending?.tipo,
         anno:             modal.pending?.anno !== 'completo' ? modal.pending?.anno : undefined,
         vuole_newsletter: modal.vuole_newsletter,
+        sito_web:         modal.sito_web,
       })
       markLeadDone()
     } catch {

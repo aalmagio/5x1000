@@ -35,7 +35,7 @@
           </svg>
         </button>
       </div>
-      <p v-if="searchNome.length >= 2 && !searchResults.length && !searchLoading" class="text-xs text-gray-400 mt-2">Nessun ente trovato.</p>
+      <p v-if="searchNome.length >= 3 &&!searchResults.length && !searchLoading" class="text-xs text-gray-400 mt-2">Nessun ente trovato.</p>
     </div>
 
     <!-- Input CF -->
@@ -463,7 +463,7 @@ let   searchTimer  = null
 async function onSearchNome() {
   clearTimeout(searchTimer)
   searchResults.value = []
-  if (searchNome.value.length < 2) return
+  if (searchNome.value.length < 3) return
   searchTimer = setTimeout(async () => {
     searchLoading.value = true
     try {

@@ -89,10 +89,11 @@ export const nlqQuery = (token, q) =>
   })
 
 // Lead generation: salva email prima del download
-export const salvaLead = ({ email, nome, tipo, anno, vuole_newsletter } = {}) =>
+export const salvaLead = ({ email, nome, tipo, anno, vuole_newsletter, sito_web } = {}) =>
   api.post('', new URLSearchParams({
     action: 'salva_lead',
     email,
+    ...(sito_web          ? { sito_web }          : {}),  // honeypot
     ...(nome              ? { nome }              : {}),
     ...(tipo              ? { tipo }              : {}),
     ...(anno              ? { anno }              : {}),
