@@ -1,8 +1,30 @@
+# Pannello admin dismesso (rischio RCE via shell_exec): blocca l'accesso anche
+# se una vecchia copia di admin.php fosse rimasta nel webroot.
+<Files "admin.php">
+  Require all denied
+</Files>
+
+# Header di sicurezza per tutte le risposte servite da Apache.
+# NB Plesk: se nginx serve direttamente i file statici ("Smart static files
+# processing"), questi header non arrivano su index.html/assets: in quel caso
+# replicarli in Plesk > Apache & nginx > "Direttive nginx aggiuntive".
+# CSP: unica risorsa esterna sono i Google Fonts. 'unsafe-inline' sugli stili
+# serve a Vue (attributi style nei nodi statici); gli script restano solo 'self'.
+<IfModule mod_headers.c>
+  Header set Strict-Transport-Security "max-age=31536000"
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "DENY"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+  Header set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+  Header set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+  Header unset X-Powered-By
+</IfModule>
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
 
   # 1. File e directory esistenti vengono serviti direttamente
-  #    (api.php, admin.php, assets/, index.html, ecc.)
+  #    (api.php, assets/, index.html, ecc.)
   RewriteCond %{REQUEST_FILENAME} -f [OR]
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]

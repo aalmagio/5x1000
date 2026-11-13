@@ -21,17 +21,9 @@
 
 declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Referrer-Policy: strict-origin-when-cross-origin');
-
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(204);
-    exit;
-}
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -52,6 +44,65 @@ function load_env(string $dir): void {
 }
 
 load_env(__DIR__);
+
+// APP_DEBUG=1 solo nel .env di sviluppo: abilita debug_sql e l'origine localhost.
+function _debug_attivo(): bool {
+    return getenv('APP_DEBUG') === '1';
+}
+
+// ─── CORS ───────────────────────────────────────────────────────────────────
+// I GET di sola lettura restano aperti a tutti (open data). Le azioni che
+// scrivono o costano risorse (salva_lead, nlq, nlq_token) e qualunque POST
+// sono consentite solo dalle origini del sito (CORS_ORIGINS nel .env, separate
+// da virgola; default: produzione + sviluppo).
+
+function _cors_origini_ammesse(): array {
+    $lista = getenv('CORS_ORIGINS') ?: 'https://5x1000.almagioni.com,https://dev5x1000.almagioni.com';
+    $origini = array_values(array_filter(array_map('trim', explode(',', $lista))));
+    if (_debug_attivo()) $origini[] = 'http://localhost:5173';
+    return $origini;
+}
+
+function _applica_cors(): void {
+    $origin    = $_SERVER['HTTP_ORIGIN'] ?? '';
+    $metodo    = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+    $action    = (string)($_GET['action'] ?? $_POST['action'] ?? '');
+    $riservata = $metodo === 'POST'
+              || in_array($action, ['salva_lead', 'nlq', 'nlq_token'], true);
+    if ($metodo === 'OPTIONS') {
+        $richiesto = strtoupper($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_METHOD'] ?? '');
+        $riservata = $riservata || $richiesto !== 'GET';
+    }
+    $ammessa = $origin !== '' && in_array($origin, _cors_origini_ammesse(), true);
+
+    if (!$riservata) {
+        header('Access-Control-Allow-Origin: *');
+        header('Access-Control-Allow-Methods: GET, OPTIONS');
+        header('Access-Control-Allow-Headers: Content-Type');
+    } else {
+        header('Vary: Origin');
+        if ($ammessa) {
+            header('Access-Control-Allow-Origin: ' . $origin);
+            header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+            header('Access-Control-Allow-Headers: Content-Type');
+        }
+    }
+
+    if ($metodo === 'OPTIONS') {
+        http_response_code(204);
+        exit;
+    }
+
+    // CORS non impedisce al browser di INVIARE un POST "semplice" (form-encoded)
+    // da un altro sito: se l'origine dichiarata è estranea, rifiuta lato server.
+    if ($riservata && $origin !== '' && !$ammessa) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Origine non consentita']);
+        exit;
+    }
+}
+
+_applica_cors();
 
 // ─── Manutenzione ───────────────────────────────────────────────────────────
 // Se la pipeline è in corso, risponde 503 per tutte le azioni tranne 'status'.
@@ -77,17 +128,12 @@ function _check_manutenzione(): void {
     $age_hours = (time() - filemtime($path)) / 3600;
     if ($age_hours > 12) return;
 
-    // Leggi il payload del lock
-    $payload = @json_decode(file_get_contents($path), true) ?? [];
-
+    // Dettagli della pipeline (anni, step) non esposti al pubblico.
     http_response_code(503);
     header('Retry-After: 300');
     echo json_encode([
         'errore'       => 'Sito in manutenzione',
         'manutenzione' => true,
-        'avviato_il'   => $payload['avviato_il'] ?? null,
-        'anni'         => $payload['anni']        ?? [],
-        'steps'        => $payload['steps']       ?? [],
         'messaggio'    => 'La pipeline di aggiornamento dati è in corso. Riprova tra qualche minuto.',
     ], JSON_UNESCAPED_UNICODE);
     exit;
@@ -135,6 +181,58 @@ function str_param(string $key, string $default = ''): string {
     return $val !== null ? trim((string)$val) : $default;
 }
 
+/**
+ * Pseudonimo dell'IP: HMAC-SHA256 con segreto (IP_HASH_SECRET nel .env).
+ * Un SHA-256 semplice non basta: lo spazio IPv4 si enumera in pochi minuti.
+ * Fallback su NLQ_SECRET; senza alcun segreto usa SHA-256 semplice e lo
+ * segnala nel log (da correggere configurando IP_HASH_SECRET).
+ */
+function _ip_hash(): string {
+    $ip     = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $secret = getenv('IP_HASH_SECRET') ?: (getenv('NLQ_SECRET') ?: '');
+    if ($secret === '') {
+        error_log('[api.php] IP_HASH_SECRET non configurato: hash IP non protetto');
+        return hash('sha256', $ip);
+    }
+    return hash_hmac('sha256', $ip, $secret);
+}
+
+// Profondità massima di paginazione: OFFSET oltre questa soglia costringe
+// MySQL a scorrere e scartare centinaia di migliaia di righe.
+const MAX_RIGHE_PAGINAZIONE = 10000;
+
+function _max_pagina(int $per_pagina): int {
+    return max(1, intdiv(MAX_RIGHE_PAGINAZIONE, max(1, $per_pagina)));
+}
+
+/**
+ * Rate limit generico per IP su tabella `rate_limit` (bucket, ip_hash, ts).
+ * Fail-open: se la tabella non esiste ancora, logga e lascia passare
+ * (usato per i download, che non devono bloccarsi prima della migration).
+ */
+function _rate_limit(string $bucket, int $max_per_ora, string $messaggio): void {
+    $pdo = db();
+    $ip  = _ip_hash();
+    try {
+        if (mt_rand(1, 100) === 1) {
+            $pdo->exec("DELETE FROM rate_limit WHERE ts < DATE_SUB(NOW(), INTERVAL 2 HOUR)");
+        }
+        $stmt = $pdo->prepare(
+            "SELECT COUNT(*) FROM rate_limit
+             WHERE bucket = ? AND ip_hash = ? AND ts > DATE_SUB(NOW(), INTERVAL 1 HOUR)"
+        );
+        $stmt->execute([$bucket, $ip]);
+        $n = (int)$stmt->fetchColumn();
+        if ($n >= $max_per_ora) {
+            header('Retry-After: 3600');
+            err($messaggio, 429);
+        }
+        $pdo->prepare("INSERT INTO rate_limit (bucket, ip_hash) VALUES (?, ?)")->execute([$bucket, $ip]);
+    } catch (\PDOException $e) {
+        error_log('[api.php] rate_limit non disponibile (eseguire la migration): ' . $e->getMessage());
+    }
+}
+
 // ─── Actions ────────────────────────────────────────────────────────────────
 
 function action_status(): void {
@@ -152,19 +250,13 @@ function action_status(): void {
 
     // Stato manutenzione
     $lock_path    = _maintenance_lock_path();
-    $manutenzione = false;
-    $lock_info    = null;
-    if (is_file($lock_path) && (time() - filemtime($lock_path)) / 3600 <= 12) {
-        $manutenzione = true;
-        $lock_info    = @json_decode(file_get_contents($lock_path), true) ?? [];
-    }
+    $manutenzione = is_file($lock_path) && (time() - filemtime($lock_path)) / 3600 <= 12;
 
     json_out([
         'anni_disponibili'     => array_map('intval', $anni),
         'righe_totali'         => $totale,
         'ultimo_aggiornamento' => $ultimo,
         'manutenzione'         => $manutenzione,
-        'pipeline_attiva'      => $lock_info,
     ]);
 }
 
@@ -376,6 +468,7 @@ function action_enti(): void {
     $non_runts  = int_param('non_runts');
     $pagina     = max(1, int_param('pagina', 1));
     $per_pagina = min(200, max(1, int_param('per_pagina', 50)));
+    $pagina     = min($pagina, _max_pagina($per_pagina));
     $sort       = str_param('sort', 'importo_totale');
     $asc        = int_param('asc', 0);
 
@@ -464,11 +557,8 @@ function action_enti(): void {
             $params[] = $ft_q;
             $params[] = '%' . $q . '%';
         } else {
-            $ft_like  = true;
-            $where[] = '(e.denominazione LIKE ? OR e.cod_fiscale LIKE ? OR r.denominazione LIKE ?)';
-            $params[] = '%' . $q . '%';
-            $params[] = '%' . $q . '%';
-            $params[] = '%' . $q . '%';
+            // 1-2 caratteri: LIKE '%x%' su 1M+ righe senza indice → rifiuta
+            err('Inserisci almeno 3 caratteri per la ricerca.');
         }
     }
     if ($runts_only) {
@@ -495,7 +585,7 @@ function action_enti(): void {
     $count_stmt->execute($params);
     $totale = (int)$count_stmt->fetchColumn();
 
-    $pagine = max(1, (int)ceil($totale / $per_pagina));
+    $pagine = min(_max_pagina($per_pagina), max(1, (int)ceil($totale / $per_pagina)));
     $offset = ($pagina - 1) * $per_pagina;
 
     // Dati — denominazione canonica: RUNTS se disponibile, altrimenti anno corrente.
@@ -539,14 +629,18 @@ function action_enti(): void {
         $r['runts_5x1000']     = (bool)$r['runts_5x1000'];
     }
 
-    json_out([
+    $out = [
         'totale'     => $totale,
         'pagina'     => $pagina,
         'pagine'     => $pagine,
         'per_pagina' => $per_pagina,
         'data'       => $rows,
-        'debug_sql'  => $debug_sql_fn($count_sql, $params) . "\n\n" . $debug_sql_fn($data_sql, $score_params),
-    ]);
+    ];
+    // SQL di debug solo in sviluppo: in produzione esporrebbe lo schema del DB.
+    if (_debug_attivo()) {
+        $out['debug_sql'] = $debug_sql_fn($count_sql, $params) . "\n\n" . $debug_sql_fn($data_sql, $score_params);
+    }
+    json_out($out);
 }
 
 function action_ente(): void {
@@ -901,7 +995,7 @@ function action_analisi_categorie(): void {
 
 function action_cerca_cf(): void {
     $q = str_param('q');
-    if (strlen($q) < 2) err('Parametro q troppo corto (min. 2 caratteri)');
+    if (mb_strlen($q) < 3) err('Parametro q troppo corto (min. 3 caratteri)');
 
     $pdo = db();
 
@@ -946,6 +1040,7 @@ function action_categoria_dettaglio(): void {
     $anno      = int_param('anno');
     $pagina    = max(1, int_param('pagina', 1));
     $per_pagina = min(200, max(1, int_param('per_pagina', 50)));
+    $pagina     = min($pagina, _max_pagina($per_pagina));
 
     if (!$categoria) err('Parametro categoria mancante');
     if (!$anno)      err('Parametro anno mancante');
@@ -1011,7 +1106,7 @@ function action_categoria_dettaglio(): void {
     $perc_importo_sul_totale = ($tot_i_anno > 0) ? round($totale_imp / $tot_i_anno * 100, 2) : null;
 
     // Lista enti paginata
-    $pagine = max(1, (int)ceil($totale_enti / $per_pagina));
+    $pagine = min(_max_pagina($per_pagina), max(1, (int)ceil($totale_enti / $per_pagina)));
     $offset = ($pagina - 1) * $per_pagina;
     $stmt2 = $pdo->prepare(
         "SELECT cod_fiscale, denominazione, regione, n_scelte,
@@ -1065,6 +1160,14 @@ function action_download(): void {
     if (!in_array($tipo, ['csv', 'xlsx', 'report', 'scelte'], true)) {
         err('Tipo non valido', 400);
     }
+
+    // Rate limit per IP: tetto generale + tetto stretto sul CSV completo (~210 MB).
+    // Configurabili con DOWNLOAD_MAX_PER_HOUR e DOWNLOAD_COMPLETO_MAX_PER_HOUR.
+    $msg_limite = 'Limite di download raggiunto per questa ora. Riprova più tardi.';
+    if ($tipo === 'csv' && $anno === 'completo') {
+        _rate_limit('download_completo', (int)(getenv('DOWNLOAD_COMPLETO_MAX_PER_HOUR') ?: 3), $msg_limite);
+    }
+    _rate_limit('download', (int)(getenv('DOWNLOAD_MAX_PER_HOUR') ?: 30), $msg_limite);
 
     $pdo = db();
 
@@ -1307,14 +1410,33 @@ function action_salva_lead(): void {
     $anno             = (int)str_param('anno');
     $vuole_newsletter = (int)(bool)str_param('vuole_newsletter');
 
-    if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        err('Email non valida', 400);
+    // Honeypot: campo nascosto nel form, compilato solo dai bot. Risposta
+    // identica a quella reale per non segnalare il filtro.
+    if (str_param('sito_web') !== '') {
+        json_out(['ok' => true]);
     }
 
-    $ip_hash = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? '');
+    if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255) {
+        err('Email non valida', 400);
+    }
+    $nome = mb_substr($nome, 0, 200);
+    $tipo = mb_substr($tipo, 0, 50);
+
+    $ip_hash = _ip_hash();
     $pdo = db();
 
     try {
+        // Rate limit per IP (default 5/ora, LEAD_MAX_PER_HOUR nel .env)
+        $max = (int)(getenv('LEAD_MAX_PER_HOUR') ?: 5);
+        $rl  = $pdo->prepare(
+            "SELECT COUNT(*) FROM leads
+             WHERE ip_hash = ? AND creato_il > DATE_SUB(NOW(), INTERVAL 1 HOUR)"
+        );
+        $rl->execute([$ip_hash]);
+        if ((int)$rl->fetchColumn() >= $max) {
+            err('Troppe richieste, riprova più tardi.', 429);
+        }
+
         $stmt = $pdo->prepare(
             "INSERT INTO leads (email, nome, fonte, file_tipo, file_anno, ip_hash, vuole_newsletter)
              VALUES (?, ?, 'download', ?, ?, ?, ?)"
@@ -1614,6 +1736,7 @@ function action_multi_categoria(): void {
     $min_cat       = max(2, int_param('min_categorie', 2));
     $pagina        = max(1, int_param('pagina', 1));
     $per_pagina    = min(200, max(1, int_param('per_pagina', 50)));
+    $pagina     = min($pagina, _max_pagina($per_pagina));
     $offset        = ($pagina - 1) * $per_pagina;
 
     $where  = $anno ? 'AND ca.anno = ?' : '';
@@ -1777,6 +1900,7 @@ function action_esclusi(): void {
     $regione    = str_param('regione');
     $pagina     = max(1, int_param('pagina', 1));
     $per_pagina = min(200, max(1, int_param('per_pagina', 50)));
+    $pagina     = min($pagina, _max_pagina($per_pagina));
     $offset     = ($pagina - 1) * $per_pagina;
 
     // Condizioni applicate alla subquery sugli esclusi
@@ -1796,6 +1920,7 @@ function action_esclusi(): void {
         $params[] = $regione;
     }
     if ($q) {
+        if (mb_strlen($q) < 3) err('Inserisci almeno 3 caratteri per la ricerca.');
         $where[]  = '(ex.denominazione LIKE ? OR ex.cod_fiscale LIKE ?)';
         $params[] = '%' . $q . '%';
         $params[] = '%' . $q . '%';
@@ -1815,7 +1940,7 @@ function action_esclusi(): void {
     $stmt_c->execute($params);
     $totale = (int)$stmt_c->fetchColumn();
 
-    $pagine = max(1, (int)ceil($totale / $per_pagina));
+    $pagine = min(_max_pagina($per_pagina), max(1, (int)ceil($totale / $per_pagina)));
 
     // Dati: per ogni (anno, CF) con almeno un escluso → aggrega cat escluse e ammesse
     // LIMIT/OFFSET embedded come interi (già validati) — MariaDB non accetta bind su LIMIT
@@ -1950,6 +2075,7 @@ function action_conflitti_categoria(): void {
     $anno       = int_param('anno');
     $pagina     = max(1, int_param('pagina', 1));
     $per_pagina = min(200, max(1, int_param('per_pagina', 50)));
+    $pagina     = min($pagina, _max_pagina($per_pagina));
     $offset     = ($pagina - 1) * $per_pagina;
 
     $where  = $anno ? 'AND a.anno = ?' : '';
@@ -2168,6 +2294,72 @@ function _nlq_secret(): string {
     return $s;
 }
 
+// Tabelle che l'SQL generato dal modello può leggere. Il vincolo vero è
+// l'utente MySQL NLQ_DB_USER (solo SELECT su queste tabelle); il validatore
+// regex di _nlq_validate_sql è solo una seconda linea.
+const NLQ_TABELLE = ['enti', 'categoria_ammissioni', 'runts', 'ripartizioni'];
+
+/**
+ * Connessione dedicata all'esecuzione dell'SQL generato.
+ * Fail-closed: se l'utente non è configurato o ha privilegi oltre a SELECT
+ * sulle tabelle ammesse (es. è stato messo l'utente principale), NLQ si spegne.
+ */
+function db_nlq(): PDO {
+    static $pdo = null;
+    if ($pdo) return $pdo;
+
+    $user = getenv('NLQ_DB_USER') ?: '';
+    $pass = getenv('NLQ_DB_PASSWORD') ?: '';
+    if ($user === '') {
+        err('NLQ non abilitato: utente database in sola lettura non configurato.', 503);
+    }
+    $host = getenv('SITE_DB_HOST') ?: 'localhost';
+    $port = getenv('SITE_DB_PORT') ?: '3306';
+    $name = getenv('SITE_DB_NAME') ?: '';
+    $conn = new PDO("mysql:host=$host;port=$port;dbname=$name;charset=utf8mb4", $user, $pass, [
+        PDO::ATTR_ERRMODE                => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE     => PDO::FETCH_ASSOC,
+        PDO::MYSQL_ATTR_MULTI_STATEMENTS => false,
+        PDO::MYSQL_ATTR_INIT_COMMAND     => "SET NAMES utf8mb4",
+    ]);
+
+    if (!_nlq_privilegi_ok($conn, $name)) {
+        error_log('[api.php] NLQ_DB_USER ha privilegi oltre a SELECT sulle tabelle ammesse: NLQ disattivato');
+        err('NLQ non abilitato: configurazione del database non sicura.', 503);
+    }
+
+    // Timeout per singola query (MySQL 5.7.8+ in ms; MariaDB 10.1+ in secondi)
+    try {
+        $conn->exec('SET SESSION MAX_EXECUTION_TIME = 5000');
+    } catch (\PDOException) {
+        try { $conn->exec('SET SESSION max_statement_time = 5'); } catch (\PDOException) {}
+    }
+    try { $conn->exec('SET SESSION TRANSACTION READ ONLY'); } catch (\PDOException) {}
+
+    return $pdo = $conn;
+}
+
+/** True solo se ogni GRANT è USAGE globale o SELECT su una tabella di NLQ_TABELLE. */
+function _nlq_privilegi_ok(PDO $conn, string $db_name): bool {
+    $grants = $conn->query('SHOW GRANTS FOR CURRENT_USER()')->fetchAll(PDO::FETCH_COLUMN);
+    if (!$grants) return false;
+    foreach ($grants as $g) {
+        if (!preg_match('/^GRANT (.+?) ON (\S+) TO /i', (string)$g, $m)) return false;
+        $privs  = strtoupper(trim($m[1]));
+        $target = str_replace('`', '', $m[2]);
+        if ($target === '*.*') {
+            if ($privs !== 'USAGE') return false;
+            continue;
+        }
+        if ($privs !== 'SELECT') return false;
+        $parti = explode('.', $target, 2);
+        if (count($parti) !== 2) return false;
+        if (strcasecmp(str_replace('\\_', '_', $parti[0]), $db_name) !== 0) return false;
+        if (!in_array(strtolower($parti[1]), NLQ_TABELLE, true)) return false;
+    }
+    return true;
+}
+
 function _nlq_token_today(): string {
     return hash_hmac('sha256', date('Y-m-d'), _nlq_secret());
 }
@@ -2203,6 +2395,16 @@ function _nlq_check_rate_limit(string $ip_hash): void {
         err("Limite raggiunto: massimo $max query/ora per IP. Riprova tra poco.", 429);
     }
 
+    // Tetto globale: protegge la CPU del server anche da richieste distribuite
+    // su molti IP (ogni chiamata al modello può durare fino a 120 s).
+    $max_glob = (int)(getenv('NLQ_MAX_GLOBAL_PER_HOUR') ?: 100);
+    $tot = (int)$pdo->query(
+        "SELECT COUNT(*) FROM nlq_rate_limit WHERE ts > DATE_SUB(NOW(), INTERVAL 1 HOUR)"
+    )->fetchColumn();
+    if ($tot >= $max_glob) {
+        err('Il servizio ha raggiunto il limite di richieste per questa ora. Riprova più tardi.', 429);
+    }
+
     $pdo->prepare("INSERT INTO nlq_rate_limit (ip_hash) VALUES (?)")->execute([$ip_hash]);
 }
 
@@ -2235,6 +2437,22 @@ function _nlq_cache_set(string $hash, string $domanda, string $sql, array $resul
                hits          = hits + 1"
         )->execute([$hash, $domanda, $sql, json_encode($result, JSON_UNESCAPED_UNICODE), $ttl]);
     } catch (\Throwable) {}
+}
+
+/**
+ * Limita le chiamate contemporanee al modello (NLQ_MAX_CONCORRENTI, default 2)
+ * con lock nominali MySQL: si liberano da soli a fine richiesta, quando la
+ * connessione PDO si chiude, anche se lo script termina con un errore.
+ */
+function _nlq_acquisisci_slot(): void {
+    $n = max(1, (int)(getenv('NLQ_MAX_CONCORRENTI') ?: 2));
+    $stmt = db()->prepare('SELECT GET_LOCK(?, 0)');
+    for ($i = 1; $i <= $n; $i++) {
+        $stmt->execute(['nlq_slot_' . (getenv('SITE_DB_NAME') ?: '') . '_' . $i]); // nomi globali al server: separa prod e sviluppo
+        if ((int)$stmt->fetchColumn() === 1) return;
+    }
+    header('Retry-After: 30');
+    err('Il modello è occupato con altre richieste. Riprova tra qualche secondo.', 429);
 }
 
 function _nlq_call_ollama(string $domanda): string {
@@ -2346,6 +2564,12 @@ function _nlq_validate_sql(string $sql): string {
     $clean = preg_replace('/--[^\n]*/m', '', $sql);
     $clean = preg_replace('/\/\*.*?\*\//s', '', $clean);
     $clean = trim(preg_replace('/\s+/', ' ', $clean));
+    $clean = rtrim($clean, '; ');
+
+    // Una sola istruzione
+    if (str_contains($clean, ';')) {
+        err('Query non permessa (istruzioni multiple).');
+    }
 
     if (!preg_match('/^(SELECT|WITH)\s+/i', $clean)) {
         err('Il modello ha generato una risposta non utilizzabile. Prova a riformulare la domanda.');
@@ -2355,18 +2579,37 @@ function _nlq_validate_sql(string $sql): string {
         'DROP','DELETE','UPDATE','INSERT','CREATE','ALTER','TRUNCATE',
         'EXEC','EXECUTE','GRANT','REVOKE','LOAD\s+DATA','INTO\s+OUTFILE',
         'INTO\s+DUMPFILE','SLEEP\s*\(','BENCHMARK\s*\(',
+        'LOAD_FILE','INFORMATION_SCHEMA','PERFORMANCE_SCHEMA','MYSQL','SYS',
+        'HANDLER','LOCK','CALL','PREPARE','SET',
     ];
     foreach ($forbidden as $kw) {
         if (preg_match('/\b' . $kw . '\b/i', $clean)) {
-            err("Query non permessa (contiene '$kw').");
+            err('Query non permessa.');
         }
     }
+    if (str_contains($clean, '@@')) err('Query non permessa.');
 
-    $allowed = ['enti','categoria_ammissioni','runts','ripartizioni'];
-    if (preg_match_all('/\b(?:FROM|JOIN)\s+`?(\w+)`?/i', $clean, $m)) {
+    // Ogni identificatore dopo FROM/JOIN e dopo una virgola nella clausola FROM
+    // (join impliciti "FROM enti, leads") deve essere una tabella ammessa.
+    // Seconda linea: il limite vero sono i GRANT di NLQ_DB_USER.
+    if (preg_match_all('/\b(?:FROM|JOIN)\s+([`\w.]+)/i', $clean, $m)) {
         foreach ($m[1] as $tbl) {
-            if (!in_array(strtolower($tbl), $allowed, true)) {
-                err("Tabella '$tbl' non accessibile tramite questa interfaccia.");
+            if (!in_array(strtolower(trim($tbl, '`')), NLQ_TABELLE, true)) {
+                err('Tabella non accessibile tramite questa interfaccia.');
+            }
+        }
+    }
+    // Lookahead: le clausole si sovrappongono, così anche i FROM delle sottoquery
+    // vengono esaminati. La cattura si ferma alle parentesi (sottoquery, funzioni).
+    $re_from = '/\bFROM\s+(?=((?:(?!\b(?:WHERE|GROUP|ORDER|LIMIT|HAVING|UNION)\b)[^()])*))/i';
+    if (preg_match_all($re_from, $clean, $fm)) {
+        foreach ($fm[1] as $clausola) {
+            foreach (explode(',', $clausola) as $pezzo) {
+                if (!preg_match('/^\s*([`\w.]+)/', $pezzo, $tm)) continue;
+                $tbl = strtolower(trim($tm[1], '`'));
+                if (!in_array($tbl, NLQ_TABELLE, true)) {
+                    err('Tabella non accessibile tramite questa interfaccia.');
+                }
             }
         }
     }
@@ -2407,12 +2650,18 @@ function action_nlq(): void {
     if (strlen($domanda) < 5)   err('Domanda troppo corta (min. 5 caratteri).');
     if (strlen($domanda) > 500) err('Domanda troppo lunga (max. 500 caratteri).');
 
-    $ip_hash = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? 'unknown');
+    $ip_hash = _ip_hash();
     try {
         _nlq_check_rate_limit($ip_hash);
     } catch (\PDOException) {
-        error_log('[api.php] nlq_rate_limit table missing — run migration');
+        // Fail-closed: senza rate limit funzionante NLQ non parte.
+        error_log('[api.php] nlq_rate_limit non disponibile — eseguire la migration');
+        err('NLQ temporaneamente non disponibile.', 503);
     }
+
+    // Verifica la connessione in sola lettura PRIMA di chiamare il modello
+    // (e prima della cache, che potrebbe servire risultati di query vecchie).
+    db_nlq();
 
     $cache_key = md5(mb_strtolower($domanda));
     $cached    = _nlq_cache_get($cache_key);
@@ -2420,10 +2669,11 @@ function action_nlq(): void {
         json_out(array_merge($cached, ['from_cache' => true]));
     }
 
+    _nlq_acquisisci_slot();
     $sql_raw = _nlq_call_ollama($domanda);
     $sql     = _nlq_validate_sql($sql_raw);
 
-    $pdo = db();
+    $pdo = db_nlq();
     try {
         $stmt = $pdo->query($sql);
         $rows = $stmt->fetchAll();
@@ -2473,6 +2723,7 @@ function action_ricerca_avanzata(): void {
     $raggruppa      = (bool)int_param('raggruppa'); // 1 → raggruppa per ente, mostra anni per cat
     $pagina         = max(1, int_param('pagina', 1));
     $per_pagina     = min(200, max(1, int_param('per_pagina', 50)));
+    $pagina     = min($pagina, _max_pagina($per_pagina));
     $offset         = ($pagina - 1) * $per_pagina;
 
     $where  = ['1=1'];
@@ -2497,6 +2748,7 @@ function action_ricerca_avanzata(): void {
         $params[] = $regione;
     }
     if ($q) {
+        if (mb_strlen($q) < 3) err('Inserisci almeno 3 caratteri per la ricerca.');
         $where[]  = '(ca.denominazione LIKE ? OR ca.cod_fiscale LIKE ?)';
         $params[] = '%' . $q . '%';
         $params[] = '%' . $q . '%';
@@ -2528,7 +2780,7 @@ function action_ricerca_avanzata(): void {
         $stmt_c = $pdo->prepare($count_sql);
         $stmt_c->execute($params);
         $totale = (int)$stmt_c->fetchColumn();
-        $pagine = max(1, (int)ceil($totale / $per_pagina));
+        $pagine = min(_max_pagina($per_pagina), max(1, (int)ceil($totale / $per_pagina)));
 
         // Aggrega: per ogni ente restituisce le categorie con gli anni in cui è ammesso/escluso.
         // escluso_anni = "cat|anno,cat|anno,..." → parsato PHP → {cat: [anni]}
@@ -2602,7 +2854,7 @@ function action_ricerca_avanzata(): void {
     $stmt_c = $pdo->prepare($count_sql);
     $stmt_c->execute($params);
     $totale = (int)$stmt_c->fetchColumn();
-    $pagine = max(1, (int)ceil($totale / $per_pagina));
+    $pagine = min(_max_pagina($per_pagina), max(1, (int)ceil($totale / $per_pagina)));
 
     $data_sql = "SELECT
         ca.anno,
@@ -2683,7 +2935,7 @@ try {
         'geo'                  => action_geo(),
         'nlq_token'            => action_nlq_token(),
         'nlq'                  => action_nlq(),
-        default                => err("Azione '$action' non trovata. Azioni disponibili: status, anni, categorie, regioni, statistiche, enti, ente, confronta, analisi_categorie, categoria_dettaglio, files, download, inoptato, salva_lead, forecast, ripartizioni, multi_categoria, composizione_categorie, conflitti_categoria, esclusi, ricerca_avanzata, geo, nlq_token, nlq", 404),
+        default                => err('Azione non trovata. Documentazione: /api', 404),
     };
 } catch (PDOException $e) {
     error_log('[api.php] DB error: ' . $e->getMessage());

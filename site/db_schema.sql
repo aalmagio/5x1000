@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS `leads` (
   `fonte`      VARCHAR(100)          DEFAULT 'download' COMMENT 'contesto: download, newsletter, …',
   `file_tipo`  VARCHAR(50)           DEFAULT NULL COMMENT 'csv | xlsx | report',
   `file_anno`  SMALLINT              DEFAULT NULL COMMENT 'NULL = dataset completo',
-  `ip_hash`          CHAR(64)              DEFAULT NULL COMMENT 'SHA-256 IP anonimizzato (privacy)',
+  `ip_hash`          CHAR(64)              DEFAULT NULL COMMENT 'HMAC-SHA256 dell''IP con IP_HASH_SECRET (pseudonimo, non anonimo)',
   `vuole_newsletter` TINYINT(1)  NOT NULL DEFAULT 0   COMMENT '1 se l''utente ha accettato aggiornamenti via email',
   `creato_il`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -299,3 +299,23 @@ CREATE TABLE IF NOT EXISTS `nlq_rate_limit` (
   PRIMARY KEY (`id`),
   KEY `idx_ip_ts` (`ip_hash`, `ts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Migration sicurezza (novembre 2026): rate limit generico per IP
+-- usato dai download (bucket 'download', 'download_completo').
+-- Da eseguire una volta su produzione e sviluppo.
+-- Senza questa tabella api.php lascia passare i download e scrive
+-- un avviso nel log PHP.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `rate_limit` (
+  `id`      BIGINT        NOT NULL AUTO_INCREMENT,
+  `bucket`  VARCHAR(30)   NOT NULL COMMENT 'tipo di azione limitata',
+  `ip_hash` CHAR(64)      NOT NULL COMMENT 'HMAC-SHA256 dell''IP',
+  `ts`      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_bucket_ip_ts` (`bucket`, `ip_hash`, `ts`),
+  KEY `idx_ts` (`ts`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Indice per il rate limit di salva_lead (conteggio per IP nell'ultima ora)
+-- ALTER TABLE `leads` ADD KEY `idx_ip_creato` (`ip_hash`, `creato_il`);
