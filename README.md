@@ -396,7 +396,6 @@ Priorità: **flag CLI > config.yaml > default nel codice**
 │   ├── public/           # Webroot (Apache/Plesk)
 │   │   ├── index.html    # SPA Vue
 │   │   ├── api.php       # API REST (PHP)
-│   │   ├── admin.php     # Pannello admin
 │   │   ├── .htaccess     # Vue Router + redirect download
 │   │   ├── .env.example  # Variabili d'ambiente (copiare in .env)
 │   │   ├── data/
@@ -450,8 +449,9 @@ SITE_DB_HOST=localhost
 SITE_DB_USER=...
 SITE_DB_PASSWORD=...
 SITE_DB_NAME=...
-ADMIN_PASSWORD=...  # hash bcrypt
 ```
+
+Il pannello `admin.php` è stato rimosso: le operazioni di aggiornamento si fanno via SSH con `guida.py` e `sync.py` (vedi `PROCEDURA_AGGIORNAMENTO.md`). L'`.htaccess` nega comunque l'accesso a `admin.php` nel caso ne restasse una copia nel webroot.
 
 ---
 
