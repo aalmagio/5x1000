@@ -109,6 +109,15 @@
             >Download</RouterLink>
           </li>
 
+          <!-- Dati 2×1000 (sito esterno) -->
+          <li>
+            <a
+              href="https://dati2x1000.assif.it/"
+              target="_blank" rel="noopener"
+              class="px-3 py-2 rounded-md text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+            >Dati 2×1000</a>
+          </li>
+
           <!-- Dropdown: ··· -->
           <li class="relative" @mouseenter="open('altro')" @mouseleave="scheduleClose">
             <button
@@ -187,6 +196,10 @@
             active-class="text-brand-500 bg-red-50"
             @click="menuOpen = false"
           >📥 Download</RouterLink>
+          <a href="https://dati2x1000.assif.it/" target="_blank" rel="noopener"
+            class="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
+            @click="menuOpen = false"
+          >🔗 Dati 2×1000</a>
           <RouterLink v-for="l in menuAltro" :key="l.to" :to="l.to"
             class="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-brand-500 hover:bg-gray-50 transition-colors"
             active-class="text-brand-500 bg-red-50"
@@ -210,7 +223,7 @@
           <!-- Brand -->
           <div>
             <img
-              src="https://5x1000.assif.it/wp-content/uploads/2026/05/ASSIF_logo-1.png"
+              src="https://www.assif.it/wp-content/uploads/2022/05/cropped-ASSIF_logo.png"
               alt="ASSIF"
               class="h-8 w-auto mb-3 brightness-0 invert"
             />
@@ -256,6 +269,7 @@
             <ul class="space-y-2">
               <li><a href="https://www.assif.it" target="_blank" rel="noopener" class="hover:text-white transition-colors">Sito ASSIF</a></li>
               <li><a href="https://5x1000.assif.it" target="_blank" rel="noopener" class="hover:text-white transition-colors">Osservatorio 5×1000</a></li>
+              <li><a href="https://dati2x1000.assif.it/" target="_blank" rel="noopener" class="hover:text-white transition-colors">Dati 2×1000</a></li>
               <li><a href="https://www.assif.it/soci/modulo-iscrizione/" target="_blank" rel="noopener" class="hover:text-white transition-colors">Diventa socio</a></li>
               <li><a href="https://www.assif.it/contatti/" target="_blank" rel="noopener" class="hover:text-white transition-colors">Contatti</a></li>
               <li><RouterLink to="/api"   class="hover:text-white transition-colors">API</RouterLink></li>
