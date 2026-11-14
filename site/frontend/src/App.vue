@@ -6,7 +6,7 @@
         <!-- Logo -->
         <RouterLink to="/" class="flex items-center gap-3 group" @click="closeAll">
           <img
-            src="https://5x1000.assif.it/wp-content/uploads/2026/05/ASSIF_logo-1.png"
+            src="https://www.assif.it/wp-content/uploads/2022/05/cropped-ASSIF_logo.png"
             alt="ASSIF"
             class="h-8 w-auto"
           />
